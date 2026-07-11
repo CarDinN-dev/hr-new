@@ -1,0 +1,14 @@
+node_modules
+dist
+backend/node_modules
+backend/dist
+backups
+tmp
+.env
+.env.local
+backend/.env
+npm-debug.log*
+vite-dev.log
+*.pdf
+playwright-report
+test-results

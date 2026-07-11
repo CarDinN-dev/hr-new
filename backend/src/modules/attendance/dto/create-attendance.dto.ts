@@ -1,0 +1,56 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { AttendanceStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsDate, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+
+export class CreateAttendanceDto {
+  @ApiProperty()
+  @IsUUID()
+  employeeId: string;
+
+  @ApiProperty({ example: '2024-02-01' })
+  @Type(() => Date)
+  @IsDate()
+  attendanceDate: Date;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  checkIn?: Date;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  checkOut?: Date;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isLate?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  lateMinutes?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  workingHours?: number;
+
+  @ApiPropertyOptional({ enum: AttendanceStatus })
+  @IsOptional()
+  @IsEnum(AttendanceStatus)
+  status?: AttendanceStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}

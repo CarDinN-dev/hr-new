@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hr_erp
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hr_erp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: medtech-hr-erp-api:latest
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/hr_erp?schema=public
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: 1d
+      BCRYPT_SALT_ROUNDS: 12
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      HR_ADMIN_PASSWORD: ${HR_ADMIN_PASSWORD:?set HR_ADMIN_PASSWORD in .env}
+      ZAHIRA_ADMIN_PASSWORD: ${ZAHIRA_ADMIN_PASSWORD:?set ZAHIRA_ADMIN_PASSWORD in .env}
+      KASHIF_ADMIN_PASSWORD: ${KASHIF_ADMIN_PASSWORD:?set KASHIF_ADMIN_PASSWORD in .env}
+      ATHUL_ADMIN_PASSWORD: ${ATHUL_ADMIN_PASSWORD:?set ATHUL_ADMIN_PASSWORD in .env}
+      MANAGER_PASSWORD: ${MANAGER_PASSWORD:?set MANAGER_PASSWORD in .env}
+      EMPLOYEE_PASSWORD: ${EMPLOYEE_PASSWORD:?set EMPLOYEE_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "npx prisma migrate deploy && npm run seed && node dist/main.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  hr-erp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+    image: medtech-hr-erp:latest
+    ports:
+      - "8080:80"
+      - "8443:443"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

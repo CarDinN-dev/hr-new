@@ -1,0 +1,445 @@
+import { newId } from "./id";
+
+export const employeeImportColumns = [
+  "Employee Code", "Employee Category", "First Name", "Last Name", "Full Name", "Work Shift", "Company", "Sponsor Name", "WPS Sponsor",
+  "Department", "Designation", "Grade/Band", "Date of Birth", "Joining Date", "Reporting Manager Employee Code/Name", "Family Status (Yes/No)",
+  "Leave Policy", "Last Rejoin Date", "Annual Leave Balance (As on Date)", "Annual Leave Balance", "LOP Days (Loss of Pay)", "Business Unit",
+  "Working Company Name", "Cost Centre", "Nationality", "RP/ID Number", "RP/ID Profession", "QID Expiry Date", "Visa Type", "Hire Type",
+  "Confirmation Date", "ESB Date", "Gender", "Marital Status", "Office Mobile No.", "Personal Mobile No.", "E-Mail ID (Work)", "No. of Dependents",
+  "Blood Group", "Local Building/Villa #", "Local Street #", "Local Zone #", "International Apartment", "International Building", "International Floor",
+  "International Street", "International State", "International Country", "International Zip Code", "Emergency Contact Name", "Emergency Contact Relationship",
+  "Emergency Contact Mobile No.", "Travel Sector", "Travel Cost", "No. of Tickets - Employee (Year)", "Ticket Balance (%)", "No. of Tickets - Family",
+  "Salary Pay Type", "Company Accommodation", "Company Transportation", "Overtime Eligible", "Company Food", "Company Fuel Card", "Work Permit No.",
+  "Work Permit Issue Date", "Work Permit Expiry Date", "Office File No.", "Access Card No.", "Bank Code", "IBAN No.", "Account No.",
+  "Highest Education Qualification", "Year of Passing", "Passport No.", "Passport Place of Issue", "Passport Issue Date", "Passport Expiry Date",
+  "License Type", "Driving License No.", "Driving License Expiry Date", "Insurance Card No.", "Insurance Issue Date", "Insurance Expiry Date",
+  "Basic", "HRA", "Food Allowance", "Mobile Allowance", "Special Allowance", "Overtime Amount", "Total"
+] as const;
+
+export const employeeProfileSections = [
+  { title: "Core Employment Details", fields: ["Employee Code", "Employee Category", "Full Name", "Work Shift", "Company", "Department", "Designation", "Grade/Band", "Joining Date", "Reporting Manager Employee Code/Name", "Business Unit", "Working Company Name", "Cost Centre", "Hire Type", "Confirmation Date", "ESB Date"] },
+  { title: "Personal & Identity", fields: ["First Name", "Last Name", "Date of Birth", "Gender", "Marital Status", "Family Status (Yes/No)", "No. of Dependents", "Nationality", "Blood Group"] },
+  { title: "Residency, Visa & Access", fields: ["Sponsor Name", "WPS Sponsor", "RP/ID Number", "RP/ID Profession", "QID Expiry Date", "Visa Type", "Work Permit No.", "Work Permit Issue Date", "Work Permit Expiry Date", "Office File No.", "Access Card No."] },
+  { title: "Contact & Addresses", fields: ["Office Mobile No.", "Personal Mobile No.", "E-Mail ID (Work)", "Local Building/Villa #", "Local Street #", "Local Zone #", "International Apartment", "International Building", "International Floor", "International Street", "International State", "International Country", "International Zip Code"] },
+  { title: "Leave, Travel & Benefits", fields: ["Leave Policy", "Last Rejoin Date", "Annual Leave Balance (As on Date)", "Annual Leave Balance", "LOP Days (Loss of Pay)", "Travel Sector", "Travel Cost", "No. of Tickets - Employee (Year)", "Ticket Balance (%)", "No. of Tickets - Family", "Company Accommodation", "Company Transportation", "Overtime Eligible", "Company Food", "Company Fuel Card"] },
+  { title: "Bank & Salary", fields: ["Salary Pay Type", "Bank Code", "IBAN No.", "Account No.", "Basic", "HRA", "Food Allowance", "Mobile Allowance", "Special Allowance", "Overtime Amount", "Total"] },
+  { title: "Qualifications & Documents", fields: ["Highest Education Qualification", "Year of Passing", "Passport No.", "Passport Place of Issue", "Passport Issue Date", "Passport Expiry Date", "License Type", "Driving License No.", "Driving License Expiry Date", "Insurance Card No.", "Insurance Issue Date", "Insurance Expiry Date"] },
+  { title: "Emergency Contact", fields: ["Emergency Contact Name", "Emergency Contact Relationship", "Emergency Contact Mobile No."] }
+] as const;
+
+export type AttendanceCode = "P" | "H" | "L" | "A";
+export type EmployeeStatus = "Active" | "On Leave" | "Resigned" | "Terminated";
+export type EmployeeRecord = { id: string; status: EmployeeStatus; fields: Record<string, string>; photo?: string };
+export type LeaveStatus = "Pending" | "Approved" | "Rejected";
+
+export type LeaveRequest = {
+  id: string;
+  employeeId: string;
+  type: string;
+  from: string;
+  to: string;
+  days: number;
+  reason: string;
+  status: LeaveStatus;
+  appliedOn: string;
+  decidedOn?: string;
+};
+
+export type PayrollSlip = {
+  id: string;
+  employeeId: string;
+  year: number;
+  month: number;
+  basic: number;
+  housing: number;
+  allowances: number;
+  overtime: number;
+  bonus: number;
+  deductions: number;
+  lopDays: number;
+  lopAmount: number;
+  gross: number;
+  net: number;
+  note: string;
+  status: "Draft" | "Finalized";
+};
+
+export type BusinessTrip = {
+  id: string;
+  employeeId: string;
+  destination: string;
+  purpose: string;
+  from: string;
+  to: string;
+  days: number;
+  perDiem: number;
+  travelCost: number;
+  advanceAmount: number;
+  status: "Pending" | "Approved" | "Rejected" | "Closed";
+  createdOn: string;
+};
+
+export type EmployeeExpense = {
+  id: string;
+  employeeId: string;
+  tripId?: string;
+  category: string;
+  date: string;
+  amount: number;
+  description: string;
+  status: "Submitted" | "Approved" | "Rejected" | "Paid";
+  createdOn: string;
+};
+
+export type RecruitmentJobStatus = "Open" | "On Hold" | "Closed";
+export type CandidateStage = "Applied" | "Screening" | "Interview" | "Offer" | "Hired" | "Rejected";
+
+export type RecruitmentJob = {
+  id: string;
+  title: string;
+  dept: string;
+  openings: number;
+  status: RecruitmentJobStatus;
+  postedOn: string;
+  description: string;
+};
+
+export type RecruitmentCandidate = {
+  id: string;
+  jobId: string;
+  name: string;
+  email: string;
+  phone: string;
+  stage: CandidateStage;
+  rating: number;
+  notes: string;
+  appliedOn: string;
+  employeeId?: string;
+};
+
+export type EosRecord = {
+  id: string;
+  employeeId: string;
+  asOf: string;
+  reason: string;
+  serviceYears: number;
+  gratuity: number;
+  leaveEncashment: number;
+  lopDeduction: number;
+  expenseReimbursement: number;
+  tripAdvanceDeduction: number;
+  netSettlement: number;
+  status: "Draft" | "Approved" | "Paid";
+  createdOn: string;
+};
+
+export type DocumentLog = {
+  id: string;
+  template: PdfTemplate;
+  employeeId: string;
+  documentNumber: string;
+  generatedOn: string;
+  status: "Generated";
+  filename?: string;
+  dataUrl?: string;
+  sizeBytes?: number;
+};
+
+export type HrSettings = {
+  company: {
+    name: string;
+    legalName: string;
+    tagline: string;
+    address: string;
+    phone: string;
+    email: string;
+    website: string;
+    currency: string;
+    wpsEmployerEid?: string;
+    wpsPayerEid?: string;
+    wpsPayerQid?: string;
+    wpsPayerBank?: string;
+    wpsPayerIban?: string;
+    accountPhoto?: string;
+  };
+  departments: string[];
+  leaveTypes: Array<{ id: string; name: string; days: number }>;
+  documentSeq: number;
+};
+
+export type HrState = {
+  employees: EmployeeRecord[];
+  attendance: Record<string, Record<string, AttendanceCode>>;
+  leaves: LeaveRequest[];
+  payroll: PayrollSlip[];
+  businessTrips: BusinessTrip[];
+  expenses: EmployeeExpense[];
+  jobs: RecruitmentJob[];
+  candidates: RecruitmentCandidate[];
+  eosRecords: EosRecord[];
+  documents: DocumentLog[];
+  settings: HrSettings;
+};
+
+export type PdfTemplate =
+  | "offer_letter"
+  | "appointment_letter"
+  | "employment_contract"
+  | "salary_certificate"
+  | "experience_certificate"
+  | "warning_letter"
+  | "payslip"
+  | "leave_approval"
+  | "clearance_certificate"
+  | "final_settlement"
+  | "gratuity_statement"
+  | "employee_profile"
+  | "employee_directory"
+  | "attendance_report"
+  | "leave_report"
+  | "payroll_register"
+  | "headcount_report";
+
+export const pdfTemplates: Array<{ id: PdfTemplate; label: string; category: string }> = [
+  { id: "offer_letter", label: "Offer Letter", category: "Recruitment" },
+  { id: "appointment_letter", label: "Appointment Letter", category: "Employment" },
+  { id: "employment_contract", label: "Employment Contract", category: "Employment" },
+  { id: "salary_certificate", label: "Salary Certificate", category: "Letters" },
+  { id: "experience_certificate", label: "Experience Certificate", category: "Letters" },
+  { id: "warning_letter", label: "Warning Letter", category: "Employee Relations" },
+  { id: "payslip", label: "Payslip", category: "Payroll" },
+  { id: "leave_approval", label: "Leave Approval", category: "Leave" },
+  { id: "clearance_certificate", label: "Clearance Certificate", category: "Exit" },
+  { id: "final_settlement", label: "Final Settlement", category: "Exit" },
+  { id: "gratuity_statement", label: "Gratuity Statement", category: "Exit" }
+];
+
+export const reportTemplates: Array<{ id: PdfTemplate; label: string; description: string }> = [
+  { id: "employee_directory", label: "Employee Directory", description: "Full staff directory with employment, contact and status fields." },
+  { id: "attendance_report", label: "Monthly Attendance", description: "Present, half-day, leave, absent and attendance percentage by employee." },
+  { id: "leave_report", label: "Leave Register", description: "Leave applications with date range, duration, reason and approval state." },
+  { id: "payroll_register", label: "Payroll Register", description: "Gross, additions, deductions, loss of pay and net salary for the month." },
+  { id: "headcount_report", label: "Department Headcount", description: "Active headcount split by department." }
+];
+
+export const navItems = [
+  "Dashboard",
+  "Employees",
+  "Attendance",
+  "Leave",
+  "Business Trips",
+  "Expenses",
+  "Payroll",
+  "Recruitment",
+  "EOS",
+  "Documents",
+  "Reports",
+  "Settings"
+] as const;
+
+export type NavItem = typeof navItems[number];
+
+export const statusOptions: EmployeeStatus[] = ["Active", "On Leave", "Resigned", "Terminated"];
+export const candidateStages: CandidateStage[] = ["Applied", "Screening", "Interview", "Offer", "Hired", "Rejected"];
+export const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+export function createEmptyEmployee(code: string): EmployeeRecord {
+  const fields = Object.fromEntries(employeeImportColumns.map(column => [column, ""]));
+  return {
+    id: newId(),
+    status: "Active",
+    fields: {
+      ...fields,
+      "Employee Code": code,
+      "Employee Category": "Staff",
+      "Company": "MedTech Corporation Trading W.L.L.",
+      "Working Company Name": "MedTech Corporation Trading W.L.L.",
+      "Work Shift": "Standard day",
+      "Leave Policy": "Qatar standard",
+      "Salary Pay Type": "Bank Transfer",
+      "Hire Type": "Direct",
+      "Overtime Eligible": "No"
+    }
+  };
+}
+
+export function normalizeEmployee(employee: EmployeeRecord): EmployeeRecord {
+  const fields = { ...Object.fromEntries(employeeImportColumns.map(column => [column, ""])), ...employee.fields };
+  const fullName = fields["Full Name"] || `${fields["First Name"]} ${fields["Last Name"]}`.trim();
+  const total = fields.Total || String(
+    moneyField(fields.Basic) +
+    moneyField(fields.HRA) +
+    moneyField(fields["Food Allowance"]) +
+    moneyField(fields["Mobile Allowance"]) +
+    moneyField(fields["Special Allowance"]) +
+    moneyField(fields["Overtime Amount"])
+  );
+
+  return { ...employee, fields: { ...fields, "Full Name": fullName, Total: total } };
+}
+
+export function defaultState(): HrState {
+  const jobs = seedRecruitmentJobs();
+  const employees = seedEmployees().map(normalizeEmployee);
+  return {
+    employees,
+    attendance: seedAttendance(employees),
+    leaves: seedLeaves(),
+    payroll: [],
+    businessTrips: [],
+    expenses: [],
+    jobs,
+    candidates: seedRecruitmentCandidates(jobs),
+    eosRecords: [],
+    documents: [],
+    settings: {
+      company: {
+        name: "MedTech",
+        legalName: "MedTech Corporation Trading W.L.L.",
+        tagline: "Human Resources Operations",
+        address: "Doha, State of Qatar",
+        phone: "+974 4000 0000",
+        email: "hr@medtech.qa",
+        website: "www.medtech.qa",
+        currency: "QAR",
+        wpsEmployerEid: "",
+        wpsPayerEid: "",
+        wpsPayerQid: "",
+        wpsPayerBank: "",
+        wpsPayerIban: "",
+        accountPhoto: ""
+      },
+      departments: ["Sales", "Service", "Warehouse", "Finance", "Projects", "Procurement", "Human Resources", "Quality", "Management"],
+      leaveTypes: [
+        { id: "lt-annual", name: "Annual leave", days: 30 },
+        { id: "lt-sick", name: "Sick leave", days: 14 },
+        { id: "lt-emergency", name: "Emergency leave", days: 3 },
+        { id: "lt-unpaid", name: "Unpaid leave", days: 0 }
+      ],
+      documentSeq: 12
+    }
+  };
+}
+
+function seedRecruitmentJobs(): RecruitmentJob[] {
+  return [
+    {
+      id: newId(),
+      title: "Service Engineer",
+      dept: "Service",
+      openings: 2,
+      status: "Open",
+      postedOn: "2026-06-18",
+      description: "Field service expansion for installations, preventive maintenance and customer support."
+    },
+    {
+      id: newId(),
+      title: "Sales Executive",
+      dept: "Sales",
+      openings: 3,
+      status: "Open",
+      postedOn: "2026-06-20",
+      description: "Commercial growth role covering hospitals, clinics and medical equipment accounts."
+    }
+  ];
+}
+
+function seedRecruitmentCandidates(jobs: RecruitmentJob[]): RecruitmentCandidate[] {
+  const service = jobs.find(job => job.dept === "Service") ?? jobs[0];
+  const sales = jobs.find(job => job.dept === "Sales") ?? jobs[0];
+  return [
+    { id: newId(), jobId: service.id, name: "Laura Bennett", email: "laura.b@example.com", phone: "+974 5000 2101", stage: "Interview", rating: 4, notes: "Strong clinical background", appliedOn: "2026-06-21" },
+    { id: newId(), jobId: service.id, name: "Tom Eriksen", email: "tom.e@example.com", phone: "+974 5000 2102", stage: "Screening", rating: 3, notes: "", appliedOn: "2026-06-22" },
+    { id: newId(), jobId: sales.id, name: "Grace Liu", email: "grace.liu@example.com", phone: "+974 5000 2103", stage: "Offer", rating: 5, notes: "Excellent medical device sales experience", appliedOn: "2026-06-23" },
+    { id: newId(), jobId: sales.id, name: "Peter Novak", email: "p.novak@example.com", phone: "+974 5000 2104", stage: "Applied", rating: 0, notes: "", appliedOn: "2026-06-24" }
+  ];
+}
+
+function seedEmployees(): EmployeeRecord[] {
+  return [
+    employee("MT-0018", "Fahad", "Al-Kuwari", "Key Account Manager", "Sales", "Sales Manager", "2021-03-12", "Qatari", "QNB", "14500", "4000", "1500", "20000", "Active"),
+    employee("MT-0024", "Aisha", "Rahman", "Senior Accountant", "Finance", "Finance Manager", "2021-09-02", "Indian", "Commercial Bank", "12800", "3500", "1200", "17500", "Active"),
+    employee("MT-0041", "Naveen", "Kumar", "Biomedical Engineer", "Service", "Service Manager", "2023-01-17", "Indian", "Doha Bank", "11200", "3000", "1000", "15200", "On Leave"),
+    employee("MT-0053", "Mariam", "Said", "Procurement Officer", "Procurement", "Procurement Manager", "2024-11-08", "Jordanian", "QIB", "10800", "2800", "1000", "14600", "Active"),
+    employee("MT-0064", "Leila", "D'Souza", "HR Officer", "Human Resources", "HR Manager", "2025-02-03", "Indian", "QNB", "9800", "2500", "900", "13200", "Active"),
+    employee("MT-0072", "Omar", "Nasser", "Warehouse Supervisor", "Warehouse", "Operations Manager", "2025-09-14", "Egyptian", "Dukhan Bank", "8900", "2200", "800", "11900", "Active")
+  ];
+}
+
+function employee(
+  code: string,
+  first: string,
+  last: string,
+  designation: string,
+  department: string,
+  manager: string,
+  joiningDate: string,
+  nationality: string,
+  bank: string,
+  basic: string,
+  hra: string,
+  transport: string,
+  total: string,
+  status: EmployeeStatus
+): EmployeeRecord {
+  const emailName = `${first}.${last}`.replace(/'/g, "").toLowerCase();
+  return {
+    id: newId(),
+    status,
+    fields: {
+      ...Object.fromEntries(employeeImportColumns.map(column => [column, ""])),
+      "Employee Code": code,
+      "Employee Category": "Staff",
+      "First Name": first,
+      "Last Name": last,
+      "Full Name": `${first} ${last}`,
+      Company: "MedTech Corporation Trading W.L.L.",
+      Department: department,
+      Designation: designation,
+      "Joining Date": joiningDate,
+      "Reporting Manager Employee Code/Name": manager,
+      "Business Unit": department === "Sales" ? "Commercial" : department === "Finance" || department === "Human Resources" ? "Corporate" : "Operations",
+      "Working Company Name": "MedTech Corporation Trading W.L.L.",
+      Nationality: nationality,
+      "QID Expiry Date": "2027-06-30",
+      "Visa Type": "Work residence",
+      "Hire Type": "Direct",
+      Gender: first === "Aisha" || first === "Mariam" || first === "Leila" ? "Female" : "Male",
+      "Marital Status": "Married",
+      "Office Mobile No.": "+974 4000 1000",
+      "Personal Mobile No.": "+974 55" + code.slice(-4) + "00",
+      "E-Mail ID (Work)": `${emailName}@medtech.qa`,
+      "Emergency Contact Name": "Emergency contact",
+      "Emergency Contact Relationship": "Family",
+      "Emergency Contact Mobile No.": "+974 5000 0000",
+      "Salary Pay Type": "Bank Transfer",
+      "Bank Code": bank,
+      "IBAN No.": "QA** **** " + code.slice(-4),
+      "Account No.": "1000293" + code.slice(-4),
+      Basic: basic,
+      HRA: hra,
+      "Transport Allowance": transport,
+      "Special Allowance": "0",
+      Total: total
+    }
+  };
+}
+
+function seedAttendance(employees: EmployeeRecord[]): Record<string, Record<string, AttendanceCode>> {
+  const byCode = Object.fromEntries(employees.map(employee => [employee.fields["Employee Code"], employee.id]));
+  const day: Record<string, AttendanceCode> = {};
+  if (byCode["MT-0024"]) day[byCode["MT-0024"]] = "H";
+  if (byCode["MT-0018"]) day[byCode["MT-0018"]] = "P";
+  return {
+    "2026-06-20": day
+  };
+}
+
+function seedLeaves(): LeaveRequest[] {
+  return [];
+}
+
+function moneyField(value: string) {
+  const number = Number(String(value || "0").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
