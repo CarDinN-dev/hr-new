@@ -9,6 +9,13 @@ tmp
 backend/.env
 npm-debug.log*
 vite-dev.log
+*.log
+*.pid
 *.pdf
 playwright-report
 test-results
+.cloudflare-tunnel-url
+.cloudflare/
+.cloudflared/
+cloudflare-logs/
+*.quick-tunnel-disabled*

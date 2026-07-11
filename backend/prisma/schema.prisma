@@ -101,6 +101,7 @@ model User {
   role         Role         @default(EMPLOYEE)
   permissions  Permission[] @default([])
   isActive     Boolean      @default(true)
+  sessionVersion Int        @default(0)
   employee     Employee?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt

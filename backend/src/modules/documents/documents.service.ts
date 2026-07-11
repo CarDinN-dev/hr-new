@@ -19,13 +19,19 @@ export class DocumentsService {
 
   async create(dto: CreateDocumentDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
-    const uploadedById = dto.uploadedById ?? user.employeeId;
+    const uploadedById = hasHrAccess(user.role) ? dto.uploadedById ?? user.employeeId : user.employeeId;
     if (!uploadedById) throw new NotFoundException('Uploader employee profile is required');
-    await this.ensureEmployee(uploadedById);
 
     if (!hasHrAccess(user.role) && dto.employeeId !== user.employeeId) {
       throw new ForbiddenException('Employees can only upload documents for themselves');
     }
+    if (!hasHrAccess(user.role) && dto.uploadedById && dto.uploadedById !== uploadedById) {
+      throw new ForbiddenException('Employees cannot upload documents as another employee');
+    }
+    if (!hasHrAccess(user.role) && dto.visibility === DocumentVisibility.PUBLIC) {
+      throw new ForbiddenException('Only HR can publish documents to all employees');
+    }
+    await this.ensureEmployee(uploadedById);
 
     return this.prisma.employeeDocument.create({
       data: { ...dto, uploadedById },
@@ -68,6 +74,15 @@ export class DocumentsService {
     const document = await this.findById(id, user);
     if (!hasHrAccess(user.role) && document.employeeId !== user.employeeId) {
       throw new ForbiddenException('Cannot update this document');
+    }
+    if (!hasHrAccess(user.role) && dto.employeeId && dto.employeeId !== document.employeeId) {
+      throw new ForbiddenException('Employees cannot reassign document ownership');
+    }
+    if (!hasHrAccess(user.role) && dto.uploadedById && dto.uploadedById !== document.uploadedById) {
+      throw new ForbiddenException('Employees cannot change the document uploader');
+    }
+    if (!hasHrAccess(user.role) && dto.visibility === DocumentVisibility.PUBLIC) {
+      throw new ForbiddenException('Only HR can publish documents to all employees');
     }
     if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
     if (dto.uploadedById) await this.ensureEmployee(dto.uploadedById);

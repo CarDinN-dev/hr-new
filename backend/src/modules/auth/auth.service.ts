@@ -12,6 +12,8 @@ import { JwtPayload } from './types/jwt-payload.type';
 @Injectable()
 export class AuthService {
   private readonly loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  private readonly loginWindowMs = 15 * 60 * 1000;
+  private readonly maxLoginEntries = 10_000;
 
   constructor(
     private readonly usersService: UsersService,
@@ -30,6 +32,7 @@ export class AuthService {
         role: user.role,
         permissions: user.permissions,
         csrfToken,
+        sessionVersion: user.sessionVersion,
         employeeId: user.employee?.id ?? null,
       }),
       csrfToken,
@@ -51,7 +54,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    this.loginAttempts.delete(this.loginKey(ip, dto.email));
+    this.loginAttempts.delete(this.accountLoginKey(dto.email));
     const safeUser = this.usersService.toSafeUser(user);
     const csrfToken = this.csrfToken();
     return {
@@ -62,6 +65,7 @@ export class AuthService {
         role: user.role,
         permissions: user.permissions,
         csrfToken,
+        sessionVersion: user.sessionVersion,
         employeeId: user.employee?.id ?? null,
       }),
       csrfToken,
@@ -73,23 +77,54 @@ export class AuthService {
   }
 
   private checkLoginLimit(ip: string, email: string) {
-    const record = this.loginAttempts.get(this.loginKey(ip, email));
-    if (record && record.resetAt > Date.now() && record.count >= 10) {
+    this.pruneLoginAttempts();
+    const accountRecord = this.loginAttempts.get(this.accountLoginKey(email));
+    const ipRecord = this.loginAttempts.get(this.ipLoginKey(ip));
+    if (
+      (accountRecord && accountRecord.resetAt > Date.now() && accountRecord.count >= 10) ||
+      (ipRecord && ipRecord.resetAt > Date.now() && ipRecord.count >= 50)
+    ) {
       throw new HttpException('Too many login attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
     }
   }
 
   private recordFailedLogin(ip: string, email: string) {
-    const key = this.loginKey(ip, email);
-    const now = Date.now();
-    const current = this.loginAttempts.get(key);
-    const record = current && current.resetAt > now ? current : { count: 0, resetAt: now + 15 * 60 * 1000 };
-    record.count += 1;
-    this.loginAttempts.set(key, record);
+    this.incrementLoginAttempt(this.accountLoginKey(email));
+    this.incrementLoginAttempt(this.ipLoginKey(ip));
   }
 
-  private loginKey(ip: string, email: string) {
-    return `${ip}:${email.toLowerCase()}`;
+  private incrementLoginAttempt(key: string) {
+    const now = Date.now();
+    const current = this.loginAttempts.get(key);
+    const record = current && current.resetAt > now ? current : { count: 0, resetAt: now + this.loginWindowMs };
+    record.count += 1;
+    this.loginAttempts.set(key, record);
+    this.pruneLoginAttempts();
+  }
+
+  private accountLoginKey(email: string) {
+    return `account:${email.toLowerCase()}`;
+  }
+
+  private ipLoginKey(ip: string) {
+    return `ip:${ip}`;
+  }
+
+  private pruneLoginAttempts() {
+    const now = Date.now();
+    for (const [key, record] of this.loginAttempts) {
+      if (record.resetAt <= now) this.loginAttempts.delete(key);
+    }
+    while (this.loginAttempts.size > this.maxLoginEntries) {
+      const oldestKey = this.loginAttempts.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.loginAttempts.delete(oldestKey);
+    }
+  }
+
+  async logout(userId: string) {
+    await this.usersService.revokeSessions(userId);
+    return { loggedOut: true };
   }
 
   private signToken(payload: JwtPayload): string {

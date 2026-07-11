@@ -27,6 +27,29 @@ Open `http://localhost:8080`. The compose stack starts:
 
 The API is proxied through the frontend at `/api/v1`. Swagger is disabled in production unless `ENABLE_SWAGGER=true` is set.
 
+## Cloudflare Quick Tunnel
+
+The Quick Tunnel exposes the loopback-only app on port `8080` at a temporary public HTTPS URL. It requires no domain or router changes and is intended only for testing and demonstrations. The existing JWT login, role checks, CSRF checks, and API authorization remain active; anyone with the URL can reach the login screen, so use strong passwords from the gitignored `.env` file.
+
+On Windows:
+
+```powershell
+npm run tunnel:start
+npm run tunnel:status
+npm run tunnel:stop
+```
+
+On macOS or Linux:
+
+```sh
+sh scripts/cloudflare/start-tunnel.sh
+sh scripts/cloudflare/stop-tunnel.sh
+```
+
+The start script launches the Compose app when needed, waits for `/healthz`, starts `cloudflared`, prints the public URL, and saves it to `.cloudflare-tunnel-url`. The URL changes each time the tunnel restarts. Logs are under `cloudflare-logs/`. The stop script terminates only the recorded tunnel process, restores any temporarily renamed `~/.cloudflared/config.yml` or `config.yaml`, and stops the Compose app only when the start script launched it. Verify shutdown with `npm run tunnel:status`.
+
+Rotate access by changing the password values in `.env`, then recreate the API container with `docker compose up -d --force-recreate api`. Never commit `.env`, tunnel logs, or runtime files.
+
 ## Oracle deployment checklist
 
 - Set every value in `.env`; do not use demo passwords for Oracle.

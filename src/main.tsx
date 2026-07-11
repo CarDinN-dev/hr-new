@@ -85,6 +85,7 @@ import {
   loadBackendSession,
   loadBackendState,
   loginBackend,
+  logoutBackend,
   saveBackendState,
   type BackendSession
 } from "./api";
@@ -279,6 +280,17 @@ function App() {
     setTheme(prev => prev === "dark" ? "light" : "dark");
   }
 
+  async function logout() {
+    const session = backendSessionRef.current;
+    setBackendSession(null);
+    if (!session) return;
+    try {
+      await logoutBackend(session);
+    } catch (error) {
+      notify(errorMessage(error));
+    }
+  }
+
   if (!backendSession) {
     return (
       <>
@@ -315,7 +327,7 @@ function App() {
           state={state}
           setState={setState}
           backendSession={backendSession}
-          setBackendSession={setBackendSession}
+          onLogout={() => void logout()}
           setNav={setNav}
           setModal={setModal}
           closeModal={closeModal}
@@ -365,7 +377,7 @@ function AccountMenu({
   state,
   setState,
   backendSession,
-  setBackendSession,
+  onLogout,
   setNav,
   setModal,
   closeModal,
@@ -376,7 +388,7 @@ function AccountMenu({
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   backendSession: BackendSession;
-  setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null>>;
+  onLogout: () => void;
   setNav: (nav: NavItem) => void;
   setModal: React.Dispatch<React.SetStateAction<React.ReactNode>>;
   closeModal: () => void;
@@ -402,7 +414,7 @@ function AccountMenu({
       <button role="menuitem" onClick={() => { toggleTheme(); setOpen(false); }}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Light mode" : "Dark mode"}</button>
       <button role="menuitem" onClick={goSettings}><Settings size={16} /> Profile and settings</button>
       <button role="menuitem" onClick={openBackup}><Download size={16} /> Backup / restore</button>
-      <button role="menuitem" onClick={() => setBackendSession(null)}><LogOut size={16} /> Log out</button>
+      <button role="menuitem" onClick={onLogout}><LogOut size={16} /> Log out</button>
     </div>}
     <button className="account-trigger" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
       <span className="account-avatar">{photo ? <img src={photo} alt="" /> : accountInitials(backendSession.email)}</span>
@@ -1778,6 +1790,18 @@ function BackendPanel({
     }
   }
 
+  async function disconnect() {
+    const session = backendSession;
+    setBackendSession(null);
+    if (!session) return;
+    try {
+      await logoutBackend(session);
+      notify("Backend session ended.");
+    } catch (error) {
+      notify(errorMessage(error));
+    }
+  }
+
   return <div className="panel backend-panel">
     <div className="panel-head"><div><h3>Backend Connection</h3><span>{apiBaseUrl}</span></div><Badge value={backendSession ? "Connected" : "Disconnected"} /></div>
     <div className="form-grid compact">
@@ -1788,7 +1812,7 @@ function BackendPanel({
       <button className="primary" disabled={busy === "login"} onClick={login}>{busy === "login" ? "Connecting..." : "Login"}</button>
       <button disabled={!backendSession || busy === "save"} onClick={saveAll}>{busy === "save" ? "Saving..." : "Save full workspace"}</button>
       <button disabled={!backendSession || busy === "sync"} onClick={sync}>{busy === "sync" ? "Loading..." : "Load from backend"}</button>
-      {backendSession && <button onClick={() => setBackendSession(null)}>Disconnect</button>}
+      {backendSession && <button onClick={() => void disconnect()}>Disconnect</button>}
     </div>
     <div className="backend-payroll">
       <select id="backend-payroll-month" name="backend-payroll-month" aria-label="Backend payroll month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>

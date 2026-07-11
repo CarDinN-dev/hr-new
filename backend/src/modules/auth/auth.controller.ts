@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Request } from 'express';
@@ -32,5 +32,12 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: RequestUser) {
     return user;
+  }
+
+  @ApiBearerAuth()
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  logout(@CurrentUser() user: RequestUser) {
+    return this.authService.logout(user.id);
   }
 }

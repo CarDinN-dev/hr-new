@@ -47,6 +47,14 @@ export class UsersService {
     return this.toSafeUser(user);
   }
 
+  revokeSessions(id: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { sessionVersion: { increment: 1 } },
+      select: { sessionVersion: true },
+    });
+  }
+
   toSafeUser<T extends { passwordHash?: string }>(user: T): Omit<T, 'passwordHash'> {
     const safeUser = { ...user };
     delete safeUser.passwordHash;

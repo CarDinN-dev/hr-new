@@ -8,7 +8,10 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "docker:build": "docker build -t medtech-hr-erp ."
+    "docker:build": "docker build -t medtech-hr-erp .",
+    "tunnel:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cloudflare/start-tunnel.ps1",
+    "tunnel:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cloudflare/stop-tunnel.ps1",
+    "tunnel:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cloudflare/status-tunnel.ps1"
   },
   "dependencies": {
     "jspdf": "^4.2.1",

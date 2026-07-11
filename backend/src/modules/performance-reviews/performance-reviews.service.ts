@@ -18,8 +18,11 @@ export class PerformanceReviewsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreatePerformanceReviewDto, user: RequestUser) {
-    const reviewerId = dto.reviewerId ?? user.employeeId;
+    const reviewerId = hasHrAccess(user.role) ? dto.reviewerId ?? user.employeeId : user.employeeId;
     if (!reviewerId) throw new NotFoundException('Reviewer employee profile is required');
+    if (!hasHrAccess(user.role) && dto.reviewerId && dto.reviewerId !== reviewerId) {
+      throw new ForbiddenException('Managers cannot submit reviews as another employee');
+    }
     await this.ensureEmployee(dto.employeeId);
     await this.ensureEmployee(reviewerId);
     await this.assertCanReview(dto.employeeId, user);
@@ -61,9 +64,27 @@ export class PerformanceReviewsService {
   async update(id: string, dto: UpdatePerformanceReviewDto, user: RequestUser) {
     const review = await this.ensureExists(id);
     await this.assertCanReview(review.employeeId, user);
-    if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
-    if (dto.reviewerId) await this.ensureEmployee(dto.reviewerId);
-    return this.prisma.performanceReview.update({ where: { id }, data: dto, include: reviewInclude });
+    if (dto.employeeId) {
+      await this.ensureEmployee(dto.employeeId);
+      await this.assertCanReview(dto.employeeId, user);
+    }
+
+    let reviewerId = dto.reviewerId;
+    if (!hasHrAccess(user.role)) {
+      if (!user.employeeId) throw new NotFoundException('Reviewer employee profile is required');
+      if (reviewerId && reviewerId !== user.employeeId) {
+        throw new ForbiddenException('Managers cannot submit reviews as another employee');
+      }
+      reviewerId = user.employeeId;
+    } else if (reviewerId) {
+      await this.ensureEmployee(reviewerId);
+    }
+
+    return this.prisma.performanceReview.update({
+      where: { id },
+      data: { ...dto, reviewerId },
+      include: reviewInclude,
+    });
   }
 
   async remove(id: string) {

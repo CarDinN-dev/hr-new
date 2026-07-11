@@ -154,6 +154,14 @@ export async function generateBackendPayroll(session: BackendSession, year: numb
   });
 }
 
+export async function logoutBackend(session: BackendSession) {
+  return apiRequest<{ loggedOut: boolean }>("/auth/logout", {
+    method: "POST",
+    token: session.token,
+    csrfToken: session.csrfToken
+  });
+}
+
 async function apiList<T>(path: string, token: string) {
   return apiRequest<T[]>(path, { token });
 }

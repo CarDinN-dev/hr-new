@@ -23,6 +23,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || !user.isActive || user.deletedAt) {
       throw new UnauthorizedException('User account is inactive');
     }
+    if (payload.sessionVersion !== user.sessionVersion) {
+      throw new UnauthorizedException('Session has been invalidated');
+    }
 
     return {
       id: user.id,

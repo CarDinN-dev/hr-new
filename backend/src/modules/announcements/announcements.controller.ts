@@ -33,8 +33,8 @@ export class AnnouncementsController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN, Role.MANAGER)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateAnnouncementDto) {
-    return this.announcementsService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateAnnouncementDto, @CurrentUser() user: RequestUser) {
+    return this.announcementsService.update(id, dto, user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)

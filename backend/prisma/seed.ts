@@ -56,9 +56,11 @@ async function main() {
     });
   }
 
+  const managerPasswordHash = await bcrypt.hash(passwordFor('MANAGER_PASSWORD'), saltRounds);
   const managerUser = await prisma.user.upsert({
     where: { email: 'manager@example.com' },
     update: {
+      passwordHash: managerPasswordHash,
       role: Role.MANAGER,
       permissions: [Permission.ATTENDANCE_READ_ALL, Permission.LEAVE_APPROVE],
       isActive: true,
@@ -66,15 +68,17 @@ async function main() {
     },
     create: {
       email: 'manager@example.com',
-      passwordHash: await bcrypt.hash(passwordFor('MANAGER_PASSWORD'), saltRounds),
+      passwordHash: managerPasswordHash,
       role: Role.MANAGER,
       permissions: [Permission.ATTENDANCE_READ_ALL, Permission.LEAVE_APPROVE],
     },
   });
 
+  const employeePasswordHash = await bcrypt.hash(passwordFor('EMPLOYEE_PASSWORD'), saltRounds);
   const employeeUser = await prisma.user.upsert({
     where: { email: 'employee@example.com' },
     update: {
+      passwordHash: employeePasswordHash,
       role: Role.EMPLOYEE,
       permissions: [],
       isActive: true,
@@ -82,7 +86,7 @@ async function main() {
     },
     create: {
       email: 'employee@example.com',
-      passwordHash: await bcrypt.hash(passwordFor('EMPLOYEE_PASSWORD'), saltRounds),
+      passwordHash: employeePasswordHash,
       role: Role.EMPLOYEE,
       permissions: [],
     },

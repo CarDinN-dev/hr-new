@@ -46,7 +46,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       success: false,
       statusCode: status,
-      message: body?.message ?? (exception instanceof Error ? exception.message : 'Unexpected error'),
+      message:
+        status === HttpStatus.INTERNAL_SERVER_ERROR
+          ? 'Internal server error'
+          : body?.message ?? (exception instanceof Error ? exception.message : 'Unexpected error'),
       error: body?.error ?? HttpStatus[status],
       path: request.url,
       timestamp: new Date().toISOString(),

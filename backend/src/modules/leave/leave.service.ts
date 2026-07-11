@@ -180,10 +180,61 @@ export class LeaveService {
     if (request.status !== LeaveRequestStatus.PENDING) {
       throw new BadRequestException('Only pending leave requests can be updated');
     }
-    return this.prisma.leaveRequest.update({
-      where: { id },
-      data: dto,
-      include: leaveRequestInclude,
+
+    const nextLeaveTypeId = dto.leaveTypeId ?? request.leaveTypeId;
+    const nextStartDate = dto.startDate ?? request.startDate;
+    const nextEndDate = dto.endDate ?? request.endDate;
+    const nextTotalDays = dto.totalDays ?? Number(request.totalDays);
+
+    if (nextEndDate < nextStartDate) {
+      throw new BadRequestException('endDate must be after startDate');
+    }
+    if (dto.leaveTypeId) await this.findTypeById(dto.leaveTypeId);
+
+    const previousYear = request.startDate.getFullYear();
+    const nextYear = nextStartDate.getFullYear();
+    const previousBalance = await this.findBalance(request.employeeId, request.leaveTypeId, previousYear);
+    const nextBalance = await this.findBalance(request.employeeId, nextLeaveTypeId, nextYear);
+    const previousTotalDays = Number(request.totalDays);
+    const sameBalance = previousBalance.id === nextBalance.id;
+    const available =
+      Number(nextBalance.totalDays) - Number(nextBalance.usedDays) - Number(nextBalance.pendingDays) +
+      (sameBalance ? previousTotalDays : 0);
+    if (available < nextTotalDays) {
+      throw new BadRequestException('Insufficient leave balance');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (sameBalance) {
+        const pendingDelta = nextTotalDays - previousTotalDays;
+        if (pendingDelta !== 0) {
+          await tx.leaveBalance.update({
+            where: { id: previousBalance.id },
+            data: { pendingDays: { increment: pendingDelta } },
+          });
+        }
+      } else {
+        await tx.leaveBalance.update({
+          where: { id: previousBalance.id },
+          data: { pendingDays: { decrement: previousTotalDays } },
+        });
+        await tx.leaveBalance.update({
+          where: { id: nextBalance.id },
+          data: { pendingDays: { increment: nextTotalDays } },
+        });
+      }
+
+      return tx.leaveRequest.update({
+        where: { id },
+        data: {
+          leaveTypeId: dto.leaveTypeId,
+          startDate: dto.startDate,
+          endDate: dto.endDate,
+          totalDays: dto.totalDays,
+          reason: dto.reason,
+        },
+        include: leaveRequestInclude,
+      });
     });
   }
 

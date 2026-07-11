@@ -6,5 +6,6 @@ export type JwtPayload = {
   role: Role;
   permissions: Permission[];
   csrfToken: string;
+  sessionVersion: number;
   employeeId?: string | null;
 };

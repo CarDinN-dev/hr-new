@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { hasHrAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
@@ -58,8 +58,11 @@ export class AnnouncementsService {
     return announcement;
   }
 
-  async update(id: string, dto: UpdateAnnouncementDto) {
-    await this.ensureExists(id);
+  async update(id: string, dto: UpdateAnnouncementDto, user: RequestUser) {
+    const announcement = await this.ensureExists(id);
+    if (!hasHrAccess(user.role) && announcement.createdById !== user.employeeId) {
+      throw new ForbiddenException('Managers can only update announcements they created');
+    }
     if (dto.departmentId) await this.ensureDepartment(dto.departmentId);
     return this.prisma.announcement.update({ where: { id }, data: dto, include: announcementInclude });
   }
@@ -90,5 +93,6 @@ export class AnnouncementsService {
   private async ensureExists(id: string) {
     const announcement = await this.prisma.announcement.findFirst({ where: { id, deletedAt: null } });
     if (!announcement) throw new NotFoundException('Announcement not found');
+    return announcement;
   }
 }
