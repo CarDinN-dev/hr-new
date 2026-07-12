@@ -55,6 +55,7 @@ import {
   clearAttendanceDay,
   createEosRecord,
   createPayroll,
+  deleteEmployee,
   deleteLeave,
   decideLeave,
   documentNumber,
@@ -81,12 +82,16 @@ import {
 import {
   apiBaseUrl,
   backendSessionKey,
+  createBackendBackup,
   generateBackendPayroll,
+  loadBackupStatus,
   loadBackendSession,
   loadBackendState,
   loginBackend,
   logoutBackend,
+  rollbackLatestBackendBackup,
   saveBackendState,
+  type BackendBackupStatus,
   type BackendSession
 } from "./api";
 import { newId } from "./id";
@@ -325,13 +330,9 @@ function App() {
         </nav>
         <AccountMenu
           state={state}
-          setState={setState}
           backendSession={backendSession}
           onLogout={() => void logout()}
           setNav={setNav}
-          setModal={setModal}
-          closeModal={closeModal}
-          notify={notify}
           theme={theme}
           toggleTheme={toggleTheme}
         />
@@ -362,7 +363,7 @@ function App() {
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
-          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} setModal={setModal} closeModal={closeModal} />}
+          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} />}
         </div>
       </main>
 
@@ -375,34 +376,21 @@ function App() {
 
 function AccountMenu({
   state,
-  setState,
   backendSession,
   onLogout,
   setNav,
-  setModal,
-  closeModal,
-  notify,
   theme,
   toggleTheme
 }: {
   state: HrState;
-  setState: React.Dispatch<React.SetStateAction<HrState>>;
   backendSession: BackendSession;
   onLogout: () => void;
   setNav: (nav: NavItem) => void;
-  setModal: React.Dispatch<React.SetStateAction<React.ReactNode>>;
-  closeModal: () => void;
-  notify: (message: string) => void;
   theme: Theme;
   toggleTheme: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const photo = state.settings.company.accountPhoto;
-
-  function openBackup() {
-    setOpen(false);
-    setModal(<BackupModal state={state} setState={setState} close={closeModal} notify={notify} />);
-  }
 
   function goSettings() {
     setOpen(false);
@@ -413,7 +401,7 @@ function AccountMenu({
     {open && <div className="account-popover" role="menu">
       <button role="menuitem" onClick={() => { toggleTheme(); setOpen(false); }}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Light mode" : "Dark mode"}</button>
       <button role="menuitem" onClick={goSettings}><Settings size={16} /> Profile and settings</button>
-      <button role="menuitem" onClick={openBackup}><Download size={16} /> Backup / restore</button>
+      <button role="menuitem" onClick={goSettings}><Download size={16} /> Backups</button>
       <button role="menuitem" onClick={onLogout}><LogOut size={16} /> Log out</button>
     </div>}
     <button className="account-trigger" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
@@ -585,6 +573,13 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
   }
 
+  function remove(employee: EmployeeRecord) {
+    const confirmed = window.confirm(`Delete ${employeeName(employee)}? This also removes linked attendance, leave, payroll, expenses, trips, EOS records and generated documents.`);
+    if (!confirmed) return;
+    setState(prev => deleteEmployee(prev, employee.id));
+    notify("Employee and linked records deleted.");
+  }
+
   return (
     <section className="stack employee-workspace">
       <div className="employee-hero panel">
@@ -635,6 +630,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
                     <button onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={() => edit(employee)} savePdf={savePdf} />)}>Open profile</button>
                     <button onClick={() => edit(employee)}>Edit</button>
                     <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>PDF</button>
+                    <button className="danger-outline" onClick={() => remove(employee)}><Trash2 size={15} /> Delete</button>
                   </div>
                 </article>
               );
@@ -874,7 +870,7 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
                 </div>
                 {group.employees.map(employee => {
                   const code = day[employee.id];
-                  const punch = attendancePunch(employee, code);
+                  const punch = attendancePunch(employee, code, state.settings.workdayHours, state.settings.halfDayHours);
                   const needsReview = code === "H" || code === "A";
                   return (
                     <div className="attendance-record" key={employee.id}>
@@ -920,13 +916,13 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
   );
 }
 
-function attendancePunch(employee: EmployeeRecord, code?: AttendanceCode) {
+function attendancePunch(employee: EmployeeRecord, code: AttendanceCode | undefined, workdayHours: number, halfDayHours: number) {
   void employee;
   if (!code) return { in: "-", out: "-", hours: "-", status: "Unmarked", note: "Attendance has not been recorded yet." };
   if (code === "L") return { in: "Leave", out: "-", hours: "0.00", status: "Leave", note: "Approved leave day." };
   if (code === "A") return { in: "-", out: "-", hours: "0.00", status: "Absent", note: "Absence recorded. Review whether this should remain loss of pay." };
-  if (code === "H") return { in: "Marked", out: "-", hours: "4.00", status: "Half-day", note: "Half-day attendance recorded. Review whether this is approved." };
-  return { in: "Marked", out: "-", hours: "8.00", status: "Present", note: "Attendance marked manually. Connect a clocking device/import for real punch times." };
+  if (code === "H") return { in: "Marked", out: "-", hours: halfDayHours.toFixed(2), status: "Half-day", note: "Half-day attendance recorded. Review whether this is approved." };
+  return { in: "Marked", out: "-", hours: workdayHours.toFixed(2), status: "Present", note: "Attendance marked manually. Connect a clocking device/import for real punch times." };
 }
 
 function AttendanceMetric({ label, value, tone }: { label: string; value: React.ReactNode; tone: "present" | "half" | "leave" | "absent" | "payroll" }) {
@@ -1558,7 +1554,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   </section>;
 }
 
-function Documents({ state, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function Documents({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
   const active = activeEmployees(state.employees);
   const [employeeId, setEmployeeId] = useState(active[0]?.id || "");
   const [template, setTemplate] = useState<PdfTemplate>("offer_letter");
@@ -1568,6 +1564,12 @@ function Documents({ state, notify, savePdf }: { state: HrState; setState: React
   function generate() {
     if (!employee) return notify("Select an employee first.");
     void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf(template, employee, state, notes), template, employee.id));
+  }
+
+  function removeDocument(id: string, name: string) {
+    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    setState(prev => ({ ...prev, documents: prev.documents.filter(item => item.id !== id) }));
+    notify("Generated document deleted.");
   }
 
   return (
@@ -1596,9 +1598,10 @@ function Documents({ state, notify, savePdf }: { state: HrState; setState: React
             doc.employeeId ? employeeName(rowEmployee) : "-",
             formatDate(doc.generatedOn),
             doc.filename || doc.status,
-            doc.dataUrl
-              ? <div className="row-actions" key="actions"><button onClick={() => window.open(doc.dataUrl, "_blank", "noopener")}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></div>
-              : <Badge key="status" value={doc.status} />
+            <div className="row-actions" key="actions">
+              {doc.dataUrl ? <><button onClick={() => window.open(doc.dataUrl, "_blank", "noopener")}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : <Badge value={doc.status} />}
+              <button className="danger-outline" onClick={() => removeDocument(doc.id, doc.filename || doc.documentNumber)}><Trash2 size={15} /> Delete</button>
+            </div>
           ];
         })} empty="No documents generated yet." />
       </div>
@@ -1640,21 +1643,26 @@ function SettingsPage({
   setState,
   notify,
   backendSession,
-  setBackendSession,
-  setModal,
-  closeModal
+  setBackendSession
 }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   notify: (message: string) => void;
   backendSession: BackendSession | null;
   setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null>>;
-  setModal: React.Dispatch<React.SetStateAction<React.ReactNode>>;
-  closeModal: () => void;
 }) {
   const [company, setCompany] = useState(state.settings.company);
   const [departments, setDepartments] = useState(state.settings.departments.join("\n"));
   const [leaveTypes, setLeaveTypes] = useState(state.settings.leaveTypes.map(item => `${item.name}:${item.days}`).join("\n"));
+  const [workdayHours, setWorkdayHours] = useState(state.settings.workdayHours);
+  const [halfDayHours, setHalfDayHours] = useState(state.settings.halfDayHours);
+  const [backupStatus, setBackupStatus] = useState<BackendBackupStatus | null>(null);
+  const [backupBusy, setBackupBusy] = useState("");
+
+  useEffect(() => {
+    if (!backendSession) return;
+    void loadBackupStatus(backendSession).then(setBackupStatus).catch(error => notify(errorMessage(error)));
+  }, [backendSession?.token]);
 
   async function updatePhoto(file?: File) {
     if (!file) return;
@@ -1666,18 +1674,47 @@ function SettingsPage({
     }
   }
 
-  function openBackup() {
-    setModal(<BackupModal state={state} setState={setState} close={closeModal} notify={notify} />);
-  }
-
   function saveSettings() {
     const nextDepartments = departments.split("\n").map(item => item.trim()).filter(Boolean);
     const nextLeaveTypes = leaveTypes.split("\n").map((line, index) => {
       const [name, days] = line.split(":");
       return { id: `lt-${index + 1}`, name: name.trim(), days: Number(days) || 0 };
     }).filter(item => item.name);
-    setState(prev => ({ ...prev, settings: { ...prev.settings, company, departments: nextDepartments, leaveTypes: nextLeaveTypes } }));
+    setState(prev => ({ ...prev, settings: { ...prev.settings, company, departments: nextDepartments, leaveTypes: nextLeaveTypes, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)) } }));
     notify("Settings saved.");
+  }
+
+  async function takeBackup() {
+    if (!backendSession) return;
+    setBackupBusy("backup");
+    try {
+      const saved = await saveBackendState(state, backendSession);
+      const session = { ...backendSession, stateUpdatedAt: saved.updatedAt };
+      setBackendSession(session);
+      await createBackendBackup(session);
+      setBackupStatus(await loadBackupStatus(session));
+      notify("Backup stored.");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setBackupBusy("");
+    }
+  }
+
+  async function rollbackBackup() {
+    if (!backendSession || !window.confirm("Roll back to the latest backup? Current workspace data will be replaced.")) return;
+    setBackupBusy("rollback");
+    try {
+      const restored = await rollbackLatestBackendBackup(backendSession);
+      setState(hydrateState(restored.data));
+      setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: restored.updatedAt } : prev);
+      setBackupStatus(await loadBackupStatus({ ...backendSession, stateUpdatedAt: restored.updatedAt }));
+      notify("Latest backup restored.");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setBackupBusy("");
+    }
   }
 
   return <section className="settings-grid">
@@ -1693,9 +1730,9 @@ function SettingsPage({
       </div>
     </div>
     <div className="panel">
-      <div className="panel-head"><h3>Backup / Restore</h3><span>Workspace JSON</span></div>
-      <p className="muted">Export a backup before payroll runs, demos or device changes.</p>
-      <button onClick={openBackup}>Open backup / restore</button>
+      <div className="panel-head"><h3>Backup & Rollback</h3><span>Automatic every 8 hours</span></div>
+      <p className="muted">{backupStatus?.latest ? `Latest: ${new Date(backupStatus.latest.createdAt).toLocaleString()} (${backupStatus.latest.kind.toLowerCase()})` : "No backup stored yet."}</p>
+      <div className="inline-controls"><button disabled={!!backupBusy} onClick={() => void takeBackup()}>{backupBusy === "backup" ? "Backing up..." : "Take backup now"}</button><button className="danger-outline" disabled={!!backupBusy || !backupStatus?.latest} onClick={() => void rollbackBackup()}>{backupBusy === "rollback" ? "Rolling back..." : "Roll back latest"}</button></div>
     </div>
     <div className="panel"><div className="panel-head"><h3>Company Profile</h3></div><div className="form-grid compact">
       {(["name", "legalName", "tagline", "address", "phone", "email", "website", "currency", "wpsEmployerEid", "wpsPayerEid", "wpsPayerQid", "wpsPayerBank", "wpsPayerIban"] as const).map(key => {
@@ -1705,6 +1742,7 @@ function SettingsPage({
     </div></div>
     <div className="panel"><div className="panel-head"><h3>Departments</h3></div><textarea id="settings-departments" name="settings-departments" aria-label="Departments" value={departments} onChange={event => setDepartments(event.target.value)} /></div>
     <div className="panel"><div className="panel-head"><h3>Leave Types</h3><span>Format: Name:days</span></div><textarea id="settings-leave-types" name="settings-leave-types" aria-label="Leave types" value={leaveTypes} onChange={event => setLeaveTypes(event.target.value)} /></div>
+    <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>
     <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, account photo, department and leave type changes.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>
     <BackendPanel state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} />
   </section>;
@@ -1823,35 +1861,6 @@ function BackendPanel({
   </div>;
 }
 
-function BackupModal({ state, setState, close, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; close: () => void; notify: (message: string) => void }) {
-  function exportBackup() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `medtech-hr-backup-${todayISO()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function importBackup(file?: File) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        setState(hydrateState(JSON.parse(String(reader.result))));
-        notify("Backup restored.");
-        close();
-      } catch {
-        notify("Backup file could not be read.");
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  return <div><h2>Backup / restore</h2><p className="muted">Export a JSON backup before demos, payroll runs or browser cleanup.</p><div className="modal-actions"><button onClick={exportBackup}>Export backup</button><label className="button-like">Import backup<input type="file" accept="application/json" onChange={event => importBackup(event.target.files?.[0])} /></label><button onClick={close}>Done</button></div></div>;
-}
-
 function DataTable({ columns, rows, empty }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string }) {
   if (!rows.length) return <div className="empty">{empty || "No records."}</div>;
   return <div className="table-wrap"><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
@@ -1936,7 +1945,9 @@ function hydrateState(value: Partial<HrState>): HrState {
       company: { ...base.settings.company, ...value.settings?.company },
       departments: value.settings?.departments ?? base.settings.departments,
       leaveTypes: value.settings?.leaveTypes ?? base.settings.leaveTypes,
-      documentSeq: value.settings?.documentSeq ?? base.settings.documentSeq
+      documentSeq: value.settings?.documentSeq ?? base.settings.documentSeq,
+      workdayHours: value.settings?.workdayHours ?? base.settings.workdayHours,
+      halfDayHours: value.settings?.halfDayHours ?? base.settings.halfDayHours
     }
   };
 }

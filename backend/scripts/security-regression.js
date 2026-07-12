@@ -7,6 +7,7 @@ const { JwtStrategy } = require('../dist/modules/auth/strategies/jwt.strategy');
 const { DocumentsService } = require('../dist/modules/documents/documents.service');
 const { LeaveService } = require('../dist/modules/leave/leave.service');
 const { PerformanceReviewsService } = require('../dist/modules/performance-reviews/performance-reviews.service');
+const { ConsoleStateService } = require('../dist/modules/console-state/console-state.service');
 
 async function expectRejected(action, message) {
   await assert.rejects(action, (error) => error?.message === message);
@@ -52,6 +53,35 @@ async function main() {
     () => reviews.create({ employeeId: 'direct-report', reviewerId: 'victim' }, manager),
     'Managers cannot submit reviews as another employee',
   );
+
+  let consoleState = { id: 'default', data: { marker: 'original' }, updatedAt: new Date('2026-07-12T00:00:00Z') };
+  const backups = [];
+  const backupPrisma = {
+    hrConsoleState: {
+      findUnique: async () => consoleState,
+      update: async ({ data }) => (consoleState = { ...consoleState, ...data, updatedAt: new Date() }),
+    },
+    hrConsoleStateBackup: {
+      count: async () => backups.length,
+      findFirst: async () => backups.at(-1) || null,
+      create: async ({ data }) => {
+        const backup = { id: `backup-${backups.length + 1}`, createdAt: new Date(), ...data };
+        backups.push(backup);
+        return backup;
+      },
+      findMany: async ({ skip }) => backups.slice().reverse().slice(skip).map(({ id }) => ({ id })),
+      deleteMany: async ({ where }) => {
+        for (const id of where.id.in) backups.splice(backups.findIndex(item => item.id === id), 1);
+      },
+    },
+    $transaction: async (actions) => Promise.all(actions),
+  };
+  const consoleStateService = new ConsoleStateService(backupPrisma);
+  await consoleStateService.createBackup('MANUAL', 'hr-user');
+  consoleState = { ...consoleState, data: { marker: 'changed' }, updatedAt: new Date('2026-07-12T01:00:00Z') };
+  await consoleStateService.rollbackLatest('hr-user');
+  assert.deepEqual(consoleState.data, { marker: 'original' });
+  assert.equal(backups.at(-1).kind, 'ROLLBACK_SAFETY');
   await expectRejected(
     () => reviews.update('review', { employeeId: 'victim' }, manager),
     'Managers can only review direct reports',

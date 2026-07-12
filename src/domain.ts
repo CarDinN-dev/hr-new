@@ -125,9 +125,28 @@ export function leaveBalanceSummary(state: HrState, employeeId: string, typeName
 
 export function setAttendance(state: HrState, date: string, employeeId: string, code: AttendanceCode) {
   const attendance = { ...state.attendance, [date]: { ...(state.attendance[date] || {}) } };
-  if (attendance[date][employeeId] === code) delete attendance[date][employeeId];
-  else attendance[date][employeeId] = code;
+  attendance[date][employeeId] = code;
   return { ...state, attendance };
+}
+
+export function deleteEmployee(state: HrState, employeeId: string) {
+  const attendance = Object.fromEntries(Object.entries(state.attendance).flatMap(([date, records]) => {
+    const day = { ...records };
+    delete day[employeeId];
+    return Object.keys(day).length ? [[date, day]] : [];
+  }));
+
+  return {
+    ...state,
+    employees: state.employees.filter(employee => employee.id !== employeeId),
+    attendance,
+    leaves: state.leaves.filter(item => item.employeeId !== employeeId),
+    payroll: state.payroll.filter(item => item.employeeId !== employeeId),
+    businessTrips: state.businessTrips.filter(item => item.employeeId !== employeeId),
+    expenses: state.expenses.filter(item => item.employeeId !== employeeId),
+    eosRecords: state.eosRecords.filter(item => item.employeeId !== employeeId),
+    documents: state.documents.filter(item => item.employeeId !== employeeId)
+  };
 }
 
 export function markAllAttendance(state: HrState, date: string, code: AttendanceCode) {

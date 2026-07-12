@@ -81,10 +81,16 @@ type BackendPayroll = {
   status: string;
 };
 
-type BackendConsoleState = {
+export type BackendConsoleState = {
   id: string;
   data: Partial<HrState>;
   updatedAt: string;
+};
+
+export type BackendBackupStatus = {
+  count: number;
+  intervalHours: number;
+  latest: { id: string; kind: string; createdAt: string } | null;
 };
 
 export function loadBackendSession(): BackendSession | null {
@@ -142,6 +148,26 @@ export async function saveBackendState(state: HrState, session: BackendSession) 
     token: session.token,
     csrfToken: session.csrfToken,
     body: JSON.stringify({ data: state, updatedAt: session.stateUpdatedAt })
+  });
+}
+
+export function loadBackupStatus(session: BackendSession) {
+  return apiRequest<BackendBackupStatus>("/console-state/backups/status", { token: session.token });
+}
+
+export function createBackendBackup(session: BackendSession) {
+  return apiRequest<{ id: string; kind: string; createdAt: string }>("/console-state/backups", {
+    method: "POST",
+    token: session.token,
+    csrfToken: session.csrfToken
+  });
+}
+
+export function rollbackLatestBackendBackup(session: BackendSession) {
+  return apiRequest<BackendConsoleState>("/console-state/backups/rollback-latest", {
+    method: "POST",
+    token: session.token,
+    csrfToken: session.csrfToken
   });
 }
 

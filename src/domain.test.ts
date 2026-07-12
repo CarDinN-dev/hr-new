@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideLeave, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, settlementSummary, tripTotal, upcomingBirthdays } from "./domain";
+import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideLeave, deleteEmployee, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, setAttendance, settlementSummary, tripTotal, upcomingBirthdays } from "./domain";
 import { defaultState } from "./data";
 
 describe("HR domain", () => {
@@ -113,6 +113,21 @@ describe("HR domain", () => {
     expect(state.attendance["2026-07-09"]).toBeDefined();
     state = clearAttendanceDay(state, "2026-07-09");
     expect(state.attendance["2026-07-09"]).toBeUndefined();
+  });
+
+  it("keeps a selected attendance status and cascades employee deletion", () => {
+    const state = defaultState();
+    const employee = state.employees[0];
+    const marked = setAttendance(setAttendance(state, "2026-07-12", employee.id, "H"), "2026-07-12", employee.id, "H");
+    expect(marked.attendance["2026-07-12"][employee.id]).toBe("H");
+
+    const deleted = deleteEmployee({
+      ...marked,
+      documents: [{ id: "doc", employeeId: employee.id, template: "offer_letter", documentNumber: "DOC-1", generatedOn: "2026-07-12", status: "Generated" }]
+    }, employee.id);
+    expect(deleted.employees.some(item => item.id === employee.id)).toBe(false);
+    expect(deleted.attendance["2026-07-12"]).toBeUndefined();
+    expect(deleted.documents).toHaveLength(0);
   });
 
   it("rolls business trip advances and approved expenses into EOS", () => {

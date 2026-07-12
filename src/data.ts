@@ -165,6 +165,8 @@ export type HrSettings = {
   departments: string[];
   leaveTypes: Array<{ id: string; name: string; days: number }>;
   documentSeq: number;
+  workdayHours: number;
+  halfDayHours: number;
 };
 
 export type HrState = {
@@ -316,7 +318,9 @@ export function defaultState(): HrState {
         { id: "lt-emergency", name: "Emergency leave", days: 3 },
         { id: "lt-unpaid", name: "Unpaid leave", days: 0 }
       ],
-      documentSeq: 12
+      documentSeq: 12,
+      workdayHours: 8,
+      halfDayHours: 4
     }
   };
 }

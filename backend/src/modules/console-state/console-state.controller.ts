@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -22,5 +22,20 @@ export class ConsoleStateController {
   @Put()
   save(@Body() dto: SaveConsoleStateDto, @CurrentUser() user: RequestUser) {
     return this.consoleStateService.save(dto, user);
+  }
+
+  @Get('backups/status')
+  backupStatus() {
+    return this.consoleStateService.backupStatus();
+  }
+
+  @Post('backups')
+  backup(@CurrentUser() user: RequestUser) {
+    return this.consoleStateService.createBackup('MANUAL', user.id);
+  }
+
+  @Post('backups/rollback-latest')
+  rollbackLatest(@CurrentUser() user: RequestUser) {
+    return this.consoleStateService.rollbackLatest(user.id);
   }
 }
