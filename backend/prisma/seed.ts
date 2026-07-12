@@ -56,42 +56,6 @@ async function main() {
     });
   }
 
-  const managerPasswordHash = await bcrypt.hash(passwordFor('MANAGER_PASSWORD'), saltRounds);
-  const managerUser = await prisma.user.upsert({
-    where: { email: 'manager@example.com' },
-    update: {
-      passwordHash: managerPasswordHash,
-      role: Role.MANAGER,
-      permissions: [Permission.ATTENDANCE_READ_ALL, Permission.LEAVE_APPROVE],
-      isActive: true,
-      deletedAt: null,
-    },
-    create: {
-      email: 'manager@example.com',
-      passwordHash: managerPasswordHash,
-      role: Role.MANAGER,
-      permissions: [Permission.ATTENDANCE_READ_ALL, Permission.LEAVE_APPROVE],
-    },
-  });
-
-  const employeePasswordHash = await bcrypt.hash(passwordFor('EMPLOYEE_PASSWORD'), saltRounds);
-  const employeeUser = await prisma.user.upsert({
-    where: { email: 'employee@example.com' },
-    update: {
-      passwordHash: employeePasswordHash,
-      role: Role.EMPLOYEE,
-      permissions: [],
-      isActive: true,
-      deletedAt: null,
-    },
-    create: {
-      email: 'employee@example.com',
-      passwordHash: employeePasswordHash,
-      role: Role.EMPLOYEE,
-      permissions: [],
-    },
-  });
-
   const hrDepartment = await prisma.department.upsert({
     where: { code: 'HR' },
     update: { name: 'Human Resources', deletedAt: null },
@@ -180,14 +144,13 @@ async function main() {
   const managerEmployee = await prisma.employee.upsert({
     where: { employeeCode: 'EMP-0002' },
     update: {
-      userId: managerUser.id,
+      userId: null,
       departmentId: engineeringDepartment.id,
       positionId: managerPosition.id,
       managerId: adminEmployee.id,
       deletedAt: null,
     },
     create: {
-      userId: managerUser.id,
       employeeCode: 'EMP-0002',
       firstName: 'Maya',
       lastName: 'Manager',
@@ -210,14 +173,13 @@ async function main() {
   const sampleEmployee = await prisma.employee.upsert({
     where: { employeeCode: 'EMP-0003' },
     update: {
-      userId: employeeUser.id,
+      userId: null,
       departmentId: engineeringDepartment.id,
       positionId: engineerPosition.id,
       managerId: managerEmployee.id,
       deletedAt: null,
     },
     create: {
-      userId: employeeUser.id,
       employeeCode: 'EMP-0003',
       firstName: 'Omar',
       lastName: 'Employee',
@@ -333,8 +295,6 @@ async function main() {
   for (const loginUser of loginUsers) {
     console.log(`${loginUser.role}: ${loginUser.email}`);
   }
-  console.log('Manager: manager@example.com');
-  console.log('Employee: employee@example.com');
 }
 
 main()
