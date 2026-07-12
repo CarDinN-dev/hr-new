@@ -53,10 +53,11 @@ Rotate access by changing the password values in `.env`, then recreate the API c
 ## Oracle deployment checklist
 
 - Set every value in `.env`; do not use demo passwords for Oracle.
-- Open only `80`/`443` publicly in the Oracle security list; keep Postgres and API host ports private.
-- Put a real certificate in Nginx or terminate TLS at Oracle/load balancer. The generated certificate is local-only.
+- Keep the application, API and PostgreSQL ports bound to `127.0.0.1`; a Cloudflare Tunnel needs outbound access only.
+- Restrict SSH to the administrator IP and do not add public ingress rules for `3000`, `3100`, `5432`, `5434`, `8080` or `8443`.
 - Run `docker compose pull && docker compose up -d --build`, then check `docker compose ps`.
-- Back up the Docker volume `postgres_data` before upgrades and payroll runs.
+- The backend keeps up to 90 workspace snapshots, runs one every eight hours, and supports manual backup and rollback from Settings.
+- Copy PostgreSQL disaster-recovery dumps to a private Oracle Object Storage bucket; application snapshots in the same database do not protect against volume loss.
 - Keep `CORS_ORIGIN` empty when the frontend proxies `/api/v1` from the same domain.
 
 ## Checks
@@ -71,4 +72,4 @@ cd ..
 docker compose config
 ```
 
-The app saves HR data to PostgreSQL through the backend. Use Backup / Restore for manual JSON exports before payroll runs or upgrades.
+The app saves HR data to PostgreSQL through the backend. Browser JSON import/export is intentionally disabled; use the protected Settings backup controls.

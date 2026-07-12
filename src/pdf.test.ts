@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { defaultState } from "./data";
 import { saveEmployeeProfilePdf, savePayslipPdf } from "./pdf";
 import { createPayroll } from "./domain";
+import { dataUrlBlob } from "./dataUrl";
 
 beforeAll(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
@@ -17,6 +18,8 @@ describe("professional PDF output", () => {
 
     expect(profile.filename).toContain(employee.fields["Employee Code"]);
     expect(profile.dataUrl).toMatch(/^data:application\/pdf/);
+    expect(dataUrlBlob(profile.dataUrl).type).toBe("application/pdf");
+    expect(dataUrlBlob(profile.dataUrl).size).toBeGreaterThan(5_000);
     expect(profile.sizeBytes).toBeGreaterThan(5_000);
     expect(payslip.filename).toContain("2026-07");
     expect(payslip.sizeBytes).toBeGreaterThan(5_000);

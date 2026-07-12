@@ -97,6 +97,7 @@ import {
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
+import { openDataUrl } from "./dataUrl";
 import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
@@ -124,6 +125,10 @@ async function withPdf<T>(action: (pdf: typeof import("./pdf")) => T) {
 
 function templateName(id: PdfTemplate) {
   return pdfTemplates.find(item => item.id === id)?.label ?? reportTemplates.find(item => item.id === id)?.label ?? id;
+}
+
+function confirmDelete(label: string) {
+  return window.confirm(`Delete ${label}? This cannot be undone.`);
 }
 
 function accountInitials(value: string) {
@@ -963,7 +968,7 @@ function Leave({ state, setState, setModal, notify, close, savePdf }: CommonProp
               <Badge key="status" value={leave.status} />,
               <div className="row-actions" key="actions">
                 {leave.status === "Pending" && <><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Approved"))}>Approve</button><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Rejected"))}>Reject</button></>}
-                <button onClick={() => setState(prev => deleteLeave(prev, leave.id))}>Delete</button>
+                <button onClick={() => confirmDelete(`${leave.type} request`) && setState(prev => deleteLeave(prev, leave.id))}>Delete</button>
               </div>
             ];
           })}
@@ -1086,7 +1091,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
           <div className="row-actions" key="actions">
             {trip.status === "Pending" && <><button onClick={() => updateTrip(trip.id, { status: "Approved" })}>Approve</button><button onClick={() => updateTrip(trip.id, { status: "Rejected" })}>Reject</button></>}
             {trip.status === "Approved" && <button onClick={() => updateTrip(trip.id, { status: "Closed" })}>Close</button>}
-            <button onClick={() => setState(prev => ({ ...prev, businessTrips: prev.businessTrips.filter(item => item.id !== trip.id) }))}>Delete</button>
+            <button onClick={() => confirmDelete(`trip to ${trip.destination}`) && setState(prev => ({ ...prev, businessTrips: prev.businessTrips.filter(item => item.id !== trip.id) }))}>Delete</button>
           </div>
         ];
       })} />
@@ -1154,7 +1159,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
           <div className="row-actions" key="actions">
             {expense.status === "Submitted" && <><button onClick={() => updateExpense(expense.id, { status: "Approved" })}>Approve</button><button onClick={() => updateExpense(expense.id, { status: "Rejected" })}>Reject</button></>}
             {expense.status === "Approved" && <button onClick={() => updateExpense(expense.id, { status: "Paid" })}>Mark paid</button>}
-            <button onClick={() => setState(prev => ({ ...prev, expenses: prev.expenses.filter(item => item.id !== expense.id) }))}>Delete</button>
+            <button onClick={() => confirmDelete(`${expense.category} expense`) && setState(prev => ({ ...prev, expenses: prev.expenses.filter(item => item.id !== expense.id) }))}>Delete</button>
           </div>
         ];
       })} />
@@ -1230,6 +1235,8 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   }
 
   function deleteJob(id: string) {
+    const job = state.jobs.find(item => item.id === id);
+    if (!confirmDelete(`${job?.title || "job opening"} and its linked candidates`)) return;
     setState(prev => ({
       ...prev,
       jobs: prev.jobs.filter(job => job.id !== id),
@@ -1371,7 +1378,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
                 <div className="row-actions">
                   {candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : <button className="primary" onClick={() => addAsEmployee(candidate)}>Add as employee</button>)}
                   <button onClick={() => editCandidate(candidate)}>Edit</button>
-                  <button onClick={() => setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete</button>
+                  <button onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete</button>
                 </div>
               </article>;
             }) : <div className="empty compact">No {stage.toLowerCase()} candidates.</div>}
@@ -1546,7 +1553,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
             {record.status === "Approved" && <button onClick={() => updateRecord(record.id, { status: "Paid" })}>Mark paid</button>}
             {record.status === "Paid" && <button onClick={() => closeEmployee(record)}>Close employee</button>}
             {rowEmployee && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEosPdf(record, rowEmployee, state.settings), "final_settlement", rowEmployee.id))}>PDF</button>}
-            <button onClick={() => setState(prev => ({ ...prev, eosRecords: prev.eosRecords.filter(item => item.id !== record.id) }))}>Delete</button>
+            <button onClick={() => confirmDelete(`EOS record dated ${formatDate(record.asOf)}`) && setState(prev => ({ ...prev, eosRecords: prev.eosRecords.filter(item => item.id !== record.id) }))}>Delete</button>
           </div>
         ];
       })} />
@@ -1567,7 +1574,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
   }
 
   function removeDocument(id: string, name: string) {
-    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    if (!confirmDelete(name)) return;
     setState(prev => ({ ...prev, documents: prev.documents.filter(item => item.id !== id) }));
     notify("Generated document deleted.");
   }
@@ -1599,7 +1606,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
             formatDate(doc.generatedOn),
             doc.filename || doc.status,
             <div className="row-actions" key="actions">
-              {doc.dataUrl ? <><button onClick={() => window.open(doc.dataUrl, "_blank", "noopener")}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : <Badge value={doc.status} />}
+              {doc.dataUrl ? <><button onClick={() => { try { openDataUrl(doc.dataUrl!); } catch (error) { notify(errorMessage(error)); } }}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : <Badge value={doc.status} />}
               <button className="danger-outline" onClick={() => removeDocument(doc.id, doc.filename || doc.documentNumber)}><Trash2 size={15} /> Delete</button>
             </div>
           ];

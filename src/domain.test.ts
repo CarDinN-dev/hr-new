@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideLeave, deleteEmployee, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, setAttendance, settlementSummary, tripTotal, upcomingBirthdays } from "./domain";
+import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideLeave, deleteEmployee, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
 import { defaultState } from "./data";
 
 describe("HR domain", () => {
@@ -128,6 +128,16 @@ describe("HR domain", () => {
     expect(deleted.employees.some(item => item.id === employee.id)).toBe(false);
     expect(deleted.attendance["2026-07-12"]).toBeUndefined();
     expect(deleted.documents).toHaveLength(0);
+  });
+
+  it("uses local calendar dates and preserves leave during bulk attendance actions", () => {
+    const state = defaultState();
+    const [employee] = state.employees;
+    const withLeave = setAttendance(state, "2026-07-12", employee.id, "L");
+    expect(markAllAttendance(withLeave, "2026-07-12", "P").attendance["2026-07-12"][employee.id]).toBe("L");
+    expect(clearAttendanceDay(withLeave, "2026-07-12").attendance["2026-07-12"][employee.id]).toBe("L");
+    expect(todayISO(new Date(2026, 6, 12, 1))).toBe("2026-07-12");
+    expect(serviceYears("2026-02-30", "2026-07-12")).toBe(0);
   });
 
   it("rolls business trip advances and approved expenses into EOS", () => {

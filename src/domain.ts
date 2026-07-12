@@ -2,8 +2,8 @@ import type { AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, Emp
 import { candidateStages, createEmptyEmployee, months, normalizeEmployee } from "./data";
 import { newId } from "./id";
 
-export function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+export function todayISO(date = new Date()) {
+  return dateToISO(date);
 }
 
 export function formatDate(value?: string) {
@@ -59,9 +59,9 @@ export function inclusiveDays(from: string, to: string) {
 }
 
 export function serviceYears(joiningDate?: string, asOf = todayISO()) {
-  if (!joiningDate) return 0;
-  const joined = new Date(`${joiningDate}T00:00:00`);
-  const end = new Date(`${asOf}T00:00:00`);
+  const joined = parseDateParts(joiningDate);
+  const end = parseDateParts(asOf);
+  if (!joined || !end) return 0;
   return Math.max(0, (Number(end) - Number(joined)) / 31_536_000_000);
 }
 
@@ -150,13 +150,16 @@ export function deleteEmployee(state: HrState, employeeId: string) {
 }
 
 export function markAllAttendance(state: HrState, date: string, code: AttendanceCode) {
-  const day = Object.fromEntries(activeEmployees(state.employees).map(employee => [employee.id, code]));
+  const existing = state.attendance[date] || {};
+  const day = Object.fromEntries(activeEmployees(state.employees).map(employee => [employee.id, existing[employee.id] === "L" ? "L" : code]));
   return { ...state, attendance: { ...state.attendance, [date]: day } };
 }
 
 export function clearAttendanceDay(state: HrState, date: string) {
   const attendance = { ...state.attendance };
-  delete attendance[date];
+  const leave = Object.fromEntries(Object.entries(attendance[date] || {}).filter(([, code]) => code === "L"));
+  if (Object.keys(leave).length) attendance[date] = leave;
+  else delete attendance[date];
   return { ...state, attendance };
 }
 
@@ -478,7 +481,7 @@ function parseDateParts(value?: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
   if (!match) return undefined;
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return Number.isNaN(Number(date)) ? undefined : date;
+  return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]) ? date : undefined;
 }
 
 function dateToISO(date: Date) {
