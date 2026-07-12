@@ -23,6 +23,7 @@ export function parseAttendanceSheet(text: string) {
 export function applyAttendanceRows(state: HrState, rows: Array<Record<string, string>>) {
   const employees = new Map(state.employees.map(employee => [employee.fields["Employee Code"].trim().toLowerCase(), employee]));
   const attendance = { ...state.attendance };
+  const attendanceApprovals = { ...state.attendanceApprovals };
   const clonedDates = new Set<string>();
   let imported = 0;
   let skipped = 0;
@@ -38,15 +39,17 @@ export function applyAttendanceRows(state: HrState, rows: Array<Record<string, s
 
     if (!clonedDates.has(date)) {
       attendance[date] = { ...(attendance[date] || {}) };
+      attendanceApprovals[date] = { ...(attendanceApprovals[date] || {}) };
       clonedDates.add(date);
     }
     attendance[date][employee.id] = code;
+    delete attendanceApprovals[date][employee.id];
     imported += 1;
   }
 
   const dates = [...clonedDates].sort();
   return {
-    state: imported ? { ...state, attendance } : state,
+    state: imported ? { ...state, attendance, attendanceApprovals } : state,
     imported,
     skipped,
     dates: dates.length,

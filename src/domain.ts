@@ -1,4 +1,4 @@
-import type { AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollSlip, RecruitmentCandidate } from "./data";
+import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollSlip, RecruitmentCandidate } from "./data";
 import { candidateStages, createEmptyEmployee, months, normalizeEmployee } from "./data";
 import { newId } from "./id";
 
@@ -126,11 +126,31 @@ export function leaveBalanceSummary(state: HrState, employeeId: string, typeName
 export function setAttendance(state: HrState, date: string, employeeId: string, code: AttendanceCode) {
   const attendance = { ...state.attendance, [date]: { ...(state.attendance[date] || {}) } };
   attendance[date][employeeId] = code;
-  return { ...state, attendance };
+  const approvals = { ...state.attendanceApprovals, [date]: { ...(state.attendanceApprovals[date] || {}) } };
+  delete approvals[date][employeeId];
+  if (!Object.keys(approvals[date]).length) delete approvals[date];
+  return { ...state, attendance, attendanceApprovals: approvals };
+}
+
+export function decideAttendance(state: HrState, date: string, employeeId: string, approval: AttendanceApproval) {
+  const code = state.attendance[date]?.[employeeId];
+  if (code !== "H" && code !== "A") return state;
+  return {
+    ...state,
+    attendanceApprovals: {
+      ...state.attendanceApprovals,
+      [date]: { ...(state.attendanceApprovals[date] || {}), [employeeId]: approval }
+    }
+  };
 }
 
 export function deleteEmployee(state: HrState, employeeId: string) {
   const attendance = Object.fromEntries(Object.entries(state.attendance).flatMap(([date, records]) => {
+    const day = { ...records };
+    delete day[employeeId];
+    return Object.keys(day).length ? [[date, day]] : [];
+  }));
+  const attendanceApprovals = Object.fromEntries(Object.entries(state.attendanceApprovals).flatMap(([date, records]) => {
     const day = { ...records };
     delete day[employeeId];
     return Object.keys(day).length ? [[date, day]] : [];
@@ -140,6 +160,7 @@ export function deleteEmployee(state: HrState, employeeId: string) {
     ...state,
     employees: state.employees.filter(employee => employee.id !== employeeId),
     attendance,
+    attendanceApprovals,
     leaves: state.leaves.filter(item => item.employeeId !== employeeId),
     payroll: state.payroll.filter(item => item.employeeId !== employeeId),
     businessTrips: state.businessTrips.filter(item => item.employeeId !== employeeId),
@@ -152,7 +173,9 @@ export function deleteEmployee(state: HrState, employeeId: string) {
 export function markAllAttendance(state: HrState, date: string, code: AttendanceCode) {
   const existing = state.attendance[date] || {};
   const day = Object.fromEntries(activeEmployees(state.employees).map(employee => [employee.id, existing[employee.id] === "L" ? "L" : code]));
-  return { ...state, attendance: { ...state.attendance, [date]: day } };
+  const attendanceApprovals = { ...state.attendanceApprovals };
+  delete attendanceApprovals[date];
+  return { ...state, attendance: { ...state.attendance, [date]: day }, attendanceApprovals };
 }
 
 export function clearAttendanceDay(state: HrState, date: string) {
@@ -160,7 +183,9 @@ export function clearAttendanceDay(state: HrState, date: string) {
   const leave = Object.fromEntries(Object.entries(attendance[date] || {}).filter(([, code]) => code === "L"));
   if (Object.keys(leave).length) attendance[date] = leave;
   else delete attendance[date];
-  return { ...state, attendance };
+  const attendanceApprovals = { ...state.attendanceApprovals };
+  delete attendanceApprovals[date];
+  return { ...state, attendance, attendanceApprovals };
 }
 
 export function decideLeave(state: HrState, id: string, status: LeaveStatus) {

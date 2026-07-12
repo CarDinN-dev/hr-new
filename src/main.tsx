@@ -45,7 +45,7 @@ import {
   type RecruitmentCandidate,
   type RecruitmentJob
 } from "./data";
-import { applyEmployeeRows, employeeTemplateHtml, parseEmployeeSheet } from "./employeeSheet";
+import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
 import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } from "./attendanceSheet";
 import { payrollExportWarnings, payrollSheetHtml, sifCsv } from "./payrollExports";
 import {
@@ -53,6 +53,7 @@ import {
   attendanceStats,
   candidatePipeline,
   clearAttendanceDay,
+  decideAttendance,
   createEosRecord,
   createPayroll,
   deleteEmployee,
@@ -596,7 +597,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
         <div className="employee-hero-actions">
           <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("employee_directory", state, new Date().getFullYear(), new Date().getMonth() + 1), "employee_directory"))}><Download size={16} /> Directory PDF</button>
           <button onClick={downloadEmployeeTemplate}><Download size={16} /> Excel template</button>
-          <label className="button-like"><Upload size={16} /> Import employees<input type="file" accept=".xls,.html,.csv,.tsv,text/html,text/csv" onChange={event => importEmployees(event.target.files?.[0])} /></label>
+          <label className="button-like"><Upload size={16} /> Import employees<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.xls,.html,.csv,.tsv,text/html,text/csv" onChange={async event => { const file = event.target.files?.[0]; event.currentTarget.value = ""; await importEmployees(file); }} /></label>
           <button className="primary" onClick={() => edit()}><UserRoundPlus size={16} /> Add employee</button>
         </div>
       </div>
@@ -647,29 +648,33 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
   );
 
   function downloadEmployeeTemplate() {
-    downloadBlob(new Blob([employeeTemplateHtml()], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Employee-Import-Template-${todayISO()}.xls`);
+    const link = document.createElement("a");
+    link.href = "/templates/MedTech-Employee-Import-Template.xlsx";
+    link.download = "MedTech-Employee-Import-Template.xlsx";
+    document.body.append(link);
+    link.click();
+    link.remove();
   }
 
-  function importEmployees(file?: File) {
+  async function importEmployees(file?: File) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const rows = parseEmployeeSheet(String(reader.result));
-        let added = 0;
-        let updated = 0;
-        setState(prev => {
-          const result = applyEmployeeRows(prev, rows);
-          added = result.added;
-          updated = result.updated;
-          return result.state;
-        });
-        notify(`Employee import complete: ${added} added, ${updated} updated.`);
-      } catch {
-        notify("Employee import failed. Use the downloaded template or a CSV exported from Excel.");
+    try {
+      const spreadsheet = /\.(xlsx|xlsm|xltx|xltm)$/i.test(file.name);
+      const parsed = spreadsheet
+        ? await parseEmployeeWorkbook(file)
+        : { rows: parseEmployeeSheet(await file.text()), skipped: 0 };
+
+      if (!parsed.rows.length) {
+        notify(parsed.skipped ? `No employees were imported. ${parsed.skipped} row${parsed.skipped === 1 ? "" : "s"} need a unique Employee Code.` : "No employee rows were found in this file.");
+        return;
       }
-    };
-    reader.readAsText(file);
+
+      const result = applyEmployeeRows(state, parsed.rows);
+      setState(result.state);
+      notify(`Employee import complete: ${result.added} added, ${result.updated} updated${parsed.skipped ? `, ${parsed.skipped} skipped` : ""}.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Employee import failed. Use the downloaded .xlsx template or a CSV exported from Excel.");
+    }
   }
 }
 
@@ -876,7 +881,8 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
                 {group.employees.map(employee => {
                   const code = day[employee.id];
                   const punch = attendancePunch(employee, code, state.settings.workdayHours, state.settings.halfDayHours);
-                  const needsReview = code === "H" || code === "A";
+                  const approval = state.attendanceApprovals[date]?.[employee.id];
+                  const needsReview = (code === "H" || code === "A") && !approval;
                   return (
                     <div className="attendance-record" key={employee.id}>
                       <div className="attendance-row">
@@ -886,13 +892,13 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
                         <strong>{punch.out}</strong>
                         <strong>{punch.hours}</strong>
                         <Badge value={punch.status} />
-                        <Badge value={needsReview ? "Pending" : code ? "Approved" : "Not marked"} />
+                        <Badge value={approval || (needsReview ? "Pending" : code ? "Approved" : "Not marked")} />
                         <div className="att-btns">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div>
                       </div>
                       {needsReview && (
                         <div className="attendance-review">
                           <span><strong>{punch.status}: </strong>{punch.note}</span>
-                          <div><button onClick={() => setState(prev => setAttendance(prev, date, employee.id, "P"))}>Approve</button><button className="danger-outline" onClick={() => setState(prev => setAttendance(prev, date, employee.id, "A"))}>Not approved</button></div>
+                          <div><button onClick={() => setState(prev => decideAttendance(prev, date, employee.id, "Approved"))}>Approve</button><button className="danger-outline" onClick={() => setState(prev => decideAttendance(prev, date, employee.id, "Not approved"))}>Not approved</button></div>
                         </div>
                       )}
                     </div>
@@ -1938,6 +1944,7 @@ function hydrateState(value: Partial<HrState>): HrState {
     ...base,
     ...value,
     attendance: value.attendance ?? base.attendance,
+    attendanceApprovals: value.attendanceApprovals ?? {},
     leaves: value.leaves ?? [],
     payroll: value.payroll ?? [],
     businessTrips: value.businessTrips ?? [],

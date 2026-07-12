@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideLeave, deleteEmployee, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
+import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
 import { defaultState } from "./data";
 
 describe("HR domain", () => {
@@ -118,8 +118,13 @@ describe("HR domain", () => {
   it("keeps a selected attendance status and cascades employee deletion", () => {
     const state = defaultState();
     const employee = state.employees[0];
-    const marked = setAttendance(setAttendance(state, "2026-07-12", employee.id, "H"), "2026-07-12", employee.id, "H");
+    const absent = decideAttendance(setAttendance(state, "2026-07-12", employee.id, "A"), "2026-07-12", employee.id, "Approved");
+    expect(absent.attendance["2026-07-12"][employee.id]).toBe("A");
+    expect(absent.attendanceApprovals["2026-07-12"][employee.id]).toBe("Approved");
+
+    const marked = decideAttendance(setAttendance(absent, "2026-07-12", employee.id, "H"), "2026-07-12", employee.id, "Approved");
     expect(marked.attendance["2026-07-12"][employee.id]).toBe("H");
+    expect(marked.attendanceApprovals["2026-07-12"][employee.id]).toBe("Approved");
 
     const deleted = deleteEmployee({
       ...marked,
