@@ -4,6 +4,7 @@ import {
   BarChart3,
   BriefcaseBusiness,
   CalendarCheck,
+  ChevronDown,
   Download,
   Eye,
   FileText,
@@ -333,6 +334,7 @@ function App() {
             <strong>HR ERP</strong>
             <span>HR and payroll</span>
           </div>
+          <button className="sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
           {navItems.map(item => {
@@ -362,6 +364,11 @@ function App() {
             <p className="section-label">MedTech Corporation Trading W.L.L.</p>
             <h1>{nav}</h1>
             <p className="page-hint">{pageHint}</p>
+          </div>
+          <div className="topbar-actions">
+            <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
+              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
           </div>
         </header>
 
@@ -422,12 +429,13 @@ function AccountMenu({
       <button role="menuitem" onClick={goSettings}><Download size={16} /> Backups</button>
       <button role="menuitem" onClick={onLogout}><LogOut size={16} /> Log out</button>
     </div>}
-    <button className="account-trigger" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
+    <button className="account-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
       <span className="account-avatar">{photo ? <img src={photo} alt="" /> : accountInitials(backendSession.email)}</span>
       <span className="account-label">
         <strong>{backendSession.email}</strong>
         <small>{backendSession.role}</small>
       </span>
+      <ChevronDown className="account-chevron" size={16} aria-hidden="true" />
     </button>
   </div>;
 }
@@ -2061,7 +2069,7 @@ function BackendPanel({
 
 function DataTable({ columns, rows, empty }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string }) {
   if (!rows.length) return <div className="empty">{empty || "No records."}</div>;
-  return <div className="table-wrap"><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
+  return <div className="table-wrap" role="region" aria-label="Scrollable data table" tabIndex={0}><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
 function Badge({ value }: { value: string }) {
