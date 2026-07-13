@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
+import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
 import { defaultState } from "./data";
 
 describe("HR domain", () => {
@@ -72,6 +72,19 @@ describe("HR domain", () => {
     expect(rerun.updated).toBeGreaterThan(0);
     expect(updatedSlip.lopDays).toBe(1);
     expect(updatedSlip.net).toBeLessThan(cleanSlip.net);
+  });
+
+  it("deducts half a day of pay for a half-day attendance mark", () => {
+    let state = defaultState();
+    const employee = state.employees[0];
+    const clean = createPayroll(state, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)!;
+
+    state = setAttendance(state, "2026-07-13", employee.id, "H");
+    const slip = createPayroll(state, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)!;
+
+    expect(slip.lopDays).toBe(0.5);
+    expect(slip.lopAmount).toBeCloseTo(clean.lopAmount + employeeSalary(employee).total / 60, 2);
+    expect(slip.net).toBeLessThan(clean.net);
   });
 
   it("keeps overlapping leave attendance and splits cross-year leave balances", () => {

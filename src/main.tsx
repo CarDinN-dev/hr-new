@@ -786,10 +786,7 @@ function EmployeeProfile({ employee, state, edit, close, savePdf }: { employee: 
 
 function Attendance({ state, setState, savePdf, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: (message: string) => void }) {
   const now = new Date();
-  const [date, setDate] = useState(() => {
-    const dates = Object.keys(state.attendance).sort();
-    return dates[dates.length - 1] || todayISO();
-  });
+  const [date, setDate] = useState(todayISO);
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [department, setDepartment] = useState("");

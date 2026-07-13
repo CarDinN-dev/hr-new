@@ -287,7 +287,7 @@ export function defaultState(): HrState {
   const employees = seedEmployees().map(normalizeEmployee);
   return {
     employees,
-    attendance: seedAttendance(employees),
+    attendance: {},
     attendanceApprovals: {},
     leaves: seedLeaves(),
     payroll: [],
@@ -429,16 +429,6 @@ function employee(
       "Special Allowance": "0",
       Total: total
     }
-  };
-}
-
-function seedAttendance(employees: EmployeeRecord[]): Record<string, Record<string, AttendanceCode>> {
-  const byCode = Object.fromEntries(employees.map(employee => [employee.fields["Employee Code"], employee.id]));
-  const day: Record<string, AttendanceCode> = {};
-  if (byCode["MT-0024"]) day[byCode["MT-0024"]] = "H";
-  if (byCode["MT-0018"]) day[byCode["MT-0018"]] = "P";
-  return {
-    "2026-06-20": day
   };
 }
 
