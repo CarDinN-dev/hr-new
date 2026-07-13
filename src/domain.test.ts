@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
+import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
 import { defaultState } from "./data";
 
 describe("HR domain", () => {
@@ -156,6 +156,24 @@ describe("HR domain", () => {
     expect(clearAttendanceDay(withLeave, "2026-07-12").attendance["2026-07-12"][employee.id]).toBe("L");
     expect(todayISO(new Date(2026, 6, 12, 1))).toBe("2026-07-12");
     expect(serviceYears("2026-02-30", "2026-07-12")).toBe(0);
+  });
+
+  it("summarizes daily attendance for active employees only", () => {
+    const state = defaultState();
+    const employees = state.employees.slice(0, 3);
+    employees[0].status = "Active";
+    employees[1].status = "On Leave";
+    employees[2].status = "Resigned";
+
+    expect(attendanceDaySummary(employees, {
+      [employees[0].id]: "P",
+      [employees[1].id]: "H",
+      [employees[2].id]: "A",
+      staleEmployee: "P"
+    })).toEqual({ total: 2, marked: 2, unmarked: 0, P: 1, H: 1, L: 0, A: 0 });
+
+    expect(attendanceDaySummary(employees, { [employees[0].id]: "A" }))
+      .toEqual({ total: 2, marked: 1, unmarked: 1, P: 0, H: 0, L: 0, A: 1 });
   });
 
   it("rolls business trip advances and approved expenses into EOS", () => {

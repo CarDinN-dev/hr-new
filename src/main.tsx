@@ -50,6 +50,7 @@ import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } fro
 import { payrollExportWarnings, payrollSheetHtml, sifCsv } from "./payrollExports";
 import {
   activeEmployees,
+  attendanceDaySummary,
   attendanceStats,
   candidatePipeline,
   clearAttendanceDay,
@@ -158,13 +159,12 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
       <section className="login-card">
         <div className="login-brand">
           <span className="login-logo"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
-          <span><ShieldCheck size={18} /> Secure HR access</span>
+          <span><ShieldCheck size={18} /> HR sign in</span>
         </div>
         <div>
           <p className="section-label">MedTech Corporation Trading W.L.L.</p>
-          <h1>Secure workforce control for healthcare operations.</h1>
-          <p className="muted">Built around MedTech's medical and laboratory equipment operations: precise records, protected access, and payroll-ready HR data.</p>
-          <div className="login-proof"><span>Excellence</span><span>Expertise</span><span>Ethics</span></div>
+          <h1>MedTech HR</h1>
+          <p className="muted">Sign in to manage employee records, attendance, leave and payroll.</p>
         </div>
         <form className="login-form" onSubmit={submit}>
           <label htmlFor="login-email">Email<input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
@@ -173,12 +173,12 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
         </form>
         <button className="theme-login" type="button" onClick={toggleTheme}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Light mode" : "Dark mode"}</button>
       </section>
-      <section className="login-stage" aria-label="MedTech secure workforce platform">
+      <section className="login-stage" aria-label="MedTech HR system">
         <React.Suspense fallback={<div className="login-scene-fallback" />}><LoginScene /></React.Suspense>
         <div className="login-stage-copy">
-          <span>Protected HR workspace</span>
-          <strong>Precision in every people decision.</strong>
-          <small>Role-based access, local PostgreSQL records and payroll-ready controls.</small>
+          <span>HR and payroll</span>
+          <strong>Employee records in one place.</strong>
+          <small>Access is limited by your assigned role.</small>
         </div>
       </section>
     </main>
@@ -320,7 +320,7 @@ function App() {
           <span className="logo-crop wordmark"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
           <div>
             <strong>HR ERP</strong>
-            <span>Qatar workforce operations</span>
+            <span>HR and payroll</span>
           </div>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -423,6 +423,7 @@ function AccountMenu({
 function Dashboard({ state, setNav, onAddEmployee }: { state: HrState; setNav: (nav: NavItem) => void; onAddEmployee: () => void }) {
   const active = activeEmployees(state.employees);
   const today = state.attendance[todayISO()] || {};
+  const todaySummary = attendanceDaySummary(state.employees, today);
   const pendingLeave = state.leaves.filter(item => item.status === "Pending");
   const currentPayroll = state.payroll.filter(item => item.year === new Date().getFullYear() && item.month === new Date().getMonth() + 1);
   const expiringDocs = state.employees.filter(employee => daysUntil(employee.fields["QID Expiry Date"]) <= 60 || daysUntil(employee.fields["Passport Expiry Date"]) <= 60);
@@ -443,16 +444,16 @@ function Dashboard({ state, setNav, onAddEmployee }: { state: HrState; setNav: (
     <>
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="section-label">Workforce command center</p>
+          <p className="section-label">Dashboard</p>
           <span className="hero-logo-crop"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
-          <h2>HR operations, payroll and workforce documents in one controlled workspace.</h2>
-          <p>Use this HR-only ERP for employee records, attendance, leave approvals, payroll drafts, official PDFs and audit-ready backups.</p>
+          <h2>Today at MedTech</h2>
+          <p>Review attendance, leave requests, payroll and employee records.</p>
         </div>
         <div className="dashboard-snapshot">
           <span>Today's snapshot</span>
           <strong>{formatDate(todayISO())}</strong>
           <dl>
-            <div><dt>Attendance</dt><dd>{Object.keys(today).length}/{active.length}</dd></div>
+            <div><dt>Attendance</dt><dd>{todaySummary.P} present, {todaySummary.A} absent</dd></div>
             <div><dt>Leave approvals</dt><dd>{pendingLeave.length}</dd></div>
             <div><dt>Compliance alerts</dt><dd>{expiringDocs.length}</dd></div>
           </dl>
@@ -465,8 +466,8 @@ function Dashboard({ state, setNav, onAddEmployee }: { state: HrState; setNav: (
 
       <section className="metric-grid">
         <Metric label="Active employees" value={active.length} hint={`${state.employees.length - active.length} inactive records`} />
-        <Metric label="Marked today" value={Object.keys(today).length} hint="attendance entries" />
-        <Metric label="Pending leave" value={pendingLeave.length} hint="manager/HR action" tone={pendingLeave.length ? "warn" : "ok"} />
+        <Metric label="Present today" value={todaySummary.P} hint={`${todaySummary.A} absent · ${todaySummary.H} half-day · ${todaySummary.L} leave · ${todaySummary.unmarked} unmarked`} tone={todaySummary.A ? "warn" : "ok"} />
+        <Metric label="Pending leave" value={pendingLeave.length} hint="awaiting approval" tone={pendingLeave.length ? "warn" : "ok"} />
         <Metric label="Open positions" value={openJobs.length} hint={`${pipelineCandidates.length} candidates in pipeline`} />
         <Metric label="Payroll this month" value={formatMoney(payrollTotal, state.settings.company.currency)} hint={`${currentPayroll.length} payslips`} />
         <Metric label="Docs expiring" value={expiringDocs.length} hint="next 60 days" tone={expiringDocs.length ? "warn" : "ok"} />
@@ -545,18 +546,18 @@ function EmployeeAvatar({ employee, small = false }: { employee: EmployeeRecord;
 
 function pageDescription(nav: NavItem) {
   const descriptions: Record<NavItem, string> = {
-    Dashboard: "Executive overview for headcount, approvals, payroll and compliance signals.",
-    Employees: "Search, import, edit and export employee records.",
-    Attendance: "Mark daily status and review payroll impact.",
-    Leave: "Approve requests and monitor balances.",
-    "Business Trips": "Track travel advances, approvals and settlement.",
-    Expenses: "Manage reimbursements and expense approvals.",
-    Payroll: "Generate payslips, WPS exports and salary records.",
-    Recruitment: "Move jobs and candidates through the hiring pipeline.",
-    EOS: "Calculate gratuity, settlements and employee closure.",
-    Documents: "Generate official HR letters and PDF records.",
-    Reports: "Download audit-ready operational reports.",
-    Settings: "Configure company profile, backend sync and HR defaults."
+    Dashboard: "Attendance, leave, payroll and employee totals.",
+    Employees: "Employee records.",
+    Attendance: "Daily attendance and monthly totals.",
+    Leave: "Leave requests and balances.",
+    "Business Trips": "Trip requests, costs and advances.",
+    Expenses: "Employee expenses and reimbursements.",
+    Payroll: "Payslips and payroll exports.",
+    Recruitment: "Job openings and candidates.",
+    EOS: "End-of-service calculations and records.",
+    Documents: "HR letters and PDFs.",
+    Reports: "Employee, attendance, leave and payroll reports.",
+    Settings: "Company and HR settings."
   };
   return descriptions[nav];
 }
@@ -590,7 +591,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
     <section className="stack employee-workspace">
       <div className="employee-hero panel">
         <div>
-          <p className="section-label">People operations</p>
+          <p className="section-label">Employees</p>
           <h3>Employee Directory</h3>
           <span>{employees.length} shown / {state.employees.length} total records</span>
         </div>
@@ -712,12 +713,12 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
   return (
     <div>
       <h2>{employee ? "Edit employee" : "Add employee"}</h2>
-      <p className="muted">The master record includes the 90 MedTech HR fields from the reference module.</p>
+      <p className="muted">Complete the employee details below.</p>
       <div className="employee-photo-editor">
         <EmployeeAvatar employee={draft} />
         <div>
           <strong>Employee photo</strong>
-          <p>Stored with this employee record on the local PC backend.</p>
+          <p>Saved with this employee record.</p>
           <div className="inline-controls">
             <label className="button-like"><ImagePlus size={16} /> {draft.photo ? "Replace photo" : "Add photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { void updateEmployeePhoto(event.target.files?.[0]); event.target.value = ""; }} /></label>
             {draft.photo && <button type="button" onClick={() => setDraft(prev => ({ ...prev, photo: "" }))}><Trash2 size={16} /> Remove</button>}
@@ -796,7 +797,7 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
   const day = state.attendance[date] || {};
   const stats = attendanceStats(state.employees, state.attendance, year, month);
   const statusLabels: Record<AttendanceCode, string> = { P: "Present", H: "Half-day", L: "Leave", A: "Absent" };
-  const statusCounts = (["P", "H", "L", "A"] as AttendanceCode[]).reduce((counts, code) => ({ ...counts, [code]: Object.values(day).filter(value => value === code).length }), {} as Record<AttendanceCode, number>);
+  const daySummary = attendanceDaySummary(state.employees, day);
   const departments = Array.from(new Set(active.map(employee => employee.fields.Department || "Unassigned"))).sort();
   const visibleEmployees = active.filter(employee => {
     const text = [employee.fields["Employee Code"], employeeName(employee), employee.fields.Department, employee.fields.Designation].join(" ").toLowerCase();
@@ -806,10 +807,19 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
       (!status || label === status) &&
       (!query || text.includes(query.toLowerCase()));
   });
-  const marked = Object.keys(day).length;
-  const payrollImpact = stats.reduce((sum, row) => sum + (employeeSalary(row.employee).total / 30) * (row.A + row.H * 0.5), 0);
+  const payrollImpact = active.reduce((sum, employee) => {
+    const code = day[employee.id];
+    return sum + (employeeSalary(employee).total / 30) * (code === "A" ? 1 : code === "H" ? 0.5 : 0);
+  }, 0);
   const grouped = departments
-    .map(name => ({ name, employees: visibleEmployees.filter(employee => (employee.fields.Department || "Unassigned") === name) }))
+    .map(name => {
+      const departmentEmployees = active.filter(employee => (employee.fields.Department || "Unassigned") === name);
+      return {
+        name,
+        employees: visibleEmployees.filter(employee => (employee.fields.Department || "Unassigned") === name),
+        summary: attendanceDaySummary(departmentEmployees, day)
+      };
+    })
     .filter(group => group.employees.length);
 
   function downloadAttendanceTemplate() {
@@ -837,8 +847,8 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
       <div className="panel attendance-control">
         <div className="attendance-hero">
           <div>
-            <h3>Attendance Control</h3>
-            <p>Department view of daily attendance, leave marks and payroll-impacting exceptions.</p>
+            <h3>Daily Attendance</h3>
+            <p>Mark each employee or import a completed attendance sheet.</p>
           </div>
           <div className="inline-controls">
             <button onClick={downloadAttendanceTemplate}><Download size={16} /> Template</button>
@@ -849,11 +859,11 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
         </div>
 
         <div className="attendance-metrics">
-          <AttendanceMetric label="Present" value={statusCounts.P} tone="present" />
-          <AttendanceMetric label="Half-day" value={statusCounts.H} tone="half" />
-          <AttendanceMetric label="Leave" value={statusCounts.L} tone="leave" />
-          <AttendanceMetric label="Absent" value={statusCounts.A} tone="absent" />
-          <AttendanceMetric label="Payroll impact" value={formatMoney(payrollImpact, state.settings.company.currency)} tone="payroll" />
+          <AttendanceMetric label="Present" value={daySummary.P} tone="present" />
+          <AttendanceMetric label="Half-day" value={daySummary.H} tone="half" />
+          <AttendanceMetric label="Leave" value={daySummary.L} tone="leave" />
+          <AttendanceMetric label="Absent" value={daySummary.A} tone="absent" />
+          <AttendanceMetric label="Day LOP estimate" value={formatMoney(payrollImpact, state.settings.company.currency)} tone="payroll" />
         </div>
 
         <div className="attendance-toolbar department-style">
@@ -865,12 +875,11 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
 
         <div className="attendance-board">
           {grouped.map(group => {
-            const present = group.employees.filter(employee => day[employee.id] === "P").length;
             return (
               <section className="attendance-dept-group" key={group.name}>
                 <div className="attendance-dept-head">
                   <div><UsersRound size={16} /><h3>{group.name}</h3></div>
-                  <span>{present} present / {group.employees.length}</span>
+                  <span>{group.summary.P} present · {group.summary.A} absent · {group.summary.unmarked} unmarked</span>
                 </div>
                 <div className="attendance-table-head">
                   <span>Employee</span><span>Date</span><span>Punch in</span><span>Punch out</span><span>Hours</span><span>Status</span><span>Approval</span><span>Action</span>
@@ -906,7 +915,7 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
           })}
           {!grouped.length && <div className="empty">No attendance records match the filters.</div>}
         </div>
-        <p className="attendance-foot">Marked: <strong>{marked}</strong>/{active.length} - Present {statusCounts.P} - Half-day {statusCounts.H} - Leave {statusCounts.L} - Absent {statusCounts.A} - Payroll impact {formatMoney(payrollImpact, state.settings.company.currency)}</p>
+        <p className="attendance-foot">Marked: <strong>{daySummary.marked}</strong>/{daySummary.total} · Present {daySummary.P} · Half-day {daySummary.H} · Leave {daySummary.L} · Absent {daySummary.A} · Unmarked {daySummary.unmarked} · Day LOP estimate {formatMoney(payrollImpact, state.settings.company.currency)}</p>
       </div>
 
       <div className="panel">
@@ -926,11 +935,11 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
 
 function attendancePunch(employee: EmployeeRecord, code: AttendanceCode | undefined, workdayHours: number, halfDayHours: number) {
   void employee;
-  if (!code) return { in: "-", out: "-", hours: "-", status: "Unmarked", note: "Attendance has not been recorded yet." };
+  if (!code) return { in: "-", out: "-", hours: "-", status: "Unmarked", note: "Not recorded." };
   if (code === "L") return { in: "Leave", out: "-", hours: "0.00", status: "Leave", note: "Approved leave day." };
-  if (code === "A") return { in: "-", out: "-", hours: "0.00", status: "Absent", note: "Absence recorded. Review whether this should remain loss of pay." };
-  if (code === "H") return { in: "Marked", out: "-", hours: halfDayHours.toFixed(2), status: "Half-day", note: "Half-day attendance recorded. Review whether this is approved." };
-  return { in: "Marked", out: "-", hours: workdayHours.toFixed(2), status: "Present", note: "Attendance marked manually. Connect a clocking device/import for real punch times." };
+  if (code === "A") return { in: "-", out: "-", hours: "0.00", status: "Absent", note: "Recorded as absent." };
+  if (code === "H") return { in: "-", out: "-", hours: halfDayHours.toFixed(2), status: "Half-day", note: "Recorded as half-day." };
+  return { in: "-", out: "-", hours: workdayHours.toFixed(2), status: "Present", note: "Recorded as present." };
 }
 
 function AttendanceMetric({ label, value, tone }: { label: string; value: React.ReactNode; tone: "present" | "half" | "leave" | "absent" | "payroll" }) {
@@ -1065,7 +1074,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
 
   return <section className="stack">
     <div className="panel">
-      <div className="panel-head"><div><h3>Business Trips</h3><span>Requests, approval, allowances and open advances.</span></div></div>
+      <div className="panel-head"><div><h3>Business Trips</h3><span>Requests, costs and advances.</span></div></div>
       <div className="form-grid compact">
         <label>Employee<select id="trip-employee" name="trip-employee" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
         <label>Destination<input id="trip-destination" name="trip-destination" value={destination} onChange={event => setDestination(event.target.value)} placeholder="Doha, Riyadh, Dubai..." /></label>
@@ -1136,7 +1145,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
       <div><span>Paid</span><strong>{formatMoney(totals.paid, state.settings.company.currency)}</strong></div>
     </div>
     <div className="panel">
-      <div className="panel-head"><div><h3>Employee Expenses</h3><span>Submit, approve, reject and mark reimbursements paid.</span></div></div>
+      <div className="panel-head"><div><h3>Employee Expenses</h3><span>Submit and process employee expenses.</span></div></div>
       <div className="form-grid compact">
         <label>Employee<select id="expense-employee" name="expense-employee" value={employeeId} onChange={event => { setEmployeeId(event.target.value); setTripId(""); }}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
         <label>Trip<select id="expense-trip" name="expense-trip" value={tripId} onChange={event => setTripId(event.target.value)}><option value="">No trip link</option>{employeeTrips.map(trip => <option key={trip.id} value={trip.id}>{trip.destination} - {formatDate(trip.from)}</option>)}</select></label>
@@ -1420,9 +1429,9 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
     <section className="stack payroll-workspace">
       <div className="payroll-hero panel">
         <div>
-          <p className="section-label">Payroll command centre</p>
+          <p className="section-label">Payroll</p>
           <h3>{months[month - 1]} {year}</h3>
-          <span>Absences, half-days and unpaid leave refresh draft payslips automatically when payroll is rerun.</span>
+          <span>Rerun payroll after changing attendance or unpaid leave.</span>
         </div>
         <div className="inline-controls">
           <select value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
@@ -1513,7 +1522,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
 
   return <section className="stack">
     <div className="panel">
-      <div className="panel-head"><div><h3>EOS, Gratuity & Settlement</h3><span>Qatar gratuity, leave encashment, LOP, expenses and trip advances.</span></div></div>
+      <div className="panel-head"><div><h3>EOS, Gratuity & Settlement</h3><span>Gratuity, leave balance, expenses and outstanding advances.</span></div></div>
       {employee && summary && <div className="eos-mode-grid">
         <article><span>EOS</span><strong>{formatMoney(summary.netSettlement, state.settings.company.currency)}</strong><p>Final payable after reimbursements and advances.</p></article>
         <article><span>Gratuity</span><strong>{formatMoney(summary.gratuity, state.settings.company.currency)}</strong><p>Basic salary based service benefit estimate.</p></article>
@@ -1585,7 +1594,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
   return (
     <section className="stack">
       <div className="panel">
-        <div className="panel-head"><div><h3>HR Documents & Letters</h3><span>Branded A4 PDFs using the required HR template list.</span></div></div>
+        <div className="panel-head"><div><h3>HR Documents & Letters</h3><span>Create HR letters and PDFs.</span></div></div>
         <div className="document-grid">
           <label>Employee<select value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{active.map(item => <option key={item.id} value={item.id}>{item.fields["Employee Code"]} - {employeeName(item)}</option>)}</select></label>
           <label>Template<select value={template} onChange={event => setTemplate(event.target.value as PdfTemplate)}>{pdfTemplates.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
@@ -1595,7 +1604,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
         {employee && ["final_settlement", "gratuity_statement", "clearance_certificate"].includes(template) && <SettlementPreview employee={employee} state={state} />}
       </div>
       <div className="panel">
-        <div className="panel-head"><h3>Required HR PDF Formats</h3><span>{pdfTemplates.length} templates</span></div>
+        <div className="panel-head"><h3>Document Templates</h3><span>{pdfTemplates.length} templates</span></div>
         <div className="template-grid">{pdfTemplates.map(item => <div className="template-card" key={item.id}><FileText size={18} /><strong>{item.label}</strong><span>{item.category}</span></div>)}</div>
       </div>
       <div className="panel">
@@ -1712,7 +1721,7 @@ function SettingsPage({
   }
 
   async function rollbackBackup() {
-    if (!backendSession || !window.confirm("Roll back to the latest backup? Current workspace data will be replaced.")) return;
+    if (!backendSession || !window.confirm("Roll back to the latest backup? Current HR data will be replaced.")) return;
     setBackupBusy("rollback");
     try {
       const restored = await rollbackLatestBackendBackup(backendSession);
@@ -1799,7 +1808,7 @@ function BackendPanel({
       const { state: nextState, updatedAt } = await loadBackendState(state, backendSession);
       setState(hydrateState(nextState));
       setBackendSession(prev => prev && updatedAt ? { ...prev, stateUpdatedAt: updatedAt } : prev);
-      notify("Backend data loaded into the HR console.");
+      notify("HR data loaded.");
     } catch (error) {
       notify(errorMessage(error));
     } finally {
@@ -1814,7 +1823,7 @@ function BackendPanel({
       const saved = await saveBackendState(state, backendSession);
       setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: saved.updatedAt } : prev);
       setSavedAt(new Date(saved.updatedAt).toLocaleString());
-      notify("Full HR workspace saved to backend.");
+      notify("HR data saved.");
     } catch (error) {
       notify(errorMessage(error));
     } finally {
@@ -1858,7 +1867,7 @@ function BackendPanel({
     </div>
     <div className="backend-actions">
       <button className="primary" disabled={busy === "login"} onClick={login}>{busy === "login" ? "Connecting..." : "Login"}</button>
-      <button disabled={!backendSession || busy === "save"} onClick={saveAll}>{busy === "save" ? "Saving..." : "Save full workspace"}</button>
+      <button disabled={!backendSession || busy === "save"} onClick={saveAll}>{busy === "save" ? "Saving..." : "Save HR data"}</button>
       <button disabled={!backendSession || busy === "sync"} onClick={sync}>{busy === "sync" ? "Loading..." : "Load from backend"}</button>
       {backendSession && <button onClick={() => void disconnect()}>Disconnect</button>}
     </div>

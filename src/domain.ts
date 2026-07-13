@@ -112,6 +112,21 @@ export function attendanceStats(employees: EmployeeRecord[], attendance: HrState
   });
 }
 
+export function attendanceDaySummary(employees: EmployeeRecord[], day: Record<string, AttendanceCode> = {}) {
+  const summary = { total: 0, marked: 0, unmarked: 0, P: 0, H: 0, L: 0, A: 0 };
+  for (const employee of activeEmployees(employees)) {
+    summary.total += 1;
+    const code = day[employee.id];
+    if (code) {
+      summary[code] += 1;
+      summary.marked += 1;
+    } else {
+      summary.unmarked += 1;
+    }
+  }
+  return summary;
+}
+
 export function leaveBalanceSummary(state: HrState, employeeId: string, typeName: string, year = new Date().getFullYear()) {
   const type = state.settings.leaveTypes.find(item => item.name === typeName);
   const total = type?.days ?? 0;
