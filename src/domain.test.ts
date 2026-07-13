@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, markAllAttendance, serviceYears, setAttendance, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
-import { defaultState } from "./data";
+import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, finalizePayrollSlip, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, loanBalance, markAllAttendance, recordManualLoanRepayment, serviceYears, setAttendance, setLoanDeductionOverride, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
+import { defaultState, type EmployeeLoan } from "./data";
 
 describe("HR domain", () => {
   it("keeps leave balances, LOP payroll and settlement in sync", () => {
@@ -85,6 +85,49 @@ describe("HR domain", () => {
     expect(slip.lopDays).toBe(0.5);
     expect(slip.lopAmount).toBeCloseTo(clean.lopAmount + employeeSalary(employee).total / 60, 2);
     expect(slip.net).toBeLessThan(clean.net);
+  });
+
+  it("caps automatic loan deductions and posts each payroll repayment once", () => {
+    let state = defaultState();
+    const employee = state.employees[0];
+    const loan = testLoan(employee.id, { principal: 1_200, termMonths: 2 });
+    state = { ...state, loans: [loan], settings: { ...state.settings, loanDeductionCap: { type: "Amount", value: 500 } } };
+
+    const generated = createPayroll(state, 2026, 7).state;
+    const slip = generated.payroll.find(item => item.employeeId === employee.id)!;
+    expect(slip.loanDeduction).toBe(500);
+    expect(slip.net).toBe(slip.gross - slip.lopAmount - 500);
+    expect(loanBalance(generated, loan.id)).toBe(1_200);
+
+    const withStaleAugust = createPayroll(generated, 2026, 8).state;
+    const finalized = finalizePayrollSlip(withStaleAugust, slip.id);
+    expect(loanBalance(finalized, loan.id)).toBe(700);
+    expect(finalized.loanRepayments).toHaveLength(1);
+    expect(finalizePayrollSlip(finalized, slip.id).loanRepayments).toHaveLength(1);
+
+    const settledBeforeAugust = recordManualLoanRepayment(finalized, loan.id, 700, "Early settlement", "2026-07-31");
+    const augustSlip = settledBeforeAugust.payroll.find(item => item.employeeId === employee.id && item.month === 8)!;
+    const finalizedAugust = finalizePayrollSlip(settledBeforeAugust, augustSlip.id);
+    expect(finalizedAugust.payroll.find(item => item.id === augustSlip.id)?.loanDeduction).toBe(0);
+    expect(finalizedAugust.loanRepayments).toHaveLength(2);
+  });
+
+  it("supports manual payroll overrides and manual loan settlement", () => {
+    let state = defaultState();
+    const employee = state.employees[0];
+    const loan = testLoan(employee.id, { repaymentMode: "Manual", termMonths: 0, monthlyLimit: 250, principal: 1_000 });
+    state = { ...state, loans: [loan], settings: { ...state.settings, loanDeductionCap: { type: "Amount", value: 200 } } };
+    expect(createPayroll(state, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)?.loanDeduction).toBe(0);
+
+    state = setLoanDeductionOverride(state, loan.id, "2026-07", 400, "Approved settlement increase", true);
+    const generated = createPayroll(state, 2026, 7).state;
+    const slip = generated.payroll.find(item => item.employeeId === employee.id)!;
+    expect(slip.loanDeduction).toBe(400);
+
+    state = finalizePayrollSlip(generated, slip.id);
+    state = recordManualLoanRepayment(state, loan.id, 600, "Cash repayment", "2026-07-20");
+    expect(loanBalance(state, loan.id)).toBe(0);
+    expect(state.loans[0].status).toBe("Settled");
   });
 
   it("keeps overlapping leave attendance and splits cross-year leave balances", () => {
@@ -232,3 +275,23 @@ describe("HR domain", () => {
     expect(duplicateAttempt.employees).toHaveLength(beforeCount + 1);
   });
 });
+
+function testLoan(employeeId: string, patch: Partial<EmployeeLoan> = {}): EmployeeLoan {
+  return {
+    id: "LOAN-1",
+    employeeId,
+    type: "Salary advance",
+    principal: 1_200,
+    disbursementDate: "2026-06-20",
+    startPeriod: "2026-07",
+    repaymentMode: "Duration",
+    termMonths: 12,
+    monthlyLimit: 0,
+    status: "Active",
+    reference: "ADV-1",
+    notes: "",
+    createdOn: "2026-06-20",
+    deductionOverrides: {},
+    ...patch
+  };
+}

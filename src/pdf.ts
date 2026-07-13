@@ -55,7 +55,7 @@ export function savePayslipPdf(slip: PayrollSlip, employee: EmployeeRecord, sett
   nextY = table(doc, sectionTitle(doc, nextY + 7, "Pay calculation"), [["Earnings", "Amount", "Deductions", "Amount"]], [
     ["Basic", money(slip.basic, settings), "Loss of pay", money(slip.lopAmount, settings)],
     ["Housing", money(slip.housing, settings), "Deductions", money(slip.deductions, settings)],
-    ["Allowances", money(slip.allowances, settings), "", ""],
+    ["Allowances", money(slip.allowances, settings), "Loan deduction", money(slip.loanDeduction ?? 0, settings)],
     ["Overtime", money(slip.overtime, settings), "", ""],
     ["Bonus", money(slip.bonus, settings), "", ""],
     ["Gross", money(slip.gross, settings), "Net Pay", money(slip.net, settings)]
@@ -180,9 +180,9 @@ function leaveReport(state: HrState, settings: HrSettings, year: number) {
 function payrollRegister(state: HrState, settings: HrSettings, year: number, month: number) {
   const slips = state.payroll.filter(item => item.year === year && item.month === month);
   const { doc, y } = brandedDoc(settings, "Payroll Register", `${months[month - 1]} ${year}`);
-  table(doc, y, [["Code", "Employee", "Gross", "Deductions", "LOP", "Net", "Status"]], slips.map(slip => {
+  table(doc, y, [["Code", "Employee", "Gross", "Other deductions", "Loans", "LOP", "Net", "Status"]], slips.map(slip => {
     const employee = state.employees.find(row => row.id === slip.employeeId);
-    return [employee?.fields["Employee Code"] ?? "-", employeeName(employee), money(slip.gross, settings), money(slip.deductions, settings), money(slip.lopAmount, settings), money(slip.net, settings), slip.status];
+    return [employee?.fields["Employee Code"] ?? "-", employeeName(employee), money(slip.gross, settings), money(slip.deductions, settings), money(slip.loanDeduction ?? 0, settings), money(slip.lopAmount, settings), money(slip.net, settings), slip.status];
   }), 7);
   return finish(doc, settings, `Payroll-Register-${year}-${String(month).padStart(2, "0")}.pdf`);
 }
@@ -447,6 +447,8 @@ function provisionalSlip(employee: EmployeeRecord): PayrollSlip {
     overtime: salary.overtime,
     bonus: 0,
     deductions: 0,
+    loanDeduction: 0,
+    loanDeductions: [],
     lopDays: 0,
     lopAmount: 0,
     gross: salary.total,

@@ -279,6 +279,8 @@ function mapPayroll(item: BackendPayroll): PayrollSlip {
     overtime: 0,
     bonus,
     deductions,
+    loanDeduction: 0,
+    loanDeductions: [],
     lopDays: 0,
     lopAmount: 0,
     gross: Number(item.grossPay || base + allowances + bonus),

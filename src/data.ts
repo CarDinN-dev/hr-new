@@ -57,12 +57,49 @@ export type PayrollSlip = {
   overtime: number;
   bonus: number;
   deductions: number;
+  loanDeduction: number;
+  loanDeductions: PayrollLoanDeduction[];
   lopDays: number;
   lopAmount: number;
   gross: number;
   net: number;
   note: string;
   status: "Draft" | "Finalized";
+};
+
+export type LoanRepaymentMode = "Duration" | "Monthly limit" | "Manual";
+export type LoanStatus = "Draft" | "Active" | "Paused" | "Settled" | "Cancelled";
+export type LoanDeductionOverride = { amount: number; reason: string; approvedAboveLimit?: boolean; updatedOn: string };
+export type PayrollLoanDeduction = { loanId: string; amount: number };
+
+export type EmployeeLoan = {
+  id: string;
+  employeeId: string;
+  type: string;
+  principal: number;
+  disbursementDate: string;
+  startPeriod: string;
+  repaymentMode: LoanRepaymentMode;
+  termMonths: number;
+  monthlyLimit: number;
+  status: LoanStatus;
+  reference: string;
+  notes: string;
+  createdOn: string;
+  deductionOverrides: Record<string, LoanDeductionOverride>;
+};
+
+export type LoanRepayment = {
+  id: string;
+  loanId: string;
+  payrollId?: string;
+  year: number;
+  month: number;
+  amount: number;
+  source: "Payroll" | "Manual";
+  status: "Posted" | "Reversed";
+  note: string;
+  postedOn: string;
 };
 
 export type BusinessTrip = {
@@ -168,6 +205,7 @@ export type HrSettings = {
   documentSeq: number;
   workdayHours: number;
   halfDayHours: number;
+  loanDeductionCap: { type: "Amount" | "Percent"; value: number };
 };
 
 export type HrState = {
@@ -178,6 +216,8 @@ export type HrState = {
   payroll: PayrollSlip[];
   businessTrips: BusinessTrip[];
   expenses: EmployeeExpense[];
+  loans: EmployeeLoan[];
+  loanRepayments: LoanRepayment[];
   jobs: RecruitmentJob[];
   candidates: RecruitmentCandidate[];
   eosRecords: EosRecord[];
@@ -233,6 +273,7 @@ export const navItems = [
   "Leave",
   "Business Trips",
   "Expenses",
+  "Loans",
   "Payroll",
   "Recruitment",
   "EOS",
@@ -293,6 +334,8 @@ export function defaultState(): HrState {
     payroll: [],
     businessTrips: [],
     expenses: [],
+    loans: [],
+    loanRepayments: [],
     jobs,
     candidates: seedRecruitmentCandidates(jobs),
     eosRecords: [],
@@ -323,7 +366,8 @@ export function defaultState(): HrState {
       ],
       documentSeq: 12,
       workdayHours: 8,
-      halfDayHours: 4
+      halfDayHours: 4,
+      loanDeductionCap: { type: "Amount", value: 0 }
     }
   };
 }

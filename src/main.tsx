@@ -7,6 +7,7 @@ import {
   Download,
   Eye,
   FileText,
+  HandCoins,
   ImagePlus,
   LayoutDashboard,
   LogOut,
@@ -38,6 +39,7 @@ import {
   type EmployeeRecord,
   type EosRecord,
   type EmployeeExpense,
+  type EmployeeLoan,
   type HrState,
   type NavItem,
   type PayrollSlip,
@@ -54,6 +56,7 @@ import {
   attendanceStats,
   candidatePipeline,
   clearAttendanceDay,
+  companyLoanDeductionCap,
   decideAttendance,
   createEosRecord,
   createPayroll,
@@ -65,16 +68,24 @@ import {
   employeeSalary,
   eosSummary,
   expenseTotals,
+  finalizePayrollSlip,
   formatDate,
   formatMoney,
   hireCandidateAsEmployee,
   inclusiveDays,
   initials,
   leaveBalanceSummary,
+  loanBalance,
+  loanEstimatedEndPeriod,
+  loanEstimatedMonths,
+  loanScheduledAmount,
   markAllAttendance,
   nextEmployeeCode,
+  payrollLoanDeductions,
   recalcSlip,
+  recordManualLoanRepayment,
   setAttendance,
+  setLoanDeductionOverride,
   todayISO,
   tripTotal,
   upcomingBirthdays,
@@ -85,7 +96,6 @@ import {
   apiBaseUrl,
   backendSessionKey,
   createBackendBackup,
-  generateBackendPayroll,
   loadBackupStatus,
   loadBackendSession,
   loadBackendState,
@@ -113,6 +123,7 @@ const navIcon = {
   Leave: BriefcaseBusiness,
   "Business Trips": BriefcaseBusiness,
   Expenses: WalletCards,
+  Loans: HandCoins,
   Payroll: WalletCards,
   Recruitment: UserRoundPlus,
   EOS: FileText,
@@ -364,6 +375,7 @@ function App() {
           {nav === "Leave" && <Leave state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} />}
           {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
           {nav === "Expenses" && <Expenses state={state} setState={setState} notify={notify} />}
+          {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} isSuperAdmin={backendSession.role === "SUPER_ADMIN"} />}
           {nav === "Payroll" && <Payroll state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
@@ -552,6 +564,7 @@ function pageDescription(nav: NavItem) {
     Leave: "Leave requests and balances.",
     "Business Trips": "Trip requests, costs and advances.",
     Expenses: "Employee expenses and reimbursements.",
+    Loans: "Employee loans and payroll deductions.",
     Payroll: "Payslips and payroll exports.",
     Recruitment: "Job openings and candidates.",
     EOS: "End-of-service calculations and records.",
@@ -1179,6 +1192,175 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
   </section>;
 }
 
+function Loans({ state, setState, setModal, notify, close, isSuperAdmin }: {
+  state: HrState;
+  setState: React.Dispatch<React.SetStateAction<HrState>>;
+  setModal: (content: React.ReactNode) => void;
+  notify: (message: string) => void;
+  close: () => void;
+  isSuperAdmin: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
+  const [department, setDepartment] = useState("");
+  const loans = state.loans ?? [];
+  const active = loans.filter(loan => loan.status === "Active");
+  const outstanding = loans.filter(loan => loan.status === "Active" || loan.status === "Paused").reduce((sum, loan) => sum + loanBalance(state, loan.id), 0);
+  const now = new Date();
+  const scheduled = activeEmployees(state.employees).reduce((sum, employee) => sum + payrollLoanDeductions(state, employee, now.getFullYear(), now.getMonth() + 1, employeeSalary(employee).total).reduce((total, item) => total + item.amount, 0), 0);
+  const visible = loans.filter(loan => {
+    const employee = state.employees.find(item => item.id === loan.employeeId);
+    const text = `${employeeName(employee)} ${employee?.fields["Employee Code"] ?? ""} ${loan.type} ${loan.reference}`.toLowerCase();
+    return (!query || text.includes(query.toLowerCase())) && (!status || loan.status === status) && (!department || employee?.fields.Department === department);
+  });
+
+  function saveLoan(loan: EmployeeLoan) {
+    setState(prev => ({ ...prev, loans: prev.loans.some(item => item.id === loan.id) ? prev.loans.map(item => item.id === loan.id ? loan : item) : [...prev.loans, loan] }));
+    notify(loan.status === "Draft" ? "Loan draft saved." : "Loan activated.");
+  }
+
+  function updateStatus(loan: EmployeeLoan, nextStatus: EmployeeLoan["status"]) {
+    setState(prev => ({ ...prev, loans: prev.loans.map(item => item.id === loan.id ? { ...item, status: nextStatus } : item) }));
+    notify(`Loan ${nextStatus.toLowerCase()}.`);
+  }
+
+  function openLoanForm(loan?: EmployeeLoan) {
+    setModal(<LoanForm state={state} loan={loan} save={saveLoan} close={close} notify={notify} />);
+  }
+
+  return <section className="stack">
+    <div className="payroll-grid">
+      <div className="payroll-tile"><span>Active loans</span><strong>{active.length}</strong><p>{loans.filter(loan => loan.status === "Paused").length} paused</p></div>
+      <div className="payroll-tile"><span>Total outstanding</span><strong>{formatMoney(outstanding, state.settings.company.currency)}</strong><p>Active and paused loans</p></div>
+      <div className="payroll-tile"><span>This month</span><strong>{formatMoney(scheduled, state.settings.company.currency)}</strong><p>Scheduled payroll deduction</p></div>
+      <div className="payroll-tile"><span>Settled loans</span><strong>{loans.filter(loan => loan.status === "Settled").length}</strong><p>{state.loanRepayments.length} posted repayment(s)</p></div>
+    </div>
+    <div className="panel">
+      <div className="panel-head"><div><h3>Employee Loans</h3><span>Automatic plans, manual deductions and repayment history.</span></div><button className="primary" onClick={() => openLoanForm()}><HandCoins size={16} /> Add loan</button></div>
+      <div className="inline-controls">
+        <input aria-label="Search loans" placeholder="Search employee, loan type or reference..." value={query} onChange={event => setQuery(event.target.value)} />
+        <select aria-label="Loan status filter" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{["Draft", "Active", "Paused", "Settled", "Cancelled"].map(item => <option key={item}>{item}</option>)}</select>
+        <select aria-label="Loan department filter" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
+      </div>
+    </div>
+    <div className="panel">
+      <DataTable empty="No loans match the filters." columns={["Employee", "Loan", "Principal", "Monthly plan", "Paid", "Balance", "Plan", "Status", "Actions"]} rows={visible.map(loan => {
+        const employee = state.employees.find(item => item.id === loan.employeeId);
+        const balance = loanBalance(state, loan.id);
+        const scheduledAmount = loanScheduledAmount(loan);
+        const effectiveScheduledAmount = employee ? Math.min(scheduledAmount, companyLoanDeductionCap(state.settings, employeeSalary(employee).total)) : scheduledAmount;
+        const projectedMonths = loanEstimatedMonths(state, loan);
+        return [
+          <span key="employee"><strong>{employeeName(employee)}</strong><br /><small>{employee?.fields["Employee Code"] || "-"}</small></span>,
+          <span key="loan"><strong>{loan.type}</strong><br /><small>{loan.repaymentMode}</small></span>,
+          formatMoney(loan.principal, state.settings.company.currency),
+          loan.repaymentMode === "Manual" ? "Manual" : formatMoney(effectiveScheduledAmount, state.settings.company.currency),
+          formatMoney(loan.principal - balance, state.settings.company.currency),
+          formatMoney(balance, state.settings.company.currency),
+          <span key="plan">{loan.repaymentMode === "Manual" ? "Manual schedule" : `${projectedMonths} projected month(s)`}<br /><small>{loan.startPeriod} → {loanEstimatedEndPeriod(state, loan)}</small></span>,
+          <Badge key="status" value={loan.status} />,
+          <div className="row-actions" key="actions">
+            <button onClick={() => setModal(<LoanDetails state={state} loan={loan} close={close} />)}>View</button>
+            {loan.status === "Draft" && <><button onClick={() => openLoanForm(loan)}>Edit</button><button className="primary" onClick={() => updateStatus(loan, "Active")}>Activate</button></>}
+            {loan.status === "Active" && <button onClick={() => updateStatus(loan, "Paused")}>Pause</button>}
+            {loan.status === "Paused" && <button onClick={() => updateStatus(loan, "Active")}>Resume</button>}
+            {(loan.status === "Active" || loan.status === "Paused") && <><button onClick={() => setModal(<LoanDeductionForm state={state} loan={loan} setState={setState} notify={notify} close={close} isSuperAdmin={isSuperAdmin} />)}>Set deduction</button><button onClick={() => setModal(<LoanPaymentForm state={state} loan={loan} setState={setState} notify={notify} close={close} />)}>Record payment</button><button className="danger-outline" onClick={() => window.confirm("Cancel this loan? Future payroll deductions will stop.") && updateStatus(loan, "Cancelled")}>Cancel</button></>}
+          </div>
+        ];
+      })} />
+    </div>
+  </section>;
+}
+
+function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?: EmployeeLoan; save: (loan: EmployeeLoan) => void; close: () => void; notify: (message: string) => void }) {
+  const employees = activeEmployees(state.employees);
+  const [draft, setDraft] = useState<EmployeeLoan>(() => loan ? { ...loan, deductionOverrides: { ...loan.deductionOverrides } } : {
+    id: newId(), employeeId: employees[0]?.id || "", type: "Salary advance", principal: 0, disbursementDate: todayISO(), startPeriod: todayISO().slice(0, 7),
+    repaymentMode: "Duration", termMonths: 12, monthlyLimit: 0, status: "Draft", reference: "", notes: "", createdOn: todayISO(), deductionOverrides: {}
+  });
+  const installment = loanScheduledAmount(draft);
+  const selectedEmployee = employees.find(employee => employee.id === draft.employeeId);
+  const effectiveInstallment = Math.min(installment, selectedEmployee ? companyLoanDeductionCap(state.settings, employeeSalary(selectedEmployee).total) : Number.POSITIVE_INFINITY);
+  const projectedMonths = effectiveInstallment > 0 ? Math.ceil(draft.principal / effectiveInstallment) : 0;
+
+  function submit() {
+    if (!draft.employeeId || draft.principal <= 0 || !/^\d{4}-\d{2}$/.test(draft.startPeriod) || !draft.disbursementDate) return notify("Employee, principal, disbursement date and first payroll month are required.");
+    if (draft.repaymentMode === "Duration" && (draft.termMonths < 1 || draft.termMonths > 60)) return notify("Duration must be between 1 and 60 months.");
+    if (draft.repaymentMode === "Monthly limit" && draft.monthlyLimit <= 0) return notify("Enter a positive monthly deduction limit.");
+    save({ ...draft, principal: Math.round(draft.principal * 100) / 100, termMonths: draft.repaymentMode === "Duration" ? Math.round(draft.termMonths) : 0, monthlyLimit: Math.max(0, Math.round(draft.monthlyLimit * 100) / 100) });
+    close();
+  }
+
+  return <div><h2>{loan ? "Edit loan" : "Add loan"}</h2><div className="form-grid compact">
+    <label>Employee<select value={draft.employeeId} disabled={!!loan} onChange={event => setDraft(prev => ({ ...prev, employeeId: event.target.value }))}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
+    <label>Loan type<select value={draft.type} onChange={event => setDraft(prev => ({ ...prev, type: event.target.value }))}><option>Salary advance</option><option>Personal loan</option><option>Emergency loan</option><option>Other</option></select></label>
+    <label>Principal amount<input type="number" min="0.01" step="0.01" disabled={!!loan && loan.status !== "Draft"} value={draft.principal || ""} onChange={event => setDraft(prev => ({ ...prev, principal: Number(event.target.value) || 0 }))} /></label>
+    <label>Disbursement date<input type="date" value={draft.disbursementDate} onChange={event => setDraft(prev => ({ ...prev, disbursementDate: event.target.value }))} /></label>
+    <label>First payroll month<input type="month" value={draft.startPeriod} onChange={event => setDraft(prev => ({ ...prev, startPeriod: event.target.value }))} /></label>
+    <label>Repayment mode<select value={draft.repaymentMode} onChange={event => setDraft(prev => ({ ...prev, repaymentMode: event.target.value as EmployeeLoan["repaymentMode"] }))}><option>Duration</option><option>Monthly limit</option><option>Manual</option></select></label>
+    {draft.repaymentMode === "Duration" && <label>Duration in months<input type="number" min="1" max="60" value={draft.termMonths} onChange={event => setDraft(prev => ({ ...prev, termMonths: Number(event.target.value) || 0 }))} /></label>}
+    {draft.repaymentMode !== "Manual" && <label>{draft.repaymentMode === "Monthly limit" ? "Monthly deduction" : "Loan monthly limit (optional)"}<input type="number" min="0" step="0.01" value={draft.monthlyLimit || ""} onChange={event => setDraft(prev => ({ ...prev, monthlyLimit: Number(event.target.value) || 0 }))} /></label>}
+    <label>Reference<input value={draft.reference} onChange={event => setDraft(prev => ({ ...prev, reference: event.target.value }))} /></label>
+    <label>Status<select value={draft.status} onChange={event => setDraft(prev => ({ ...prev, status: event.target.value as EmployeeLoan["status"] }))}><option>Draft</option><option>Active</option></select></label>
+    <label className="wide">Notes<textarea value={draft.notes} onChange={event => setDraft(prev => ({ ...prev, notes: event.target.value }))} /></label>
+  </div><p className="muted">{draft.repaymentMode === "Manual" ? "HR will enter the deduction for each payroll month." : `Planned deduction after current limits: ${formatMoney(effectiveInstallment, state.settings.company.currency)} for about ${projectedMonths || "-"} month(s). The last installment adjusts to the remaining balance.`}</p><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Save loan</button></div></div>;
+}
+
+function LoanDeductionForm({ state, loan, setState, notify, close, isSuperAdmin }: { state: HrState; loan: EmployeeLoan; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; close: () => void; isSuperAdmin: boolean }) {
+  const defaultPeriod = todayISO().slice(0, 7);
+  const [period, setPeriod] = useState(defaultPeriod);
+  const [amount, setAmount] = useState(String(loan.deductionOverrides?.[defaultPeriod]?.amount ?? loanScheduledAmount(loan)));
+  const [reason, setReason] = useState(loan.deductionOverrides?.[defaultPeriod]?.reason ?? "");
+  const employee = state.employees.find(item => item.id === loan.employeeId)!;
+  const companyCap = companyLoanDeductionCap(state.settings, employeeSalary(employee).total);
+  const normalLimit = Math.min(loan.monthlyLimit > 0 ? loan.monthlyLimit : Number.POSITIVE_INFINITY, companyCap);
+  const balance = loanBalance(state, loan.id);
+
+  function saveOverride() {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value < 0 || value > balance) return notify("Deduction must be between zero and the remaining balance.");
+    if (!reason.trim()) return notify("Enter a reason for the manual deduction.");
+    const aboveLimit = value > normalLimit;
+    if (aboveLimit && !isSuperAdmin) return notify("Only a Super Admin can approve a deduction above the configured limit.");
+    setState(prev => setLoanDeductionOverride(prev, loan.id, period, value, reason, aboveLimit));
+    notify(value === 0 ? "Loan deduction skipped for this month." : "Loan deduction saved.");
+    close();
+  }
+
+  return <div><h2>Set loan deduction</h2><p className="muted">{employeeName(employee)} · Balance {formatMoney(balance, state.settings.company.currency)}</p><div className="form-grid compact">
+    <label>Payroll month<input type="month" value={period} onChange={event => { const next = event.target.value; setPeriod(next); setAmount(String(loan.deductionOverrides?.[next]?.amount ?? loanScheduledAmount(loan))); setReason(loan.deductionOverrides?.[next]?.reason ?? ""); }} /></label>
+    <label>Deduction amount<input type="number" min="0" max={balance} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></label>
+    <label className="wide">Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Required for the audit history" /></label>
+  </div><p className="muted">Normal limit: {Number.isFinite(normalLimit) ? formatMoney(normalLimit, state.settings.company.currency) : "No configured limit"}. Enter 0 to skip the month.{isSuperAdmin ? " Amounts above the limit are recorded as Super Admin overrides." : ""}</p><div className="modal-actions"><button onClick={() => { setState(prev => setLoanDeductionOverride(prev, loan.id, period, undefined)); notify("Automatic schedule restored."); close(); }}>Use schedule</button><button onClick={close}>Cancel</button><button className="primary" onClick={saveOverride}>Save deduction</button></div></div>;
+}
+
+function LoanPaymentForm({ state, loan, setState, notify, close }: { state: HrState; loan: EmployeeLoan; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; close: () => void }) {
+  const balance = loanBalance(state, loan.id);
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [note, setNote] = useState("");
+  function submit() {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0 || value > balance) return notify("Payment must be positive and cannot exceed the remaining balance.");
+    if (!note.trim()) return notify("Enter a payment reference or note.");
+    setState(prev => recordManualLoanRepayment(prev, loan.id, value, note, date));
+    notify("Manual loan payment posted.");
+    close();
+  }
+  return <div><h2>Record loan payment</h2><p className="muted">Remaining balance: {formatMoney(balance, state.settings.company.currency)}</p><div className="form-grid compact"><label>Amount<input type="number" min="0.01" max={balance} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></label><label>Payment date<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label className="wide">Reference or note<input value={note} onChange={event => setNote(event.target.value)} /></label></div><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Post payment</button></div></div>;
+}
+
+function LoanDetails({ state, loan, close }: { state: HrState; loan: EmployeeLoan; close: () => void }) {
+  const employee = state.employees.find(item => item.id === loan.employeeId);
+  const repayments = state.loanRepayments.filter(item => item.loanId === loan.id).slice().sort((a, b) => b.postedOn.localeCompare(a.postedOn));
+  const overrides = Object.entries(loan.deductionOverrides ?? {}).sort(([a], [b]) => b.localeCompare(a));
+  return <div><h2>{loan.type}</h2><p className="muted">{employeeName(employee)} · {loan.reference || "No reference"}</p><div className="settlement-preview"><div><span>Principal</span><strong>{formatMoney(loan.principal, state.settings.company.currency)}</strong></div><div><span>Balance</span><strong>{formatMoney(loanBalance(state, loan.id), state.settings.company.currency)}</strong></div><div><span>Projected end</span><strong>{loanEstimatedEndPeriod(state, loan)}</strong></div></div><h3>Repayment history</h3><DataTable empty="No repayments posted." columns={["Period", "Source", "Amount", "Status", "Note"]} rows={repayments.map(item => [monthKeyLabel(item.year, item.month), item.source, formatMoney(item.amount, state.settings.company.currency), <Badge key="status" value={item.status} />, item.note || "-"])} /><h3>Manual payroll entries</h3><DataTable empty="No manual payroll entries." columns={["Period", "Amount", "Reason", "Approval"]} rows={overrides.map(([period, item]) => [period, formatMoney(item.amount, state.settings.company.currency), item.reason, item.approvedAboveLimit ? "Super Admin" : "Within limit"])} /><div className="modal-actions"><button onClick={close}>Close</button></div></div>;
+}
+
+function monthKeyLabel(year: number, month: number) {
+  return `${months[month - 1]} ${year}`;
+}
+
 function Recruitment({ state, setState, notify, setNav }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; setNav: (nav: NavItem) => void }) {
   const [editingJobId, setEditingJobId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
@@ -1408,6 +1590,7 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
   const slips = state.payroll.filter(item => item.month === month && item.year === year);
   const payrollNet = slips.reduce((sum, slip) => sum + slip.net, 0);
   const payrollLop = slips.reduce((sum, slip) => sum + slip.lopAmount, 0);
+  const payrollLoans = slips.reduce((sum, slip) => sum + (slip.loanDeduction ?? 0), 0);
   const finalized = slips.filter(slip => slip.status === "Finalized").length;
   const warnings = payrollExportWarnings(state, slips);
 
@@ -1431,7 +1614,7 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
         <div>
           <p className="section-label">Payroll</p>
           <h3>{months[month - 1]} {year}</h3>
-          <span>Rerun payroll after changing attendance or unpaid leave.</span>
+          <span>Rerun payroll after changing attendance, unpaid leave or loan deductions.</span>
         </div>
         <div className="inline-controls">
           <select value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
@@ -1442,12 +1625,13 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
       <div className="payroll-grid">
         <div className="payroll-tile"><span>Net payable</span><strong>{formatMoney(payrollNet, state.settings.company.currency)}</strong><p>{slips.length} payslips</p></div>
         <div className="payroll-tile"><span>LOP impact</span><strong>{formatMoney(payrollLop, state.settings.company.currency)}</strong><p>From attendance and unpaid leave</p></div>
+        <div className="payroll-tile"><span>Loan deductions</span><strong>{formatMoney(payrollLoans, state.settings.company.currency)}</strong><p>Posted when payslips are finalized</p></div>
         <div className="payroll-tile"><span>Finalized</span><strong>{finalized}/{slips.length}</strong><p>Protected from refresh</p></div>
         <div className={`payroll-tile ${warnings.length ? "warn" : "ok"}`}><span>WPS readiness</span><strong>{warnings.length ? `${warnings.length} issue(s)` : "Ready"}</strong><p>{warnings[0] || "Bank sheet can be exported"}</p></div>
       </div>
       <div className="panel payroll-register">
         <div className="panel-head">
-          <div><h3>Payroll Register</h3><span>Draft slips update from attendance; finalized slips stay locked.</span></div>
+          <div><h3>Payroll Register</h3><span>Draft slips update from attendance and loans; finalized slips stay locked.</span></div>
           <div className="inline-controls">
           <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("payroll_register", state, year, month), "payroll_register"))}>Register PDF</button>
             <button disabled={!slips.length} onClick={exportPayrollSheet}>WPS sheet</button>
@@ -1456,7 +1640,7 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
         </div>
       <DataTable
         empty="No payslips for this period. Run payroll to create drafts."
-        columns={["Code", "Employee", "Gross", "LOP", "Net Pay", "Status", "Actions"]}
+        columns={["Code", "Employee", "Gross", "LOP", "Loans", "Net Pay", "Status", "Actions"]}
         rows={slips.map(slip => {
           const employee = state.employees.find(item => item.id === slip.employeeId);
           return [
@@ -1464,11 +1648,11 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
             employeeName(employee),
             formatMoney(slip.gross, state.settings.company.currency),
             `${slip.lopDays}d / ${formatMoney(slip.lopAmount, state.settings.company.currency)}`,
+            formatMoney(slip.loanDeduction ?? 0, state.settings.company.currency),
             formatMoney(slip.net, state.settings.company.currency),
             <Badge key="status" value={slip.status} />,
             employee && <div className="row-actions" key="actions">
-              <button onClick={() => setModal(<PayslipEditor slip={slip} close={close} save={next => setState(prev => ({ ...prev, payroll: prev.payroll.map(item => item.id === next.id ? next : item) }))} />)}>Adjust</button>
-              {slip.status === "Draft" && <button onClick={() => setState(prev => ({ ...prev, payroll: prev.payroll.map(item => item.id === slip.id ? { ...item, status: "Finalized" } : item) }))}>Finalize</button>}
+              {slip.status === "Draft" && <><button onClick={() => setModal(<PayslipEditor slip={slip} close={close} save={next => setState(prev => ({ ...prev, payroll: prev.payroll.map(item => item.id === next.id ? next : item) }))} />)}>Adjust</button><button onClick={() => setState(prev => finalizePayrollSlip(prev, slip.id))}>Finalize</button></>}
               <button onClick={() => void withPdf(pdf => savePdf(pdf.savePayslipPdf(slip, employee, state.settings), "payslip", employee.id))}>PDF</button>
             </div>
           ];
@@ -1486,6 +1670,7 @@ function PayslipEditor({ slip, save, close }: { slip: PayrollSlip; save: (slip: 
     <label>Bonus<input type="number" value={draft.bonus} onChange={event => setNumber("bonus", event.target.value)} /></label>
     <label>Overtime<input type="number" value={draft.overtime} onChange={event => setNumber("overtime", event.target.value)} /></label>
     <label>Deductions<input type="number" value={draft.deductions} onChange={event => setNumber("deductions", event.target.value)} /></label>
+    <label>Loan deductions<input type="number" value={draft.loanDeduction ?? 0} readOnly /><small>Set loan amounts from the Loans tab.</small></label>
     <label>LOP amount<input type="number" value={draft.lopAmount} onChange={event => setNumber("lopAmount", event.target.value)} /></label>
     <label className="wide">Note<input value={draft.note} onChange={event => setDraft(prev => ({ ...prev, note: event.target.value }))} /></label>
   </div><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={() => { save(draft); close(); }}>Save payslip</button></div></div>;
@@ -1675,6 +1860,8 @@ function SettingsPage({
   const [leaveTypes, setLeaveTypes] = useState(state.settings.leaveTypes.map(item => `${item.name}:${item.days}`).join("\n"));
   const [workdayHours, setWorkdayHours] = useState(state.settings.workdayHours);
   const [halfDayHours, setHalfDayHours] = useState(state.settings.halfDayHours);
+  const [loanCapType, setLoanCapType] = useState(state.settings.loanDeductionCap.type);
+  const [loanCapValue, setLoanCapValue] = useState(state.settings.loanDeductionCap.value);
   const [backupStatus, setBackupStatus] = useState<BackendBackupStatus | null>(null);
   const [backupBusy, setBackupBusy] = useState("");
 
@@ -1699,7 +1886,7 @@ function SettingsPage({
       const [name, days] = line.split(":");
       return { id: `lt-${index + 1}`, name: name.trim(), days: Number(days) || 0 };
     }).filter(item => item.name);
-    setState(prev => ({ ...prev, settings: { ...prev.settings, company, departments: nextDepartments, leaveTypes: nextLeaveTypes, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)) } }));
+    setState(prev => ({ ...prev, settings: { ...prev.settings, company, departments: nextDepartments, leaveTypes: nextLeaveTypes, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)), loanDeductionCap: { type: loanCapType, value: Math.max(0, loanCapType === "Percent" ? Math.min(100, loanCapValue) : loanCapValue) } } }));
     notify("Settings saved.");
   }
 
@@ -1762,7 +1949,8 @@ function SettingsPage({
     <div className="panel"><div className="panel-head"><h3>Departments</h3></div><textarea id="settings-departments" name="settings-departments" aria-label="Departments" value={departments} onChange={event => setDepartments(event.target.value)} /></div>
     <div className="panel"><div className="panel-head"><h3>Leave Types</h3><span>Format: Name:days</span></div><textarea id="settings-leave-types" name="settings-leave-types" aria-label="Leave types" value={leaveTypes} onChange={event => setLeaveTypes(event.target.value)} /></div>
     <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>
-    <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, account photo, department and leave type changes.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>
+    <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>
+    <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>
     <BackendPanel state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} />
   </section>;
 }
@@ -1831,20 +2019,11 @@ function BackendPanel({
     }
   }
 
-  async function runBackendPayroll() {
+  function runBackendPayroll() {
     if (!backendSession) return notify("Login to the backend first.");
-    setBusy("payroll");
-    try {
-      await generateBackendPayroll(backendSession, year, month);
-      const { state: nextState, updatedAt } = await loadBackendState(state, backendSession);
-      setState(hydrateState(nextState));
-      setBackendSession(prev => prev && updatedAt ? { ...prev, stateUpdatedAt: updatedAt } : prev);
-      notify(`Backend payroll generated for ${months[month - 1]} ${year}.`);
-    } catch (error) {
-      notify(errorMessage(error));
-    } finally {
-      setBusy("");
-    }
+    const result = createPayroll(state, year, month);
+    setState(result.state);
+    notify(result.created || result.updated ? `Payroll prepared for ${months[month - 1]} ${year}.` : "Payroll is already finalized or up to date.");
   }
 
   async function disconnect() {
@@ -1874,7 +2053,7 @@ function BackendPanel({
     <div className="backend-payroll">
       <select id="backend-payroll-month" name="backend-payroll-month" aria-label="Backend payroll month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
       <input id="backend-payroll-year" name="backend-payroll-year" aria-label="Backend payroll year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
-      <button disabled={!backendSession || busy === "payroll"} onClick={runBackendPayroll}>{busy === "payroll" ? "Generating..." : "Generate API payroll"}</button>
+      <button disabled={!backendSession} onClick={runBackendPayroll}>Run payroll</button>
     </div>
     <p className="muted">{savedAt ? `Last backend save: ${savedAt}. ` : "Backend autosave is enabled after login."}</p>
   </div>;
@@ -1952,9 +2131,11 @@ function hydrateState(value: Partial<HrState>): HrState {
     attendance: value.attendance ?? base.attendance,
     attendanceApprovals: value.attendanceApprovals ?? {},
     leaves: value.leaves ?? [],
-    payroll: value.payroll ?? [],
+    payroll: (value.payroll ?? []).map(item => ({ ...item, loanDeduction: item.loanDeduction ?? 0, loanDeductions: item.loanDeductions ?? [] })),
     businessTrips: value.businessTrips ?? [],
     expenses: value.expenses ?? [],
+    loans: (value.loans ?? []).map(item => ({ ...item, deductionOverrides: item.deductionOverrides ?? {} })),
+    loanRepayments: value.loanRepayments ?? [],
     jobs: value.jobs ?? base.jobs,
     candidates: value.candidates ?? base.candidates,
     eosRecords: value.eosRecords ?? [],
@@ -1967,7 +2148,8 @@ function hydrateState(value: Partial<HrState>): HrState {
       leaveTypes: value.settings?.leaveTypes ?? base.settings.leaveTypes,
       documentSeq: value.settings?.documentSeq ?? base.settings.documentSeq,
       workdayHours: value.settings?.workdayHours ?? base.settings.workdayHours,
-      halfDayHours: value.settings?.halfDayHours ?? base.settings.halfDayHours
+      halfDayHours: value.settings?.halfDayHours ?? base.settings.halfDayHours,
+      loanDeductionCap: value.settings?.loanDeductionCap ?? base.settings.loanDeductionCap
     }
   };
 }

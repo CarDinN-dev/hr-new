@@ -7,9 +7,9 @@ const sifRecord = ["Record Sequence", "Employee QID", "Employee Visa ID", "Emplo
 export function payrollSheetHtml(state: HrState, slips: PayrollSlip[]) {
   const rows = slips.map(slip => {
     const employee = state.employees.find(item => item.id === slip.employeeId);
-    return [employee?.fields["Employee Code"] ?? "", employeeName(employee), employee?.fields.Department ?? "", employee?.fields["Bank Code"] ?? "", employee?.fields["IBAN No."] || employee?.fields["Account No."] || "", slip.basic, slip.allowances + slip.housing + slip.overtime + slip.bonus, slip.deductions + slip.lopAmount, slip.net, slip.status];
+    return [employee?.fields["Employee Code"] ?? "", employeeName(employee), employee?.fields.Department ?? "", employee?.fields["Bank Code"] ?? "", employee?.fields["IBAN No."] || employee?.fields["Account No."] || "", slip.basic, slip.allowances + slip.housing + slip.overtime + slip.bonus, slip.deductions, slip.loanDeduction ?? 0, slip.lopAmount, slip.net, slip.status];
   });
-  return tableHtml(["Employee Code", "Employee", "Department", "Bank", "IBAN / Account", "Basic", "Extra Income", "Deductions", "Net Pay", "Status"], rows);
+  return tableHtml(["Employee Code", "Employee", "Department", "Bank", "IBAN / Account", "Basic", "Extra Income", "Other Deductions", "Loan Deduction", "LOP", "Net Pay", "Status"], rows);
 }
 
 export function sifCsv(state: HrState, slips: PayrollSlip[], year: number, month: number) {
@@ -45,7 +45,7 @@ export function sifCsv(state: HrState, slips: PayrollSlip[], year: number, month
       money(slip.basic),
       "0",
       money(slip.housing + slip.allowances + slip.overtime + slip.bonus),
-      money(slip.deductions + slip.lopAmount),
+      money(slip.deductions + (slip.loanDeduction ?? 0) + slip.lopAmount),
       "Normal Payment",
       employeeStats?.A || employeeStats?.H ? `Attendance LOP ${slip.lopDays} days` : ""
     ];

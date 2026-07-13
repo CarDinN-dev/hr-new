@@ -1,4 +1,4 @@
-import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollSlip, RecruitmentCandidate } from "./data";
+import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeLoan, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollLoanDeduction, PayrollSlip, RecruitmentCandidate } from "./data";
 import { candidateStages, createEmptyEmployee, months, normalizeEmployee } from "./data";
 import { newId } from "./id";
 
@@ -160,6 +160,7 @@ export function decideAttendance(state: HrState, date: string, employeeId: strin
 }
 
 export function deleteEmployee(state: HrState, employeeId: string) {
+  const loanIds = new Set((state.loans ?? []).filter(loan => loan.employeeId === employeeId).map(loan => loan.id));
   const attendance = Object.fromEntries(Object.entries(state.attendance).flatMap(([date, records]) => {
     const day = { ...records };
     delete day[employeeId];
@@ -180,6 +181,8 @@ export function deleteEmployee(state: HrState, employeeId: string) {
     payroll: state.payroll.filter(item => item.employeeId !== employeeId),
     businessTrips: state.businessTrips.filter(item => item.employeeId !== employeeId),
     expenses: state.expenses.filter(item => item.employeeId !== employeeId),
+    loans: (state.loans ?? []).filter(item => item.employeeId !== employeeId),
+    loanRepayments: (state.loanRepayments ?? []).filter(item => !loanIds.has(item.loanId)),
     eosRecords: state.eosRecords.filter(item => item.employeeId !== employeeId),
     documents: state.documents.filter(item => item.employeeId !== employeeId)
   };
@@ -252,7 +255,9 @@ export function createPayroll(state: HrState, year: number, month: number) {
     const lopAmount = Math.round((salary.total / 30) * lopDays * 100) / 100;
     const gross = salary.basic + salary.housing + salary.allowances + salary.overtime;
     const deductions = 0;
-    const net = Math.max(0, Math.round((gross - deductions - lopAmount) * 100) / 100);
+    const loanDeductions = payrollLoanDeductions(state, employee, year, month, gross - deductions - lopAmount);
+    const loanDeduction = roundMoney(loanDeductions.reduce((sum, item) => sum + item.amount, 0));
+    const net = Math.max(0, roundMoney(gross - deductions - lopAmount - loanDeduction));
 
     const slip: PayrollSlip = {
       id: existing?.id ?? newId(),
@@ -265,6 +270,8 @@ export function createPayroll(state: HrState, year: number, month: number) {
       overtime: salary.overtime,
       bonus: 0,
       deductions,
+      loanDeduction,
+      loanDeductions,
       lopDays,
       lopAmount,
       gross,
@@ -281,6 +288,121 @@ export function createPayroll(state: HrState, year: number, month: number) {
     ...newSlips
   ];
   return { state: { ...state, payroll }, created: newSlips.length - updated, updated };
+}
+
+export function loanBalance(state: HrState, loanId: string) {
+  const loan = (state.loans ?? []).find(item => item.id === loanId);
+  if (!loan) return 0;
+  const paid = (state.loanRepayments ?? [])
+    .filter(item => item.loanId === loanId && item.status === "Posted")
+    .reduce((sum, item) => sum + item.amount, 0);
+  return Math.max(0, roundMoney(loan.principal - paid));
+}
+
+export function loanScheduledAmount(loan: EmployeeLoan) {
+  if (loan.repaymentMode === "Manual") return 0;
+  const amount = loan.repaymentMode === "Duration"
+    ? loan.principal / Math.max(1, loan.termMonths)
+    : loan.monthlyLimit;
+  return roundMoney(loan.monthlyLimit > 0 ? Math.min(amount, loan.monthlyLimit) : amount);
+}
+
+export function loanEstimatedMonths(state: HrState, loan: EmployeeLoan) {
+  const employee = state.employees.find(item => item.id === loan.employeeId);
+  const installment = Math.min(loanScheduledAmount(loan), employee ? companyLoanDeductionCap(state.settings, employeeSalary(employee).total) : Number.POSITIVE_INFINITY);
+  return installment > 0 ? Math.ceil(loanBalance(state, loan.id) / installment) : 0;
+}
+
+export function loanEstimatedEndPeriod(state: HrState, loan: EmployeeLoan, fromPeriod = monthKey(new Date().getFullYear(), new Date().getMonth() + 1)) {
+  const monthsRemaining = loanEstimatedMonths(state, loan);
+  if (!monthsRemaining || !/^\d{4}-\d{2}$/.test(loan.startPeriod)) return "-";
+  return addPeriodMonths(loan.startPeriod > fromPeriod ? loan.startPeriod : fromPeriod, monthsRemaining - 1);
+}
+
+export function companyLoanDeductionCap(settings: HrSettings, grossPay: number) {
+  const value = Math.max(0, Number(settings.loanDeductionCap?.value) || 0);
+  if (!value) return Number.POSITIVE_INFINITY;
+  return settings.loanDeductionCap?.type === "Percent"
+    ? roundMoney(grossPay * Math.min(100, value) / 100)
+    : roundMoney(value);
+}
+
+export function payrollLoanDeductions(state: HrState, employee: EmployeeRecord, year: number, month: number, availablePay: number): PayrollLoanDeduction[] {
+  const period = monthKey(year, month);
+  const gross = employeeSalary(employee).total;
+  const companyCap = companyLoanDeductionCap(state.settings, gross);
+  let companyUsed = 0;
+  let payRemaining = Math.max(0, availablePay);
+  const deductions: PayrollLoanDeduction[] = [];
+  const loans = (state.loans ?? [])
+    .filter(loan => loan.employeeId === employee.id && loan.status === "Active" && loan.startPeriod <= period)
+    .slice()
+    .sort((a, b) => a.startPeriod.localeCompare(b.startPeriod) || a.createdOn.localeCompare(b.createdOn) || a.id.localeCompare(b.id));
+
+  for (const loan of loans) {
+    const balance = loanBalance(state, loan.id);
+    const override = loan.deductionOverrides?.[period];
+    let amount = override ? override.amount : loanScheduledAmount(loan);
+    if (amount <= 0 || balance <= 0 || payRemaining <= 0) continue;
+    if (!override?.approvedAboveLimit) {
+      if (loan.monthlyLimit > 0) amount = Math.min(amount, loan.monthlyLimit);
+      amount = Math.min(amount, Math.max(0, companyCap - companyUsed));
+    }
+    amount = roundMoney(Math.min(amount, balance, payRemaining));
+    if (!amount) continue;
+    deductions.push({ loanId: loan.id, amount });
+    companyUsed = roundMoney(companyUsed + amount);
+    payRemaining = roundMoney(payRemaining - amount);
+  }
+  return deductions;
+}
+
+export function setLoanDeductionOverride(state: HrState, loanId: string, period: string, amount: number | undefined, reason = "", approvedAboveLimit = false) {
+  if (!/^\d{4}-\d{2}$/.test(period)) return state;
+  return {
+    ...state,
+    loans: (state.loans ?? []).map(loan => {
+      if (loan.id !== loanId) return loan;
+      const deductionOverrides = { ...(loan.deductionOverrides ?? {}) };
+      if (amount === undefined) delete deductionOverrides[period];
+      else if (Number.isFinite(amount) && amount >= 0 && reason.trim()) deductionOverrides[period] = { amount: roundMoney(amount), reason: reason.trim(), approvedAboveLimit, updatedOn: todayISO() };
+      return { ...loan, deductionOverrides };
+    })
+  };
+}
+
+export function recordManualLoanRepayment(state: HrState, loanId: string, amount: number, note: string, postedOn = todayISO()) {
+  const date = parseDateParts(postedOn);
+  if (!date || amount <= 0 || amount > loanBalance(state, loanId)) return state;
+  const next = {
+    ...state,
+    loanRepayments: [...(state.loanRepayments ?? []), {
+      id: newId(), loanId, year: date.getFullYear(), month: date.getMonth() + 1, amount: roundMoney(amount), source: "Manual" as const,
+      status: "Posted" as const, note: note.trim(), postedOn
+    }]
+  };
+  return settleLoans(next);
+}
+
+export function finalizePayrollSlip(state: HrState, slipId: string) {
+  const slip = state.payroll.find(item => item.id === slipId);
+  if (!slip || slip.status === "Finalized") return state;
+  const employee = state.employees.find(item => item.id === slip.employeeId);
+  const loanDeductions = employee ? payrollLoanDeductions(state, employee, slip.year, slip.month, slip.gross - slip.deductions - slip.lopAmount) : [];
+  const finalSlip = recalcSlip({ ...slip, loanDeductions, loanDeduction: roundMoney(loanDeductions.reduce((sum, item) => sum + item.amount, 0)), status: "Finalized" });
+  const loanRepayments = [...(state.loanRepayments ?? [])];
+  for (const deduction of finalSlip.loanDeductions) {
+    if (loanRepayments.some(item => item.payrollId === finalSlip.id && item.loanId === deduction.loanId && item.status === "Posted")) continue;
+    loanRepayments.push({
+      id: newId(), loanId: deduction.loanId, payrollId: finalSlip.id, year: finalSlip.year, month: finalSlip.month, amount: deduction.amount,
+      source: "Payroll", status: "Posted", note: `Payroll ${monthKey(finalSlip.year, finalSlip.month)}`, postedOn: todayISO()
+    });
+  }
+  return settleLoans({
+    ...state,
+    loanRepayments,
+    payroll: state.payroll.map(item => item.id === slipId ? finalSlip : item)
+  });
 }
 
 export function settlementSummary(employee: EmployeeRecord, state: HrState, asOf = todayISO()) {
@@ -405,7 +527,7 @@ export function createEosRecord(state: HrState, employee: EmployeeRecord, asOf: 
 
 export function recalcSlip(slip: PayrollSlip) {
   const gross = slip.basic + slip.housing + slip.allowances + slip.overtime + slip.bonus;
-  const net = Math.max(0, Math.round((gross - slip.deductions - slip.lopAmount) * 100) / 100);
+  const net = Math.max(0, roundMoney(gross - slip.deductions - slip.lopAmount - (slip.loanDeduction ?? 0)));
   return { ...slip, gross, net };
 }
 
@@ -515,6 +637,19 @@ function numberField(value?: string) {
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function addPeriodMonths(period: string, offset: number) {
+  const [year, month] = period.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return monthKey(date.getUTCFullYear(), date.getUTCMonth() + 1);
+}
+
+function settleLoans(state: HrState) {
+  return {
+    ...state,
+    loans: (state.loans ?? []).map(loan => loan.status !== "Cancelled" && loanBalance(state, loan.id) <= 0 ? { ...loan, status: "Settled" as const } : loan)
+  };
 }
 
 function parseDateParts(value?: string) {
