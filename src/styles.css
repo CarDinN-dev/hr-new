@@ -5064,3 +5064,274 @@ summary {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Specificity bridge for the legacy workspace layer. */
+.app {
+  --navy: #121a2a;
+  --navy-2: #273550;
+  --red: #d61f4b;
+  --red-dark: #b7133c;
+  --teal: #087f68;
+  --violet: #6750a4;
+  --bg: #f2f5fa;
+  --panel: #ffffff;
+  --panel-2: #f7f9fc;
+  --line: #e1e7ef;
+  --line-strong: #cbd5e1;
+  --ink: #111827;
+  --muted: #667085;
+  --soft: #edf1f6;
+  --good: #067a57;
+  --good-bg: #e7f7f0;
+  --warn: #9a5b0b;
+  --warn-bg: #fff5da;
+  --info: #235fa4;
+  --info-bg: #eaf2ff;
+  --bad: #b4233b;
+  --bad-bg: #fdecef;
+  --sidebar-bg: #ffffff;
+  --sidebar-muted: #64748b;
+  --control-bg: #ffffff;
+  --accent-soft: #fbe9ef;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 28px rgba(16, 24, 40, 0.055);
+  --shadow-hover: 0 2px 5px rgba(16, 24, 40, 0.06), 0 16px 36px rgba(16, 24, 40, 0.09);
+  --ring: rgba(214, 31, 75, 0.2);
+  --radius: 14px;
+}
+
+:root[data-theme="dark"] .app {
+  --navy: #f5f7fb;
+  --navy-2: #d7deea;
+  --red: #ff5575;
+  --red-dark: #e43d61;
+  --teal: #4bd5b2;
+  --violet: #b4a2ff;
+  --bg: #080c13;
+  --panel: #101722;
+  --panel-2: #0d141e;
+  --line: #202c3c;
+  --line-strong: #344258;
+  --ink: #f3f6fb;
+  --muted: #9ba8ba;
+  --soft: #1a2432;
+  --good: #5bd8ad;
+  --good-bg: rgba(62, 196, 150, 0.14);
+  --warn: #f3c36d;
+  --warn-bg: rgba(224, 165, 57, 0.14);
+  --info: #8dbdff;
+  --info-bg: rgba(82, 145, 226, 0.14);
+  --bad: #ff8ba0;
+  --bad-bg: rgba(224, 72, 101, 0.14);
+  --sidebar-bg: #070b11;
+  --sidebar-muted: #95a2b5;
+  --control-bg: #141d29;
+  --accent-soft: rgba(255, 85, 117, 0.12);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 38px rgba(0, 0, 0, 0.18);
+  --shadow-hover: 0 2px 5px rgba(0, 0, 0, 0.35), 0 22px 48px rgba(0, 0, 0, 0.24);
+  --ring: rgba(255, 85, 117, 0.24);
+}
+
+.app .sidebar {
+  border-right-color: var(--line);
+  background: var(--sidebar-bg);
+  color: var(--ink);
+  box-shadow: 12px 0 34px rgba(9, 15, 25, 0.06);
+}
+
+.app .brand-block {
+  min-height: 84px;
+  padding: 1rem 0.9rem;
+  border-bottom-color: var(--line);
+}
+
+.app .brand-block strong,
+.app .account-label strong {
+  color: var(--ink);
+}
+
+.app .nav-list {
+  gap: 0.2rem;
+  padding: 0.8rem 0.65rem;
+}
+
+.app .nav-list button,
+:root[data-theme="dark"] .app .nav-list button {
+  min-height: 42px;
+  padding: 0.64rem 0.76rem;
+  border-radius: 10px;
+  color: var(--sidebar-muted);
+  font-size: 0.84rem;
+  font-weight: 680;
+}
+
+.app .nav-list button:hover:not(.active) {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.app .nav-list button.active,
+:root[data-theme="dark"] .app .nav-list button.active {
+  border-color: color-mix(in srgb, var(--red) 25%, transparent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--red);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.app .account-trigger,
+:root[data-theme="dark"] .app .account-trigger {
+  min-height: 54px;
+  padding: 0.55rem;
+  border-color: var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .app .brand-block strong,
+:root[data-theme="dark"] .app .account-label strong {
+  color: #ffffff;
+}
+
+.app .topbar,
+:root[data-theme="dark"] .app .topbar {
+  min-height: 84px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0.8rem clamp(1rem, 2.2vw, 2rem);
+  background: color-mix(in srgb, var(--panel) 91%, transparent);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+.app .page-title {
+  padding-left: 0;
+}
+
+.app .page-title::before {
+  display: none;
+}
+
+.app .page-title h1 {
+  font-size: clamp(1.32rem, 1.8vw, 1.58rem);
+  font-weight: 760;
+  letter-spacing: -0.025em;
+}
+
+.app .content {
+  width: min(1580px, 100%);
+  margin: 0 auto;
+  padding: clamp(1rem, 2vw, 1.55rem);
+}
+
+.app .panel,
+.app .metric,
+.app .report-card,
+.app .employee-card,
+.app .template-card,
+.app .pipeline-column,
+.app .candidate-card,
+.app .payroll-tile,
+.app details,
+.app .modal,
+:root[data-theme="dark"] .app .panel,
+:root[data-theme="dark"] .app .metric,
+:root[data-theme="dark"] .app .report-card,
+:root[data-theme="dark"] .app .employee-card,
+:root[data-theme="dark"] .app .template-card,
+:root[data-theme="dark"] .app .pipeline-column,
+:root[data-theme="dark"] .app .candidate-card,
+:root[data-theme="dark"] .app details,
+:root[data-theme="dark"] .app .modal {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.app .panel:hover,
+.app .metric:hover,
+.app .report-card:hover,
+.app .employee-card:hover,
+.app .template-card:hover,
+.app .payroll-tile:hover {
+  border-color: color-mix(in srgb, var(--line-strong) 82%, var(--red));
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+.app button,
+.app .button-like,
+:root[data-theme="dark"] .app button {
+  min-height: 42px;
+  border-radius: var(--radius-control);
+  font-size: 0.82rem;
+}
+
+.app button.primary,
+.app .primary,
+:root[data-theme="dark"] .app button.primary,
+:root[data-theme="dark"] .app .primary {
+  border-color: var(--red-dark);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--red) 92%, #ffffff), var(--red-dark));
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--red) 22%, transparent);
+}
+
+.app input,
+.app select,
+.app textarea,
+:root[data-theme="dark"] .app input,
+:root[data-theme="dark"] .app select,
+:root[data-theme="dark"] .app textarea {
+  min-height: 42px;
+  border-radius: var(--radius-control);
+  font-size: 0.86rem;
+}
+
+.app .table-wrap {
+  border-radius: 12px;
+}
+
+.app th,
+:root[data-theme="dark"] .app th {
+  background: var(--panel-2);
+  font-size: 0.64rem;
+  letter-spacing: 0.075em;
+}
+
+@media (max-width: 900px) {
+  .app .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(320px, 88vw);
+    height: 100dvh;
+    transform: translateX(-102%);
+  }
+
+  .app .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .app .topbar,
+  :root[data-theme="dark"] .app .topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .app .topbar,
+  :root[data-theme="dark"] .app .topbar {
+    min-height: 66px;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .app .content {
+    padding: 0.78rem;
+  }
+
+  .app button,
+  .app .button-like,
+  :root[data-theme="dark"] .app button,
+  .app input,
+  .app select {
+    min-height: 42px;
+  }
+}
