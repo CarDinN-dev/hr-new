@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultState } from "./data";
 import { createPayroll, markAllAttendance } from "./domain";
-import { sifCsv } from "./payrollExports";
+import { payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
 
 describe("payroll exports", () => {
   it("creates Qatar WPS SIF rows from payroll slips", () => {
@@ -16,5 +16,17 @@ describe("payroll exports", () => {
     expect(lines).toHaveLength(slips.length + 3);
     expect(lines[3]).toContain("Attendance LOP 1 days");
     expect(lines[3].split(",")[7]).toBe("30");
+  });
+
+  it("filters payroll sheet exports by department", () => {
+    let state = defaultState();
+    state = createPayroll(state, 2026, 7).state;
+    const slips = state.payroll.filter(item => item.year === 2026 && item.month === 7);
+    const department = state.employees[0].fields.Department;
+    const expected = slips.filter(slip => state.employees.find(employee => employee.id === slip.employeeId)?.fields.Department === department);
+    const filtered = payrollSlipsForDepartment(state, slips, department);
+
+    expect(filtered).toEqual(expected);
+    expect(payrollSheetHtml(state, filtered)).toContain(`>${department}<`);
   });
 });

@@ -50,7 +50,7 @@ import {
 } from "./data";
 import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
 import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } from "./attendanceSheet";
-import { payrollExportWarnings, payrollSheetHtml, sifCsv } from "./payrollExports";
+import { payrollExportWarnings, payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
 import {
   activeEmployees,
   attendanceDaySummary,
@@ -1595,7 +1595,13 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [department, setDepartment] = useState("");
   const slips = state.payroll.filter(item => item.month === month && item.year === year);
+  const payrollDepartments = [...new Set(slips.flatMap(slip => {
+    const department = state.employees.find(employee => employee.id === slip.employeeId)?.fields.Department;
+    return department ? [department] : [];
+  }))].sort();
+  const departmentSlips = department ? payrollSlipsForDepartment(state, slips, department) : [];
   const payrollNet = slips.reduce((sum, slip) => sum + slip.net, 0);
   const payrollLop = slips.reduce((sum, slip) => sum + slip.lopAmount, 0);
   const payrollLoans = slips.reduce((sum, slip) => sum + (slip.loanDeduction ?? 0), 0);
@@ -1610,6 +1616,11 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
 
   function exportPayrollSheet() {
     downloadBlob(new Blob([payrollSheetHtml(state, slips)], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Payroll-${year}-${String(month).padStart(2, "0")}.xls`);
+  }
+
+  function exportDepartmentPayrollSheet() {
+    const filenameDepartment = department.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "Department";
+    downloadBlob(new Blob([payrollSheetHtml(state, departmentSlips)], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Payroll-${filenameDepartment}-${year}-${String(month).padStart(2, "0")}.xls`);
   }
 
   function exportSifSheet() {
@@ -1641,9 +1652,11 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
         <div className="panel-head">
           <div><h3>Payroll Register</h3><span>Draft slips update from attendance and loans; finalized slips stay locked.</span></div>
           <div className="inline-controls">
-          <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("payroll_register", state, year, month), "payroll_register"))}>Register PDF</button>
+            <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("payroll_register", state, year, month), "payroll_register"))}>Register PDF</button>
             <button disabled={!slips.length} onClick={exportPayrollSheet}>WPS sheet</button>
             <button disabled={!slips.length} onClick={exportSifSheet}>SIF file</button>
+            <select id="payroll-export-department" name="payroll-export-department" aria-label="Payroll export department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">Select department</option>{payrollDepartments.map(item => <option key={item}>{item}</option>)}</select>
+            <button disabled={!departmentSlips.length} onClick={exportDepartmentPayrollSheet}>Department XLS</button>
           </div>
         </div>
       <DataTable

@@ -4,6 +4,10 @@ import { attendanceStats, employeeName } from "./domain";
 const sifHeader = ["Employer Establishment ID (Employer EID)", "File Creation Date", "File Creation Time", "Payer Establishment ID (Payer EID)", "Payer QID", "Payer Bank Short Name", "Payer IBAN", "Salary Year and Month", "Total Salaries", "Number of Records"];
 const sifRecord = ["Record Sequence", "Employee QID", "Employee Visa ID", "Employee Name", "Employee Bank Short Name", "Employee Account", "Salary Frequency", "Number of Working days", "Net Salary", "Basic Salary", "Extra hours", "Extra income", "Deductions", "Payment Type", "Notes / Comments"];
 
+export function payrollSlipsForDepartment(state: HrState, slips: PayrollSlip[], department: string) {
+  return slips.filter(slip => state.employees.find(employee => employee.id === slip.employeeId)?.fields.Department === department);
+}
+
 export function payrollSheetHtml(state: HrState, slips: PayrollSlip[]) {
   const rows = slips.map(slip => {
     const employee = state.employees.find(item => item.id === slip.employeeId);
