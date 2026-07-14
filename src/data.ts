@@ -288,6 +288,11 @@ export const statusOptions: EmployeeStatus[] = ["Active", "On Leave", "Resigned"
 export const candidateStages: CandidateStage[] = ["Applied", "Screening", "Interview", "Offer", "Hired", "Rejected"];
 export const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
+export function splitEmployeeName(fullName: string) {
+  const [firstName = "", ...lastName] = fullName.trim().split(/\s+/).filter(Boolean);
+  return { firstName, lastName: lastName.join(" ") };
+}
+
 export function createEmptyEmployee(code: string): EmployeeRecord {
   const fields = Object.fromEntries(employeeImportColumns.map(column => [column, ""]));
   return {
@@ -311,6 +316,7 @@ export function createEmptyEmployee(code: string): EmployeeRecord {
 export function normalizeEmployee(employee: EmployeeRecord): EmployeeRecord {
   const fields = { ...Object.fromEntries(employeeImportColumns.map(column => [column, ""])), ...employee.fields };
   const fullName = fields["Full Name"] || `${fields["First Name"]} ${fields["Last Name"]}`.trim();
+  const name = splitEmployeeName(fullName);
   const total = fields.Total || String(
     moneyField(fields.Basic) +
     moneyField(fields.HRA) +
@@ -320,7 +326,16 @@ export function normalizeEmployee(employee: EmployeeRecord): EmployeeRecord {
     moneyField(fields["Overtime Amount"])
   );
 
-  return { ...employee, fields: { ...fields, "Full Name": fullName, Total: total } };
+  return {
+    ...employee,
+    fields: {
+      ...fields,
+      "First Name": fields["First Name"] || name.firstName,
+      "Last Name": fields["Last Name"] || name.lastName,
+      "Full Name": fullName,
+      Total: total
+    }
+  };
 }
 
 export function defaultState(): HrState {

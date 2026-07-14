@@ -33,6 +33,7 @@ import {
   navItems,
   pdfTemplates,
   reportTemplates,
+  splitEmployeeName,
   statusOptions,
   type AttendanceCode,
   type BusinessTrip,
@@ -116,6 +117,22 @@ import "./styles.css";
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
 type Theme = "light" | "dark";
+const employeeFieldOptions: Record<string, readonly string[]> = {
+  "Employee Category": ["Staff", "Management", "Worker", "Intern"],
+  "Work Shift": ["Standard day", "Morning shift", "Evening shift", "Night shift", "Rotating shift"],
+  "Hire Type": ["Direct", "Recruitment", "Transfer", "Contract"],
+  Gender: ["Male", "Female", "Other", "Prefer not to say"],
+  "Marital Status": ["Single", "Married", "Divorced", "Widowed"],
+  "Family Status (Yes/No)": ["Yes", "No"],
+  "Blood Group": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+  "Visa Type": ["Work residence", "Family residence", "Business visa", "Visit visa", "Other"],
+  "Salary Pay Type": ["Bank Transfer", "Cash", "Cheque"],
+  "Company Accommodation": ["Yes", "No"],
+  "Company Transportation": ["Yes", "No"],
+  "Overtime Eligible": ["Yes", "No"],
+  "Company Food": ["Yes", "No"],
+  "Company Fuel Card": ["Yes", "No"]
+};
 const LoginScene = React.lazy(() => import("./LoginScene"));
 const navIcon = {
   Dashboard: LayoutDashboard,
@@ -708,7 +725,16 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
   notify: (message: string) => void;
 }) {
   const [draft, setDraft] = useState<EmployeeRecord>(() => structuredClone(employee ?? createEmptyEmployee(nextEmployeeCode(state.employees))));
-  const setField = (field: string, value: string) => setDraft(prev => ({ ...prev, fields: { ...prev.fields, [field]: value } }));
+  const setField = (field: string, value: string) => setDraft(prev => ({
+    ...prev,
+    fields: {
+      ...prev.fields,
+      [field]: value,
+      ...(field === "Full Name"
+        ? { "First Name": splitEmployeeName(value).firstName, "Last Name": splitEmployeeName(value).lastName }
+        : {})
+    }
+  }));
 
   async function updateEmployeePhoto(file?: File) {
     if (!file) return;
@@ -752,15 +778,17 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
       <div className="employee-form">
         {employeeProfileSections.map((section, index) => (
           <details key={section.title} open={index < 3}>
-            <summary>{section.title}</summary>
-            <div className="form-grid">
-              {section.fields.map(field => (
-                <label key={field}>{field}
-                  {field === "Department"
-                    ? <select value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
+              <summary>{section.title}</summary>
+              <div className="form-grid">
+              {section.fields.map(field => {
+                const options = field === "Department" ? state.settings.departments : employeeFieldOptions[field];
+                const values = options && Array.from(new Set([...options, draft.fields[field] || ""])).filter(Boolean);
+                return <label key={field}>{field}
+                  {values
+                    ? <select value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
                     : <input type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
-                </label>
-              ))}
+                </label>;
+              })}
             </div>
           </details>
         ))}

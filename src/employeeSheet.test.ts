@@ -14,6 +14,8 @@ describe("employee sheet import", () => {
     expect(added.added).toBe(1);
     expect(updated.updated).toBe(1);
     expect(employee?.fields.Department).toBe("Sales");
+    expect(employee?.fields["First Name"]).toBe("Test");
+    expect(employee?.fields["Last Name"]).toBe("User");
   });
 
   it("keeps quoted CSV commas and newlines inside one employee row", () => {
