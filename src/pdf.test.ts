@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { defaultState } from "./data";
+import { testState } from "./testState";
 import { saveEmployeeProfilePdf, savePayslipPdf } from "./pdf";
 import { createPayroll } from "./domain";
 import { dataUrlBlob } from "./dataUrl";
@@ -10,7 +10,7 @@ beforeAll(() => {
 
 describe("professional PDF output", () => {
   it("generates profile and payslip files with usable data", () => {
-    const state = defaultState();
+    const state = testState();
     const employee = state.employees[0];
     const payroll = createPayroll(state, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)!;
     const profile = saveEmployeeProfilePdf(employee, state.settings);
@@ -23,5 +23,10 @@ describe("professional PDF output", () => {
     expect(profile.sizeBytes).toBeGreaterThan(5_000);
     expect(payslip.filename).toContain("2026-07");
     expect(payslip.sizeBytes).toBeGreaterThan(5_000);
+  });
+
+  it("rejects executable or mislabeled saved document data", () => {
+    expect(() => dataUrlBlob(`data:text/html;base64,${btoa("<script>alert(1)</script>")}`)).toThrow("Saved PDF data is invalid.");
+    expect(() => dataUrlBlob(`data:application/pdf;base64,${btoa("not a pdf")}`)).toThrow("Saved PDF data is invalid.");
   });
 });

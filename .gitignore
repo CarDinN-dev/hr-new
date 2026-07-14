@@ -12,6 +12,12 @@ vite-dev.log
 *.log
 *.pid
 *.pdf
+*.key
+*.pem
+*.p12
+*.pfx
+*.sql.gz
+*.dump
 playwright-report
 test-results
 .cloudflare-tunnel-url

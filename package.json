@@ -19,14 +19,12 @@
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "read-excel-file": "^5.8.8",
-    "three": "^0.185.1"
+    "read-excel-file": "^5.8.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^26.1.0",
     "typescript": "^5.7.2",

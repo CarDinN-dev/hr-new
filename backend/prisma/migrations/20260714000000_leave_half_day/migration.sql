@@ -1,0 +1,2 @@
+ALTER TABLE "LeaveRequest"
+ADD COLUMN "isHalfDay" BOOLEAN NOT NULL DEFAULT false;

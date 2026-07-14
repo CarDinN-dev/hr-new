@@ -1,5 +1,5 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ReviewStatus, Role } from '@prisma/client';
 import { hasHrAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
@@ -26,6 +26,8 @@ export class PerformanceReviewsService {
     await this.ensureEmployee(dto.employeeId);
     await this.ensureEmployee(reviewerId);
     await this.assertCanReview(dto.employeeId, user);
+    this.assertReviewPeriod(dto.reviewPeriodStart, dto.reviewPeriodEnd);
+    this.assertManagerStatus(dto.status, user);
     return this.prisma.performanceReview.create({
       data: { ...dto, reviewerId },
       include: reviewInclude,
@@ -64,6 +66,16 @@ export class PerformanceReviewsService {
   async update(id: string, dto: UpdatePerformanceReviewDto, user: RequestUser) {
     const review = await this.ensureExists(id);
     await this.assertCanReview(review.employeeId, user);
+    if (!hasHrAccess(user.role) && review.reviewerId !== user.employeeId) {
+      throw new ForbiddenException('Managers can only update reviews they created');
+    }
+    if (
+      !hasHrAccess(user.role)
+      && review.status !== ReviewStatus.DRAFT
+      && review.status !== ReviewStatus.SUBMITTED
+    ) {
+      throw new ForbiddenException('Acknowledged or closed reviews can only be changed by HR');
+    }
     if (dto.employeeId) {
       await this.ensureEmployee(dto.employeeId);
       await this.assertCanReview(dto.employeeId, user);
@@ -79,6 +91,12 @@ export class PerformanceReviewsService {
     } else if (reviewerId) {
       await this.ensureEmployee(reviewerId);
     }
+
+    this.assertReviewPeriod(
+      dto.reviewPeriodStart ?? review.reviewPeriodStart,
+      dto.reviewPeriodEnd ?? review.reviewPeriodEnd,
+    );
+    this.assertManagerStatus(dto.status, user);
 
     return this.prisma.performanceReview.update({
       where: { id },
@@ -127,5 +145,20 @@ export class PerformanceReviewsService {
     const review = await this.prisma.performanceReview.findFirst({ where: { id, deletedAt: null } });
     if (!review) throw new NotFoundException('Performance review not found');
     return review;
+  }
+
+  private assertReviewPeriod(start: Date, end: Date) {
+    if (end < start) throw new BadRequestException('reviewPeriodEnd must be on or after reviewPeriodStart');
+  }
+
+  private assertManagerStatus(status: ReviewStatus | undefined, user: RequestUser) {
+    if (
+      !hasHrAccess(user.role)
+      && status
+      && status !== ReviewStatus.DRAFT
+      && status !== ReviewStatus.SUBMITTED
+    ) {
+      throw new ForbiddenException('Managers can only save draft or submitted reviews');
+    }
   }
 }

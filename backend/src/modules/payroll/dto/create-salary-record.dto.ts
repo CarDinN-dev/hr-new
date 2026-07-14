@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsDate, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export class CreateSalaryRecordDto {
   @ApiProperty()
@@ -11,6 +11,7 @@ export class CreateSalaryRecordDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   baseSalary: number;
 
   @ApiPropertyOptional({ example: 5000 })
@@ -18,6 +19,7 @@ export class CreateSalaryRecordDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   allowances?: number;
 
   @ApiPropertyOptional({ example: 1000 })
@@ -25,6 +27,7 @@ export class CreateSalaryRecordDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   deductions?: number;
 
   @ApiPropertyOptional({ example: 2500 })
@@ -32,6 +35,7 @@ export class CreateSalaryRecordDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   bonuses?: number;
 
   @ApiPropertyOptional({ example: 10 })
@@ -39,6 +43,7 @@ export class CreateSalaryRecordDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(100)
   taxRate?: number;
 
   @ApiProperty({ example: '2026-01-01' })

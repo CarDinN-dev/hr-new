@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { listRecords, softDelete } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateJobPositionDto } from './dto/create-job-position.dto';
@@ -7,7 +7,7 @@ import { UpdateJobPositionDto } from './dto/update-job-position.dto';
 
 const positionInclude = {
   department: true,
-  _count: { select: { employees: true } },
+  _count: { select: { employees: { where: { deletedAt: null } } } },
 };
 
 @Injectable()
@@ -46,6 +46,11 @@ export class JobPositionsService {
 
   async remove(id: string) {
     await this.findById(id);
+    const employee = await this.prisma.employee.findFirst({
+      where: { positionId: id, deletedAt: null },
+      select: { id: true },
+    });
+    if (employee) throw new BadRequestException('Reassign active employees before deleting this job position');
     return softDelete(this.prisma.jobPosition, id, 'Job position');
   }
 

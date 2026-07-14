@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
+import { PrismaService } from '../../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -11,15 +12,21 @@ import { JwtPayload } from './types/jwt-payload.type';
 
 @Injectable()
 export class AuthService {
-  private readonly loginAttempts = new Map<string, { count: number; resetAt: number }>();
   private readonly loginWindowMs = 15 * 60 * 1000;
-  private readonly maxLoginEntries = 10_000;
+  private readonly dummyPasswordHash: Promise<string>;
 
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) {}
+    private readonly prisma: PrismaService,
+  ) {
+    const saltRounds = Number(this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12));
+    if (!Number.isInteger(saltRounds) || saltRounds < 10 || saltRounds > 15) {
+      throw new Error('BCRYPT_SALT_ROUNDS must be an integer between 10 and 15.');
+    }
+    this.dummyPasswordHash = bcrypt.hash(randomBytes(32).toString('hex'), saltRounds);
+  }
 
   async register(dto: RegisterDto) {
     const user = await this.usersService.createUser(dto.email, dto.password, Role.EMPLOYEE);
@@ -40,33 +47,34 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, ip = 'unknown') {
-    this.checkLoginLimit(ip, dto.email);
+    await this.checkLoginLimit(ip, dto.email);
 
     const user = await this.usersService.findByEmail(dto.email);
-    if (!user || user.deletedAt || !user.isActive) {
-      this.recordFailedLogin(ip, dto.email);
+    const activeUser = user && !user.deletedAt && user.isActive && !user.employee?.deletedAt ? user : null;
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      activeUser?.passwordHash ?? (await this.dummyPasswordHash),
+    );
+    if (!activeUser || !passwordMatches) {
+      await this.recordFailedLogin(ip, dto.email);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!passwordMatches) {
-      this.recordFailedLogin(ip, dto.email);
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    this.loginAttempts.delete(this.accountLoginKey(dto.email));
-    const safeUser = this.usersService.toSafeUser(user);
+    await this.prisma.authThrottle.deleteMany({
+      where: { key: { in: [this.accountIpLoginKey(ip, dto.email), this.accountLoginKey(dto.email)] } },
+    });
+    const safeUser = this.usersService.toSafeUser(activeUser);
     const csrfToken = this.csrfToken();
     return {
       user: safeUser,
       accessToken: this.signToken({
-        sub: user.id,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions,
+        sub: activeUser.id,
+        email: activeUser.email,
+        role: activeUser.role,
+        permissions: activeUser.permissions,
         csrfToken,
-        sessionVersion: user.sessionVersion,
-        employeeId: user.employee?.id ?? null,
+        sessionVersion: activeUser.sessionVersion,
+        employeeId: activeUser.employee?.id ?? null,
       }),
       csrfToken,
     };
@@ -76,50 +84,65 @@ export class AuthService {
     return randomBytes(32).toString('base64url');
   }
 
-  private checkLoginLimit(ip: string, email: string) {
-    this.pruneLoginAttempts();
-    const accountRecord = this.loginAttempts.get(this.accountLoginKey(email));
-    const ipRecord = this.loginAttempts.get(this.ipLoginKey(ip));
+  private async checkLoginLimit(ip: string, email: string) {
+    const now = new Date();
+    const [accountIpRecord, accountRecord, ipRecord] = await Promise.all([
+      this.prisma.authThrottle.findUnique({ where: { key: this.accountIpLoginKey(ip, email) } }),
+      this.prisma.authThrottle.findUnique({ where: { key: this.accountLoginKey(email) } }),
+      this.prisma.authThrottle.findUnique({ where: { key: this.ipLoginKey(ip) } }),
+    ]);
     if (
-      (accountRecord && accountRecord.resetAt > Date.now() && accountRecord.count >= 10) ||
-      (ipRecord && ipRecord.resetAt > Date.now() && ipRecord.count >= 50)
+      (accountIpRecord && accountIpRecord.resetAt > now && accountIpRecord.count >= 10) ||
+      (accountRecord && accountRecord.resetAt > now && accountRecord.count >= 20) ||
+      (ipRecord && ipRecord.resetAt > now && ipRecord.count >= 50)
     ) {
       throw new HttpException('Too many login attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
     }
   }
 
-  private recordFailedLogin(ip: string, email: string) {
-    this.incrementLoginAttempt(this.accountLoginKey(email));
-    this.incrementLoginAttempt(this.ipLoginKey(ip));
+  private async recordFailedLogin(ip: string, email: string) {
+    await Promise.all([
+      this.incrementLoginAttempt(this.accountIpLoginKey(ip, email)),
+      this.incrementLoginAttempt(this.accountLoginKey(email)),
+      this.incrementLoginAttempt(this.ipLoginKey(ip)),
+    ]);
+    await this.prisma.authThrottle.deleteMany({ where: { resetAt: { lte: new Date() } } });
   }
 
-  private incrementLoginAttempt(key: string) {
-    const now = Date.now();
-    const current = this.loginAttempts.get(key);
-    const record = current && current.resetAt > now ? current : { count: 0, resetAt: now + this.loginWindowMs };
-    record.count += 1;
-    this.loginAttempts.set(key, record);
-    this.pruneLoginAttempts();
+  private async incrementLoginAttempt(key: string) {
+    const now = new Date();
+    const resetAt = new Date(now.getTime() + this.loginWindowMs);
+    await this.prisma.$executeRaw`
+      INSERT INTO "AuthThrottle" ("key", "count", "resetAt", "updatedAt")
+      VALUES (${key}, 1, ${resetAt}, NOW())
+      ON CONFLICT ("key") DO UPDATE SET
+        "count" = CASE
+          WHEN "AuthThrottle"."resetAt" <= ${now} THEN 1
+          ELSE "AuthThrottle"."count" + 1
+        END,
+        "resetAt" = CASE
+          WHEN "AuthThrottle"."resetAt" <= ${now} THEN ${resetAt}
+          ELSE "AuthThrottle"."resetAt"
+        END,
+        "updatedAt" = NOW()
+    `;
   }
 
-  private accountLoginKey(email: string) {
-    return `account:${email.toLowerCase()}`;
+  private accountIpLoginKey(ip: string, email: string) {
+    return this.throttleKey('account-ip', `${email.toLowerCase()}\0${ip}`);
   }
 
   private ipLoginKey(ip: string) {
-    return `ip:${ip}`;
+    return this.throttleKey('ip', ip);
   }
 
-  private pruneLoginAttempts() {
-    const now = Date.now();
-    for (const [key, record] of this.loginAttempts) {
-      if (record.resetAt <= now) this.loginAttempts.delete(key);
-    }
-    while (this.loginAttempts.size > this.maxLoginEntries) {
-      const oldestKey = this.loginAttempts.keys().next().value as string | undefined;
-      if (!oldestKey) break;
-      this.loginAttempts.delete(oldestKey);
-    }
+  private accountLoginKey(email: string) {
+    return this.throttleKey('account', email.toLowerCase());
+  }
+
+  private throttleKey(kind: string, value: string) {
+    const secret = this.configService.getOrThrow<string>('JWT_SECRET');
+    return `${kind}:${createHmac('sha256', secret).update(value).digest('hex')}`;
   }
 
   async logout(userId: string) {
@@ -130,6 +153,7 @@ export class AuthService {
   private signToken(payload: JwtPayload): string {
     return this.jwtService.sign(payload, {
       secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+      algorithm: 'HS256',
       expiresIn: this.configService.get<string>('JWT_EXPIRES_IN', '1d') as JwtSignOptions['expiresIn'],
     });
   }

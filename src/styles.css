@@ -59,6 +59,62 @@
   --ring: rgba(255, 49, 80, 0.22);
 }
 
+.workspace-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: var(--bg);
+}
+
+.workspace-gate-card {
+  width: min(100%, 30rem);
+  padding: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.workspace-gate-card svg {
+  color: var(--red);
+}
+
+.workspace-gate-card h1 {
+  margin: 0.8rem 0 0.45rem;
+}
+
+.workspace-gate-card p {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+}
+
+.sync-alert {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--bad) 38%, var(--line));
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.sync-alert button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .sync-alert {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -3256,10 +3312,116 @@ summary {
   inset: 0;
 }
 
-.login-scene canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
+.login-scene {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 58% 40%, rgba(214, 31, 75, 0.27), transparent 22rem),
+    radial-gradient(circle at 78% 70%, rgba(54, 214, 196, 0.12), transparent 18rem),
+    linear-gradient(145deg, #111319, #07090d 68%);
+}
+
+.login-scene-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.2;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at 58% 43%, #000 0 20%, transparent 68%);
+  transform: perspective(500px) rotateX(58deg) scale(1.5) translateY(10%);
+}
+
+.login-scene-core {
+  position: absolute;
+  top: 41%;
+  left: 60%;
+  width: clamp(7.5rem, 13vw, 11rem);
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 26%;
+  background: linear-gradient(145deg, rgba(255, 93, 123, 0.86), rgba(85, 18, 41, 0.92));
+  box-shadow: inset 0 0 38px rgba(255, 255, 255, 0.16), 0 32px 80px rgba(0, 0, 0, 0.46), 0 0 70px rgba(214, 31, 75, 0.18);
+  transform: translate(-50%, -50%) rotate(45deg);
+  animation: login-core-float 8s ease-in-out infinite;
+}
+
+.login-scene-core::before,
+.login-scene-core::after {
+  content: "";
+  position: absolute;
+  inset: 18%;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 30%;
+}
+
+.login-scene-core::after {
+  inset: 35%;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 26px rgba(255, 255, 255, 0.42);
+}
+
+.login-scene-core span {
+  position: absolute;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f8f7f8;
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.74);
+}
+
+.login-scene-core span:nth-child(1) { top: 15%; left: 50%; }
+.login-scene-core span:nth-child(2) { right: 16%; bottom: 27%; }
+.login-scene-core span:nth-child(3) { bottom: 14%; left: 25%; }
+
+.login-scene-orbit {
+  position: absolute;
+  top: 41%;
+  left: 60%;
+  width: clamp(15rem, 29vw, 27rem);
+  height: clamp(5rem, 9vw, 8rem);
+  border: 1px solid rgba(255, 105, 132, 0.38);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotate(-18deg);
+  animation: login-orbit-drift 10s ease-in-out infinite;
+}
+
+.login-scene-orbit.orbit-two {
+  width: clamp(12rem, 23vw, 21rem);
+  height: clamp(4rem, 7vw, 6rem);
+  border-color: rgba(89, 224, 199, 0.28);
+  transform: translate(-50%, -50%) rotate(32deg);
+  animation-delay: -4s;
+}
+
+.login-scene-pulse {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff5d7b;
+  box-shadow: 0 0 22px rgba(255, 93, 123, 0.85);
+  animation: login-pulse 3.4s ease-in-out infinite;
+}
+
+.login-scene-pulse.pulse-one { top: 22%; left: 42%; }
+.login-scene-pulse.pulse-two { top: 33%; right: 14%; animation-delay: -1.2s; }
+.login-scene-pulse.pulse-three { right: 24%; bottom: 27%; animation-delay: -2.2s; }
+
+@keyframes login-core-float {
+  0%, 100% { transform: translate(-50%, -50%) rotate(42deg) scale(0.98); }
+  50% { transform: translate(-50%, calc(-50% - 12px)) rotate(48deg) scale(1.02); }
+}
+
+@keyframes login-orbit-drift {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes login-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.35); }
 }
 
 .login-scene-fallback {

@@ -81,7 +81,7 @@ export function payrollExportWarnings(state: HrState, slips: PayrollSlip[]) {
 }
 
 function tableHtml(headers: string[], rows: Array<Array<string | number>>) {
-  return `<!doctype html><html><head><meta charset="utf-8"></head><body><table><thead><tr>${headers.map(tag("th")).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(value => tag("td")(String(value))).join("")}</tr>`).join("")}</tbody></table></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body><table><thead><tr>${headers.map(tag("th")).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(value => tag("td")(typeof value === "number" ? String(value) : spreadsheetText(value))).join("")}</tr>`).join("")}</tbody></table></body></html>`;
 }
 
 function tag(name: "th" | "td") {
@@ -89,7 +89,12 @@ function tag(name: "th" | "td") {
 }
 
 function csvCell(value: string) {
-  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, "\"\"")}"` : value;
+  const safeValue = spreadsheetText(value);
+  return /[",\r\n]/.test(safeValue) ? `"${safeValue.replace(/"/g, "\"\"")}"` : safeValue;
+}
+
+export function spreadsheetText(value: string) {
+  return /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
 }
 
 function money(value: number) {

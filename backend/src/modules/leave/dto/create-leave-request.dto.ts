@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsBoolean, IsDate, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateLeaveRequestDto {
   @ApiPropertyOptional({ description: 'HR admins may submit a request for another employee' })
@@ -22,14 +22,14 @@ export class CreateLeaveRequestDto {
   @IsDate()
   endDate: Date;
 
-  @ApiProperty({ example: 5 })
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.5)
-  totalDays: number;
+  @ApiPropertyOptional({ default: false, description: 'Allowed only when startDate and endDate are the same day' })
+  @IsOptional()
+  @IsBoolean()
+  isHalfDay?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   reason?: string;
 }

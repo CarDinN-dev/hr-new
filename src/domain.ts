@@ -130,11 +130,11 @@ export function attendanceDaySummary(employees: EmployeeRecord[], day: Record<st
 export function leaveBalanceSummary(state: HrState, employeeId: string, typeName: string, year = new Date().getFullYear()) {
   const type = state.settings.leaveTypes.find(item => item.name === typeName);
   const total = type?.days ?? 0;
-  const requests = state.leaves.filter(item => item.employeeId === employeeId && item.type === typeName && leaveDaysInYear(item, year) > 0);
-  const usedDates = leaveDateSet(requests.filter(item => item.status === "Approved"), year);
-  const pendingDates = leaveDateSet(requests.filter(item => item.status === "Pending"), year);
-  const used = usedDates.size;
-  const pending = [...pendingDates].filter(key => !usedDates.has(key)).length;
+  const requests = state.leaves.filter(item => item.employeeId === employeeId && item.type === typeName);
+  const usedDays = leaveDayWeights(requests.filter(item => item.status === "Approved"), String(year));
+  const pendingDays = leaveDayWeights(requests.filter(item => item.status === "Pending"), String(year));
+  const used = roundMoney([...usedDays.values()].reduce((sum, value) => sum + value, 0));
+  const pending = roundMoney([...pendingDays].reduce((sum, [key, value]) => sum + Math.max(0, value - (usedDays.get(key) ?? 0)), 0));
   return { total, used, pending, remaining: total - used - pending };
 }
 
@@ -565,18 +565,16 @@ function clearLeaveAttendance(attendance: HrState["attendance"], leave: LeaveReq
 }
 
 function leaveDaysInYear(leave: LeaveRequest, year: number) {
-  let days = 0;
-  forEachLeaveDay(leave, key => {
-    if (key.startsWith(String(year))) days += 1;
-  });
-  return days;
+  return roundMoney([...leaveDayWeights([leave], String(year)).values()].reduce((sum, value) => sum + value, 0));
 }
 
-function leaveDateSet(leaves: LeaveRequest[], year: number) {
-  const dates = new Set<string>();
+function leaveDayWeights(leaves: LeaveRequest[], prefix: string) {
+  const dates = new Map<string, number>();
   for (const leave of leaves) {
+    const span = Math.max(1, inclusiveDays(leave.from, leave.to));
+    const dailyWeight = Math.min(1, Math.max(0, Number(leave.days) || 0) / span);
     forEachLeaveDay(leave, key => {
-      if (key.startsWith(String(year))) dates.add(key);
+      if (key.startsWith(prefix)) dates.set(key, Math.max(dates.get(key) ?? 0, dailyWeight));
     });
   }
   return dates;
@@ -607,11 +605,7 @@ function unpaidLeaveDays(state: HrState, employeeId: string, year: number, month
 }
 
 function leaveDaysInMonth(leave: LeaveRequest, year: number, month: number) {
-  let days = 0;
-  forEachLeaveDay(leave, key => {
-    if (key.startsWith(monthKey(year, month))) days += 1;
-  });
-  return days;
+  return roundMoney([...leaveDayWeights([leave], monthKey(year, month)).values()].reduce((sum, value) => sum + value, 0));
 }
 
 function forEachLeaveDay(leave: LeaveRequest, action: (key: string) => void) {

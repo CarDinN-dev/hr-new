@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DocumentVisibility } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional, IsString, IsUrl, IsUUID } from 'class-validator';
+import { IsDate, IsEnum, IsOptional, IsString, IsUrl, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateDocumentDto {
   @ApiProperty()
@@ -10,14 +10,17 @@ export class CreateDocumentDto {
 
   @ApiProperty({ example: 'Passport' })
   @IsString()
+  @MaxLength(100)
   documentType: string;
 
   @ApiProperty({ example: 'passport.pdf' })
   @IsString()
+  @MaxLength(255)
   fileName: string;
 
   @ApiProperty({ example: 'https://files.example.com/documents/passport.pdf' })
-  @IsUrl({ require_tld: false })
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'], require_protocol: true })
+  @MaxLength(2_048)
   fileUrl: string;
 
   @ApiPropertyOptional({ description: 'Defaults to the current employee profile' })

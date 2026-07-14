@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, finalizePayrollSlip, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, loanBalance, markAllAttendance, recordManualLoanRepayment, serviceYears, setAttendance, setLoanDeductionOverride, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
-import { defaultState, type EmployeeLoan } from "./data";
+import { type EmployeeLoan } from "./data";
+import { testState } from "./testState";
 
 describe("HR domain", () => {
   it("keeps leave balances, LOP payroll and settlement in sync", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     employee.fields["Annual Leave Balance"] = "30";
     employee.fields["LOP Days (Loss of Pay)"] = "0";
@@ -60,7 +61,7 @@ describe("HR domain", () => {
   });
 
   it("updates draft payroll when attendance changes after payroll is generated", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     state = createPayroll(state, 2026, 7).state;
     const cleanSlip = state.payroll.find(item => item.employeeId === employee.id && item.year === 2026 && item.month === 7)!;
@@ -75,7 +76,7 @@ describe("HR domain", () => {
   });
 
   it("deducts half a day of pay for a half-day attendance mark", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     const clean = createPayroll(state, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)!;
 
@@ -87,8 +88,34 @@ describe("HR domain", () => {
     expect(slip.net).toBeLessThan(clean.net);
   });
 
+  it("preserves half-day unpaid leave in balances and payroll", () => {
+    const state = testState();
+    const employee = state.employees[0];
+    const withHalfDayLeave = {
+      ...state,
+      leaves: [{
+        id: "LV-HALF",
+        employeeId: employee.id,
+        type: "Unpaid leave",
+        from: "2026-07-14",
+        to: "2026-07-14",
+        days: 0.5,
+        reason: "Appointment",
+        status: "Approved" as const,
+        appliedOn: "2026-07-10"
+      }]
+    };
+
+    const balance = leaveBalanceSummary(withHalfDayLeave, employee.id, "Unpaid leave", 2026);
+    const slip = createPayroll(withHalfDayLeave, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)!;
+
+    expect(balance.used).toBe(0.5);
+    expect(slip.lopDays).toBe(0.5);
+    expect(slip.lopAmount).toBeCloseTo(employeeSalary(employee).total / 60, 2);
+  });
+
   it("caps automatic loan deductions and posts each payroll repayment once", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     const loan = testLoan(employee.id, { principal: 1_200, termMonths: 2 });
     state = { ...state, loans: [loan], settings: { ...state.settings, loanDeductionCap: { type: "Amount", value: 500 } } };
@@ -113,7 +140,7 @@ describe("HR domain", () => {
   });
 
   it("supports manual payroll overrides and manual loan settlement", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     const loan = testLoan(employee.id, { repaymentMode: "Manual", termMonths: 0, monthlyLimit: 250, principal: 1_000 });
     state = { ...state, loans: [loan], settings: { ...state.settings, loanDeductionCap: { type: "Amount", value: 200 } } };
@@ -131,7 +158,7 @@ describe("HR domain", () => {
   });
 
   it("keeps overlapping leave attendance and splits cross-year leave balances", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     state = {
       ...state,
@@ -151,7 +178,7 @@ describe("HR domain", () => {
   });
 
   it("shows upcoming active employee birthdays and clears daily attendance", () => {
-    let state = defaultState();
+    let state = testState();
     const [todayBirthday, tomorrowBirthday, futureBirthday, inactiveBirthday] = state.employees;
     todayBirthday.fields["Date of Birth"] = "1990-07-09";
     tomorrowBirthday.fields["Date of Birth"] = "1991-07-10";
@@ -172,7 +199,7 @@ describe("HR domain", () => {
   });
 
   it("keeps a selected attendance status and cascades employee deletion", () => {
-    const state = defaultState();
+    const state = testState();
     const employee = state.employees[0];
     const absent = decideAttendance(setAttendance(state, "2026-07-12", employee.id, "A"), "2026-07-12", employee.id, "Approved");
     expect(absent.attendance["2026-07-12"][employee.id]).toBe("A");
@@ -192,7 +219,7 @@ describe("HR domain", () => {
   });
 
   it("uses local calendar dates and preserves leave during bulk attendance actions", () => {
-    const state = defaultState();
+    const state = testState();
     const [employee] = state.employees;
     const withLeave = setAttendance(state, "2026-07-12", employee.id, "L");
     expect(markAllAttendance(withLeave, "2026-07-12", "P").attendance["2026-07-12"][employee.id]).toBe("L");
@@ -202,7 +229,7 @@ describe("HR domain", () => {
   });
 
   it("summarizes daily attendance for active employees only", () => {
-    const state = defaultState();
+    const state = testState();
     const employees = state.employees.slice(0, 3);
     employees[0].status = "Active";
     employees[1].status = "On Leave";
@@ -220,7 +247,7 @@ describe("HR domain", () => {
   });
 
   it("rolls business trip advances and approved expenses into EOS", () => {
-    const state = defaultState();
+    const state = testState();
     const employee = state.employees[0];
     employee.fields["Annual Leave Balance"] = "5";
     state.businessTrips = [{
@@ -254,7 +281,7 @@ describe("HR domain", () => {
   });
 
   it("moves hired recruitment candidates into employees once", () => {
-    let state = defaultState();
+    let state = testState();
     const candidate = state.candidates.find(item => item.stage === "Offer")!;
     state = {
       ...state,

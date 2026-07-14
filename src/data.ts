@@ -339,20 +339,18 @@ export function normalizeEmployee(employee: EmployeeRecord): EmployeeRecord {
 }
 
 export function defaultState(): HrState {
-  const jobs = seedRecruitmentJobs();
-  const employees = seedEmployees().map(normalizeEmployee);
   return {
-    employees,
+    employees: [],
     attendance: {},
     attendanceApprovals: {},
-    leaves: seedLeaves(),
+    leaves: [],
     payroll: [],
     businessTrips: [],
     expenses: [],
     loans: [],
     loanRepayments: [],
-    jobs,
-    candidates: seedRecruitmentCandidates(jobs),
+    jobs: [],
+    candidates: [],
     eosRecords: [],
     documents: [],
     settings: {
@@ -379,120 +377,12 @@ export function defaultState(): HrState {
         { id: "lt-emergency", name: "Emergency leave", days: 3 },
         { id: "lt-unpaid", name: "Unpaid leave", days: 0 }
       ],
-      documentSeq: 12,
+      documentSeq: 0,
       workdayHours: 8,
       halfDayHours: 4,
       loanDeductionCap: { type: "Amount", value: 0 }
     }
   };
-}
-
-function seedRecruitmentJobs(): RecruitmentJob[] {
-  return [
-    {
-      id: newId(),
-      title: "Service Engineer",
-      dept: "Service",
-      openings: 2,
-      status: "Open",
-      postedOn: "2026-06-18",
-      description: "Field service expansion for installations, preventive maintenance and customer support."
-    },
-    {
-      id: newId(),
-      title: "Sales Executive",
-      dept: "Sales",
-      openings: 3,
-      status: "Open",
-      postedOn: "2026-06-20",
-      description: "Commercial growth role covering hospitals, clinics and medical equipment accounts."
-    }
-  ];
-}
-
-function seedRecruitmentCandidates(jobs: RecruitmentJob[]): RecruitmentCandidate[] {
-  const service = jobs.find(job => job.dept === "Service") ?? jobs[0];
-  const sales = jobs.find(job => job.dept === "Sales") ?? jobs[0];
-  return [
-    { id: newId(), jobId: service.id, name: "Laura Bennett", email: "laura.b@example.com", phone: "+974 5000 2101", stage: "Interview", rating: 4, notes: "Strong clinical background", appliedOn: "2026-06-21" },
-    { id: newId(), jobId: service.id, name: "Tom Eriksen", email: "tom.e@example.com", phone: "+974 5000 2102", stage: "Screening", rating: 3, notes: "", appliedOn: "2026-06-22" },
-    { id: newId(), jobId: sales.id, name: "Grace Liu", email: "grace.liu@example.com", phone: "+974 5000 2103", stage: "Offer", rating: 5, notes: "Excellent medical device sales experience", appliedOn: "2026-06-23" },
-    { id: newId(), jobId: sales.id, name: "Peter Novak", email: "p.novak@example.com", phone: "+974 5000 2104", stage: "Applied", rating: 0, notes: "", appliedOn: "2026-06-24" }
-  ];
-}
-
-function seedEmployees(): EmployeeRecord[] {
-  return [
-    employee("MT-0018", "Fahad", "Al-Kuwari", "Key Account Manager", "Sales", "Sales Manager", "2021-03-12", "Qatari", "QNB", "14500", "4000", "1500", "20000", "Active"),
-    employee("MT-0024", "Aisha", "Rahman", "Senior Accountant", "Finance", "Finance Manager", "2021-09-02", "Indian", "Commercial Bank", "12800", "3500", "1200", "17500", "Active"),
-    employee("MT-0041", "Naveen", "Kumar", "Biomedical Engineer", "Service", "Service Manager", "2023-01-17", "Indian", "Doha Bank", "11200", "3000", "1000", "15200", "On Leave"),
-    employee("MT-0053", "Mariam", "Said", "Procurement Officer", "Procurement", "Procurement Manager", "2024-11-08", "Jordanian", "QIB", "10800", "2800", "1000", "14600", "Active"),
-    employee("MT-0064", "Leila", "D'Souza", "HR Officer", "Human Resources", "HR Manager", "2025-02-03", "Indian", "QNB", "9800", "2500", "900", "13200", "Active"),
-    employee("MT-0072", "Omar", "Nasser", "Warehouse Supervisor", "Warehouse", "Operations Manager", "2025-09-14", "Egyptian", "Dukhan Bank", "8900", "2200", "800", "11900", "Active")
-  ];
-}
-
-function employee(
-  code: string,
-  first: string,
-  last: string,
-  designation: string,
-  department: string,
-  manager: string,
-  joiningDate: string,
-  nationality: string,
-  bank: string,
-  basic: string,
-  hra: string,
-  transport: string,
-  total: string,
-  status: EmployeeStatus
-): EmployeeRecord {
-  const emailName = `${first}.${last}`.replace(/'/g, "").toLowerCase();
-  return {
-    id: newId(),
-    status,
-    fields: {
-      ...Object.fromEntries(employeeImportColumns.map(column => [column, ""])),
-      "Employee Code": code,
-      "Employee Category": "Staff",
-      "First Name": first,
-      "Last Name": last,
-      "Full Name": `${first} ${last}`,
-      Company: "MedTech Corporation Trading W.L.L.",
-      Department: department,
-      Designation: designation,
-      "Joining Date": joiningDate,
-      "Reporting Manager Employee Code/Name": manager,
-      "Business Unit": department === "Sales" ? "Commercial" : department === "Finance" || department === "Human Resources" ? "Corporate" : "Operations",
-      "Working Company Name": "MedTech Corporation Trading W.L.L.",
-      Nationality: nationality,
-      "QID Expiry Date": "2027-06-30",
-      "Visa Type": "Work residence",
-      "Hire Type": "Direct",
-      Gender: first === "Aisha" || first === "Mariam" || first === "Leila" ? "Female" : "Male",
-      "Marital Status": "Married",
-      "Office Mobile No.": "+974 4000 1000",
-      "Personal Mobile No.": "+974 55" + code.slice(-4) + "00",
-      "E-Mail ID (Work)": `${emailName}@medtech.qa`,
-      "Emergency Contact Name": "Emergency contact",
-      "Emergency Contact Relationship": "Family",
-      "Emergency Contact Mobile No.": "+974 5000 0000",
-      "Salary Pay Type": "Bank Transfer",
-      "Bank Code": bank,
-      "IBAN No.": "QA** **** " + code.slice(-4),
-      "Account No.": "1000293" + code.slice(-4),
-      Basic: basic,
-      HRA: hra,
-      "Transport Allowance": transport,
-      "Special Allowance": "0",
-      Total: total
-    }
-  };
-}
-
-function seedLeaves(): LeaveRequest[] {
-  return [];
 }
 
 function moneyField(value: string) {

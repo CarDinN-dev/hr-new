@@ -15,6 +15,7 @@ export class QueryPayrollDto extends PaginationQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(2000)
+  @Max(2100)
   year?: number;
 
   @ApiPropertyOptional({ example: 7 })

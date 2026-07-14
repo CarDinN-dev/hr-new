@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export class CreateLeaveBalanceDto {
   @ApiProperty()
@@ -15,12 +15,14 @@ export class CreateLeaveBalanceDto {
   @Type(() => Number)
   @IsInt()
   @Min(2000)
+  @Max(2100)
   year: number;
 
   @ApiProperty({ example: 21 })
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(366)
   totalDays: number;
 
   @ApiPropertyOptional({ example: 0 })
@@ -28,6 +30,7 @@ export class CreateLeaveBalanceDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(366)
   usedDays?: number;
 
   @ApiPropertyOptional({ example: 0 })
@@ -35,5 +38,6 @@ export class CreateLeaveBalanceDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(366)
   pendingDays?: number;
 }

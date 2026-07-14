@@ -20,6 +20,13 @@ type ApiEnvelope<T> = {
   message?: string;
 };
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export type BackendSession = {
   email: string;
   token: string;
@@ -98,7 +105,7 @@ export function loadBackendSession(): BackendSession | null {
     const raw = sessionStorage.getItem(backendSessionKey) || localStorage.getItem(backendSessionKey);
     localStorage.removeItem(backendSessionKey);
     const session = raw ? JSON.parse(raw) as Partial<BackendSession> : null;
-    return session?.token && session?.csrfToken && session.email && session.role ? session as BackendSession : null;
+    return session?.token && session?.csrfToken && session.email && isHrConsoleRole(session.role) ? session as BackendSession : null;
   } catch {
     return null;
   }
@@ -109,6 +116,9 @@ export async function loginBackend(email: string, password: string): Promise<Bac
     method: "POST",
     body: JSON.stringify({ email, password })
   });
+  if (!isHrConsoleRole(result.user.role)) {
+    throw new ApiError("This console is limited to HR administrators.", 403);
+  }
   return { email: result.user.email, role: result.user.role, token: result.accessToken, csrfToken: result.csrfToken };
 }
 
@@ -117,10 +127,10 @@ export async function loadBackendState(current: HrState, session: BackendSession
   if (consoleState?.data) return { state: { ...current, ...consoleState.data }, updatedAt: consoleState.updatedAt };
 
   const [employees, departments, leaves, payroll] = await Promise.all([
-    apiList<BackendEmployee>("/employees?limit=200", session.token),
-    apiList<BackendDepartment>("/departments?limit=200", session.token),
-    apiList<BackendLeave>("/leave/requests?limit=200", session.token),
-    apiList<BackendPayroll>("/payroll?limit=200", session.token)
+    apiList<BackendEmployee>("/employees", session.token),
+    apiList<BackendDepartment>("/departments", session.token),
+    apiList<BackendLeave>("/leave/requests", session.token),
+    apiList<BackendPayroll>("/payroll", session.token)
   ]);
 
   const departmentNames = departments.map(item => item.name).filter(Boolean);
@@ -189,12 +199,26 @@ export async function logoutBackend(session: BackendSession) {
 }
 
 async function apiList<T>(path: string, token: string) {
-  return apiRequest<T[]>(path, { token });
+  const records: T[] = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const separator = path.includes("?") ? "&" : "?";
+    const envelope = await apiRequestEnvelope<T[]>(`${path}${separator}page=${page}&limit=100`, { token });
+    const pageRecords = envelope.data ?? [];
+    records.push(...pageRecords);
+    const meta = envelope.meta as { totalPages?: number } | undefined;
+    if (meta?.totalPages !== undefined ? page >= meta.totalPages : pageRecords.length < 100) return records;
+  }
+  throw new ApiError("The data set is too large to load safely.", 422);
 }
 
 async function apiRequest<T>(path: string, init: RequestInit & { token?: string; csrfToken?: string } = {}): Promise<T> {
+  const envelope = await apiRequestEnvelope<T>(path, init);
+  return envelope.data as T;
+}
+
+async function apiRequestEnvelope<T>(path: string, init: RequestInit & { token?: string; csrfToken?: string } = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
+  if (init.body) headers.set("Content-Type", "application/json");
   if (init.token) headers.set("Authorization", `Bearer ${init.token}`);
   if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
 
@@ -207,10 +231,15 @@ async function apiRequest<T>(path: string, init: RequestInit & { token?: string;
   }
 
   if (!response.ok || payload?.success === false) {
-    throw new Error(payload?.message || `API request failed (${response.status})`);
+    throw new ApiError(payload?.message || `API request failed (${response.status})`, response.status);
   }
 
-  return (payload && "data" in payload ? payload.data : payload) as T;
+  if (payload && "data" in payload) return payload as ApiEnvelope<T>;
+  return { success: true, data: payload as T };
+}
+
+function isHrConsoleRole(role: unknown): role is string {
+  return role === "SUPER_ADMIN" || role === "HR_ADMIN";
 }
 
 function mapEmployee(employee: BackendEmployee): EmployeeRecord {

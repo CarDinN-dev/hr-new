@@ -7,6 +7,7 @@ export class GeneratePayrollDto {
   @Type(() => Number)
   @IsInt()
   @Min(2000)
+  @Max(2100)
   year: number;
 
   @ApiProperty({ example: 7 })

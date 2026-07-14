@@ -1,8 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AttendanceStatus, Role } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AttendanceStatus, PayrollStatus, Prisma, Role } from '@prisma/client';
 import { hasHrAccess, hasManagementAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckAttendanceDto } from './dto/check-attendance.dto';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
@@ -25,13 +25,25 @@ const attendanceInclude = {
 
 @Injectable()
 export class AttendanceService {
+  private readonly companyTimeZone = 'Asia/Qatar';
+
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateAttendanceDto) {
     await this.ensureEmployee(dto.employeeId);
-    return this.prisma.attendance.create({
-      data: { ...dto, attendanceDate: this.dayStart(dto.attendanceDate) },
-      include: attendanceInclude,
+    const attendanceDate = this.dayStart(dto.attendanceDate);
+    return this.attendanceTransaction(async (tx) => {
+      await this.assertPayrollIsOpen(dto.employeeId, attendanceDate, tx);
+      const existing = await tx.attendance.findUnique({
+        where: { employeeId_attendanceDate: { employeeId: dto.employeeId, attendanceDate } },
+      });
+      if (existing && !existing.deletedAt) {
+        throw new ConflictException('Attendance already exists for this employee and date');
+      }
+      const data = this.manualAttendanceData(dto, attendanceDate);
+      return existing
+        ? tx.attendance.update({ where: { id: existing.id }, data: { ...data, deletedAt: null }, include: attendanceInclude })
+        : tx.attendance.create({ data, include: attendanceInclude });
     });
   }
 
@@ -62,76 +74,92 @@ export class AttendanceService {
   }
 
   async update(id: string, dto: UpdateAttendanceDto) {
-    await this.ensureExists(id);
     if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
-    return this.prisma.attendance.update({
-      where: { id },
-      data: {
-        ...dto,
-        attendanceDate: dto.attendanceDate ? this.dayStart(dto.attendanceDate) : undefined,
-      },
-      include: attendanceInclude,
+    return this.attendanceTransaction(async (tx) => {
+      const record = await this.ensureExists(id, tx);
+      const employeeId = dto.employeeId ?? record.employeeId;
+      const attendanceDate = this.dayStart(dto.attendanceDate ?? record.attendanceDate);
+      await this.assertPayrollIsOpen(record.employeeId, record.attendanceDate, tx);
+      await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
+      const data = this.manualAttendanceData(
+        {
+          employeeId,
+          attendanceDate,
+          checkIn: dto.checkIn ?? record.checkIn ?? undefined,
+          checkOut: dto.checkOut ?? record.checkOut ?? undefined,
+          status: dto.status ?? record.status,
+          notes: dto.notes ?? record.notes ?? undefined,
+        },
+        attendanceDate,
+      );
+      return tx.attendance.update({ where: { id }, data, include: attendanceInclude });
     });
   }
 
   async remove(id: string) {
-    await this.ensureExists(id);
-    return softDelete(this.prisma.attendance, id, 'Attendance record');
+    return this.attendanceTransaction(async (tx) => {
+      const record = await this.ensureExists(id, tx);
+      await this.assertPayrollIsOpen(record.employeeId, record.attendanceDate, tx);
+      return tx.attendance.update({ where: { id }, data: { deletedAt: new Date() } });
+    });
   }
 
   async checkIn(dto: CheckAttendanceDto, user: RequestUser) {
     const employeeId = await this.resolveSelfOrHrEmployee(dto.employeeId, user);
     const now = new Date();
-    const attendanceDate = this.dayStart(now);
-    const existing = await this.prisma.attendance.findFirst({
-      where: { employeeId, attendanceDate, deletedAt: null },
-    });
-
-    if (existing?.checkIn) {
-      throw new BadRequestException('Employee is already checked in for today');
-    }
-
-    const lateMinutes = this.lateMinutes(now);
-    const data = {
-      employeeId,
-      attendanceDate,
-      checkIn: now,
-      isLate: lateMinutes > 0,
-      lateMinutes,
-      status: lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT,
-    };
-
-    if (existing) {
-      return this.prisma.attendance.update({
-        where: { id: existing.id },
-        data,
-        include: attendanceInclude,
+    const attendanceDate = this.companyDay(now);
+    return this.attendanceTransaction(async (tx) => {
+      await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
+      const existing = await tx.attendance.findUnique({
+        where: { employeeId_attendanceDate: { employeeId, attendanceDate } },
       });
-    }
+      if (existing?.checkIn && !existing.deletedAt) {
+        throw new BadRequestException('Employee is already checked in for today');
+      }
 
-    return this.prisma.attendance.create({ data, include: attendanceInclude });
+      const lateMinutes = this.lateMinutes(now);
+      const data = {
+        employeeId,
+        attendanceDate,
+        checkIn: now,
+        checkOut: null,
+        workingHours: 0,
+        isLate: lateMinutes > 0,
+        lateMinutes,
+        status: lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT,
+        deletedAt: null,
+      };
+      return existing
+        ? tx.attendance.update({ where: { id: existing.id }, data, include: attendanceInclude })
+        : tx.attendance.create({ data, include: attendanceInclude });
+    });
   }
 
   async checkOut(dto: CheckAttendanceDto, user: RequestUser) {
     const employeeId = await this.resolveSelfOrHrEmployee(dto.employeeId, user);
     const now = new Date();
-    const attendanceDate = this.dayStart(now);
-    const record = await this.prisma.attendance.findFirst({
-      where: { employeeId, attendanceDate, deletedAt: null },
-    });
+    const attendanceDate = this.companyDay(now);
+    return this.attendanceTransaction(async (tx) => {
+      await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
+      const record = await tx.attendance.findUnique({
+        where: { employeeId_attendanceDate: { employeeId, attendanceDate } },
+      });
+      if (!record?.checkIn || record.deletedAt) {
+        throw new BadRequestException('Employee must check in before checking out');
+      }
+      if (record.checkOut) {
+        throw new BadRequestException('Employee is already checked out for today');
+      }
 
-    if (!record?.checkIn) {
-      throw new BadRequestException('Employee must check in before checking out');
-    }
-    if (record.checkOut) {
-      throw new BadRequestException('Employee is already checked out for today');
-    }
-
-    const workingHours = Number(((now.getTime() - record.checkIn.getTime()) / 36e5).toFixed(2));
-    return this.prisma.attendance.update({
-      where: { id: record.id },
-      data: { checkOut: now, workingHours },
-      include: attendanceInclude,
+      const workingHours = Number(((now.getTime() - record.checkIn.getTime()) / 36e5).toFixed(2));
+      if (workingHours < 0 || workingHours > 48) {
+        throw new BadRequestException('Attendance duration must be between 0 and 48 hours');
+      }
+      return tx.attendance.update({
+        where: { id: record.id },
+        data: { checkOut: now, workingHours },
+        include: attendanceInclude,
+      });
     });
   }
 
@@ -214,26 +242,91 @@ export class AttendanceService {
     if (!employee) throw new NotFoundException('Employee not found');
   }
 
-  private async ensureExists(id: string) {
-    const record = await this.prisma.attendance.findFirst({ where: { id, deletedAt: null } });
+  private async ensureExists(id: string, client: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const record = await client.attendance.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Attendance record not found');
+    return record;
   }
 
   private dayStart(date: Date) {
-    const value = new Date(date);
-    value.setHours(0, 0, 0, 0);
-    return value;
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   }
 
   private dayEnd(date: Date) {
-    const value = new Date(date);
-    value.setHours(23, 59, 59, 999);
-    return value;
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
   }
 
   private lateMinutes(date: Date) {
-    const expected = new Date(date);
-    expected.setHours(9, 0, 0, 0);
-    return Math.max(0, Math.floor((date.getTime() - expected.getTime()) / 60000));
+    const parts = this.companyDateParts(date);
+    return Math.max(0, parts.hour * 60 + parts.minute - 9 * 60);
+  }
+
+  private companyDay(date: Date) {
+    const parts = this.companyDateParts(date);
+    return new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  }
+
+  private companyDateParts(date: Date) {
+    const values = new Intl.DateTimeFormat('en-CA', {
+      timeZone: this.companyTimeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(values.find((value) => value.type === type)?.value);
+    return { year: part('year'), month: part('month'), day: part('day'), hour: part('hour'), minute: part('minute') };
+  }
+
+  private manualAttendanceData(dto: CreateAttendanceDto, attendanceDate: Date) {
+    if (dto.checkOut && !dto.checkIn) throw new BadRequestException('checkIn is required when checkOut is supplied');
+    if (dto.checkIn && dto.checkOut && dto.checkOut < dto.checkIn) {
+      throw new BadRequestException('checkOut must be on or after checkIn');
+    }
+    const lateMinutes = dto.checkIn ? this.lateMinutes(dto.checkIn) : 0;
+    const workingHours = dto.checkIn && dto.checkOut
+      ? Number(((dto.checkOut.getTime() - dto.checkIn.getTime()) / 36e5).toFixed(2))
+      : 0;
+    if (workingHours > 48) throw new BadRequestException('Attendance duration cannot exceed 48 hours');
+    return {
+      employeeId: dto.employeeId,
+      attendanceDate,
+      checkIn: dto.checkIn,
+      checkOut: dto.checkOut,
+      notes: dto.notes,
+      isLate: lateMinutes > 0,
+      lateMinutes,
+      workingHours,
+      status: dto.status ?? (lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT),
+    };
+  }
+
+  private async assertPayrollIsOpen(employeeId: string, attendanceDate: Date, tx: Prisma.TransactionClient) {
+    const payroll = await tx.payroll.findFirst({
+      where: {
+        employeeId,
+        year: attendanceDate.getUTCFullYear(),
+        month: attendanceDate.getUTCMonth() + 1,
+        deletedAt: null,
+        status: { in: [PayrollStatus.APPROVED, PayrollStatus.PAID] },
+      },
+      select: { id: true },
+    });
+    if (payroll) throw new BadRequestException('Attendance cannot change after payroll is approved or paid');
+  }
+
+  private async attendanceTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034') throw error;
+      }
+    }
+    throw new ConflictException('Attendance changed in another request. Try again.');
   }
 }

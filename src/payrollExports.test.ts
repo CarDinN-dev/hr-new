@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { defaultState } from "./data";
+import { testState } from "./testState";
 import { createPayroll, markAllAttendance } from "./domain";
-import { payrollLoanDetails, payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
+import { payrollLoanDetails, payrollSheetHtml, payrollSlipsForDepartment, sifCsv, spreadsheetText } from "./payrollExports";
 
 describe("payroll exports", () => {
   it("creates Qatar WPS SIF rows from payroll slips", () => {
-    let state = defaultState();
+    let state = testState();
     state = markAllAttendance(state, "2026-07-09", "A");
     state = createPayroll(state, 2026, 7).state;
     const slips = state.payroll.filter(item => item.year === 2026 && item.month === 7);
@@ -19,7 +19,7 @@ describe("payroll exports", () => {
   });
 
   it("filters payroll sheet exports by department", () => {
-    let state = defaultState();
+    let state = testState();
     state = createPayroll(state, 2026, 7).state;
     const slips = state.payroll.filter(item => item.year === 2026 && item.month === 7);
     const department = state.employees[0].fields.Department;
@@ -31,7 +31,7 @@ describe("payroll exports", () => {
   });
 
   it("includes each scheduled loan in payroll details", () => {
-    let state = defaultState();
+    let state = testState();
     const employee = state.employees[0];
     state = {
       ...state,
@@ -44,5 +44,11 @@ describe("payroll exports", () => {
 
     expect(payrollLoanDetails(state, slip)).toContain("Salary advance - ADV-1200:");
     expect(payrollSheetHtml(state, [slip])).toContain("Salary advance - ADV-1200:");
+  });
+
+  it("neutralizes spreadsheet formulas in exported text fields", () => {
+    expect(spreadsheetText("=HYPERLINK(\"https://example.invalid\")")).toBe("'=HYPERLINK(\"https://example.invalid\")");
+    expect(spreadsheetText("  +SUM(1,2)")).toBe("'  +SUM(1,2)");
+    expect(spreadsheetText("Normal text")).toBe("Normal text");
   });
 });

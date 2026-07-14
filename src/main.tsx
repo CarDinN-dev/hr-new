@@ -95,8 +95,8 @@ import {
   withNextDocumentSeq
 } from "./domain";
 import {
-  apiBaseUrl,
   backendSessionKey,
+  ApiError,
   createBackendBackup,
   loadBackupStatus,
   loadBackendSession,
@@ -111,7 +111,7 @@ import {
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
-import { openDataUrl } from "./dataUrl";
+import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
@@ -222,8 +222,15 @@ function App() {
   const [modal, setModal] = useState<React.ReactNode>(null);
   const [backendSession, setBackendSession] = useState<BackendSession | null>(() => loadBackendSession());
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
+  const [workspaceLoading, setWorkspaceLoading] = useState(Boolean(backendSession));
+  const [workspaceLoadError, setWorkspaceLoadError] = useState("");
+  const [workspaceLoadAttempt, setWorkspaceLoadAttempt] = useState(0);
+  const [syncError, setSyncError] = useState("");
   const backendReady = useRef(false);
   const backendSessionRef = useRef<BackendSession | null>(backendSession);
+  const stateRef = useRef(state);
+  const backendSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  stateRef.current = state;
 
   useEffect(() => {
     localStorage.removeItem(storageKey);
@@ -239,28 +246,41 @@ function App() {
   useEffect(() => {
     if (!backendSession) {
       backendReady.current = false;
+      setWorkspaceLoading(false);
+      setWorkspaceLoadError("");
+      setSyncError("");
       return;
     }
     backendReady.current = false;
+    setWorkspaceLoading(true);
+    setWorkspaceLoadError("");
     loadBackendState(state, backendSession)
       .then(({ state: nextState, updatedAt }) => {
         setState(hydrateState(nextState));
         setBackendSession(prev => prev && updatedAt ? { ...prev, stateUpdatedAt: updatedAt } : prev);
-      })
-      .catch(error => notify(errorMessage(error)))
-      .finally(() => {
         backendReady.current = true;
+        setWorkspaceLoading(false);
+        setSyncError("");
+      })
+      .catch(error => {
+        backendReady.current = false;
+        setWorkspaceLoading(false);
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          setBackendSession(null);
+          notify(errorMessage(error));
+          return;
+        }
+        setWorkspaceLoadError(errorMessage(error));
       });
-  }, [backendSession?.token]);
+  }, [backendSession?.token, workspaceLoadAttempt]);
 
   useEffect(() => {
     if (!backendSession?.token || !backendReady.current) return;
     const timer = window.setTimeout(() => {
-      const session = backendSessionRef.current;
-      if (!session) return;
-      void saveBackendState(state, session)
-        .then(saved => setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: saved.updatedAt } : prev))
-        .catch(error => notify(errorMessage(error)));
+      void saveBackendNow().catch(error => {
+        backendReady.current = false;
+        setSyncError(errorMessage(error));
+      });
     }, 900);
     return () => window.clearTimeout(timer);
   }, [state, backendSession?.token]);
@@ -287,6 +307,23 @@ function App() {
   function notify(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function saveBackendNow(): Promise<BackendSession> {
+    const save = backendSaveQueue.current.then(async () => {
+      const session = backendSessionRef.current;
+      if (!session) throw new Error("Your session has ended. Sign in again.");
+      const saved = await saveBackendState(stateRef.current, session);
+      const nextSession = { ...session, stateUpdatedAt: saved.updatedAt };
+      if (backendSessionRef.current?.token === session.token) {
+        backendSessionRef.current = nextSession;
+        setBackendSession(prev => prev?.token === session.token ? nextSession : prev);
+      }
+      setSyncError("");
+      return nextSession;
+    });
+    backendSaveQueue.current = save.then(() => undefined, () => undefined);
+    return save;
   }
 
   function closeModal() {
@@ -331,12 +368,39 @@ function App() {
     }
   }
 
+  async function retrySave() {
+    backendReady.current = true;
+    setSyncError("");
+    try {
+      await saveBackendNow();
+    } catch (error) {
+      backendReady.current = false;
+      setSyncError(errorMessage(error));
+    }
+  }
+
   if (!backendSession) {
     return (
       <>
         <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} notify={notify} theme={theme} toggleTheme={toggleTheme} />
         {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
       </>
+    );
+  }
+
+  if (workspaceLoading || workspaceLoadError) {
+    return (
+      <main className="workspace-gate">
+        <section className="workspace-gate-card" aria-live="polite">
+          <ShieldCheck size={28} />
+          <h1>{workspaceLoading ? "Loading HR workspace" : "Workspace could not be loaded"}</h1>
+          <p>{workspaceLoading ? "Your records are being loaded securely." : workspaceLoadError}</p>
+          {!workspaceLoading && <div className="modal-actions">
+            <button className="primary" type="button" onClick={() => setWorkspaceLoadAttempt(value => value + 1)}>Try again</button>
+            <button type="button" onClick={() => void logout()}>Sign out</button>
+          </div>}
+        </section>
+      </main>
     );
   }
 
@@ -375,6 +439,10 @@ function App() {
       </aside>
 
       <main className="workspace">
+        {syncError && <div className="sync-alert" role="alert">
+          <span><strong>Changes are not saved.</strong> {syncError}</span>
+          <button type="button" onClick={() => void retrySave()}>Retry save</button>
+        </div>}
         <header className="topbar">
           <button className="mobile-menu" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
           <div className="page-title">
@@ -405,7 +473,7 @@ function App() {
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
-          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} />}
+          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} saveBackendNow={saveBackendNow} />}
         </div>
       </main>
 
@@ -698,10 +766,13 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
   async function importEmployees(file?: File) {
     if (!file) return;
     try {
+      if (file.size > 10_000_000) throw new Error("Employee imports are limited to 10 MB.");
       const spreadsheet = /\.(xlsx|xlsm|xltx|xltm)$/i.test(file.name);
       const parsed = spreadsheet
         ? await parseEmployeeWorkbook(file)
         : { rows: parseEmployeeSheet(await file.text()), skipped: 0 };
+
+      if (parsed.rows.length > 5_000) throw new Error("Employee imports are limited to 5,000 rows at a time.");
 
       if (!parsed.rows.length) {
         notify(parsed.skipped ? `No employees were imported. ${parsed.skipped} row${parsed.skipped === 1 ? "" : "s"} need a unique Employee Code.` : "No employee rows were found in this file.");
@@ -878,7 +949,10 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
   async function importAttendance(file?: File) {
     if (!file) return;
     try {
-      const result = applyAttendanceRows(state, parseAttendanceSheet(await file.text()));
+      if (file.size > 10_000_000) throw new Error("Attendance imports are limited to 10 MB.");
+      const rows = parseAttendanceSheet(await file.text());
+      if (rows.length > 50_000) throw new Error("Attendance imports are limited to 50,000 rows at a time.");
+      const result = applyAttendanceRows(state, rows);
       if (!result.imported) {
         notify(`No attendance rows imported${result.skipped ? `; ${result.skipped} invalid row(s) were skipped` : ""}.`);
         return;
@@ -886,8 +960,8 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
       setState(result.state);
       if (result.latestDate) setDate(result.latestDate);
       notify(`Attendance import complete: ${result.imported} row(s) across ${result.dates} date(s)${result.skipped ? `; ${result.skipped} skipped` : ""}.`);
-    } catch {
-      notify("Attendance import failed. Use the downloaded template or a CSV exported from Excel.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Attendance import failed. Use the downloaded template or a CSV exported from Excel.");
     }
   }
 
@@ -1901,13 +1975,15 @@ function SettingsPage({
   setState,
   notify,
   backendSession,
-  setBackendSession
+  setBackendSession,
+  saveBackendNow
 }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   notify: (message: string) => void;
   backendSession: BackendSession | null;
   setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null>>;
+  saveBackendNow: () => Promise<BackendSession>;
 }) {
   const [company, setCompany] = useState(state.settings.company);
   const [departments, setDepartments] = useState(state.settings.departments.join("\n"));
@@ -1948,9 +2024,7 @@ function SettingsPage({
     if (!backendSession) return;
     setBackupBusy("backup");
     try {
-      const saved = await saveBackendState(state, backendSession);
-      const session = { ...backendSession, stateUpdatedAt: saved.updatedAt };
-      setBackendSession(session);
+      const session = await saveBackendNow();
       await createBackendBackup(session);
       setBackupStatus(await loadBackupStatus(session));
       notify("Backup stored.");
@@ -1965,10 +2039,11 @@ function SettingsPage({
     if (!backendSession || !window.confirm("Roll back to the latest backup? Current HR data will be replaced.")) return;
     setBackupBusy("rollback");
     try {
-      const restored = await rollbackLatestBackendBackup(backendSession);
+      const session = await saveBackendNow();
+      const restored = await rollbackLatestBackendBackup(session);
       setState(hydrateState(restored.data));
       setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: restored.updatedAt } : prev);
-      setBackupStatus(await loadBackupStatus({ ...backendSession, stateUpdatedAt: restored.updatedAt }));
+      setBackupStatus(await loadBackupStatus({ ...session, stateUpdatedAt: restored.updatedAt }));
       notify("Latest backup restored.");
     } catch (error) {
       notify(errorMessage(error));
@@ -2005,112 +2080,7 @@ function SettingsPage({
     <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>
     <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>
     <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>
-    <BackendPanel state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} />
   </section>;
-}
-
-function BackendPanel({
-  state,
-  setState,
-  notify,
-  backendSession,
-  setBackendSession
-}: {
-  state: HrState;
-  setState: React.Dispatch<React.SetStateAction<HrState>>;
-  notify: (message: string) => void;
-  backendSession: BackendSession | null;
-  setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null>>;
-}) {
-  const now = new Date();
-  const [email, setEmail] = useState(backendSession?.email || "");
-  const [password, setPassword] = useState("");
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
-  const [busy, setBusy] = useState("");
-  const [savedAt, setSavedAt] = useState("");
-
-  async function login() {
-    setBusy("login");
-    try {
-      const session = await loginBackend(email, password);
-      setBackendSession(session);
-      notify(`Backend connected as ${session.role}.`);
-    } catch (error) {
-      notify(errorMessage(error));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function sync() {
-    if (!backendSession) return notify("Login to the backend first.");
-    setBusy("sync");
-    try {
-      const { state: nextState, updatedAt } = await loadBackendState(state, backendSession);
-      setState(hydrateState(nextState));
-      setBackendSession(prev => prev && updatedAt ? { ...prev, stateUpdatedAt: updatedAt } : prev);
-      notify("HR data loaded.");
-    } catch (error) {
-      notify(errorMessage(error));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveAll() {
-    if (!backendSession) return notify("Login to the backend first.");
-    setBusy("save");
-    try {
-      const saved = await saveBackendState(state, backendSession);
-      setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: saved.updatedAt } : prev);
-      setSavedAt(new Date(saved.updatedAt).toLocaleString());
-      notify("HR data saved.");
-    } catch (error) {
-      notify(errorMessage(error));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function runBackendPayroll() {
-    if (!backendSession) return notify("Login to the backend first.");
-    const result = createPayroll(state, year, month);
-    setState(result.state);
-    notify(result.created || result.updated ? `Payroll prepared for ${months[month - 1]} ${year}.` : "Payroll is already finalized or up to date.");
-  }
-
-  async function disconnect() {
-    const session = backendSession;
-    setBackendSession(null);
-    if (!session) return;
-    try {
-      await logoutBackend(session);
-      notify("Backend session ended.");
-    } catch (error) {
-      notify(errorMessage(error));
-    }
-  }
-
-  return <div className="panel backend-panel">
-    <div className="panel-head"><div><h3>Backend Connection</h3><span>{apiBaseUrl}</span></div><Badge value={backendSession ? "Connected" : "Disconnected"} /></div>
-    <div className="form-grid compact">
-      <label htmlFor="backend-email">Email<input id="backend-email" name="backend-email" type="email" value={email} onChange={event => setEmail(event.target.value)} /></label>
-      <label htmlFor="backend-password">Password<input id="backend-password" name="backend-password" type="password" value={password} placeholder="Backend password" onChange={event => setPassword(event.target.value)} /></label>
-    </div>
-    <div className="backend-actions">
-      <button className="primary" disabled={busy === "login"} onClick={login}>{busy === "login" ? "Connecting..." : "Login"}</button>
-      <button disabled={!backendSession || busy === "save"} onClick={saveAll}>{busy === "save" ? "Saving..." : "Save HR data"}</button>
-      <button disabled={!backendSession || busy === "sync"} onClick={sync}>{busy === "sync" ? "Loading..." : "Load from backend"}</button>
-      {backendSession && <button onClick={() => void disconnect()}>Disconnect</button>}
-    </div>
-    <div className="backend-payroll">
-      <select id="backend-payroll-month" name="backend-payroll-month" aria-label="Backend payroll month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
-      <input id="backend-payroll-year" name="backend-payroll-year" aria-label="Backend payroll year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
-      <button disabled={!backendSession} onClick={runBackendPayroll}>Run payroll</button>
-    </div>
-    <p className="muted">{savedAt ? `Last backend save: ${savedAt}. ` : "Backend autosave is enabled after login."}</p>
-  </div>;
 }
 
 function DataTable({ columns, rows, empty }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string }) {
@@ -2158,14 +2128,11 @@ function downloadBlob(blob: Blob, filename: string) {
   link.href = url;
   link.download = filename;
   link.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 function downloadDataUrl(dataUrl: string, filename: string) {
-  const link = document.createElement("a");
-  link.href = dataUrl;
-  link.download = filename;
-  link.click();
+  downloadBlob(dataUrlBlob(dataUrl), filename);
 }
 
 function loadState(): HrState {

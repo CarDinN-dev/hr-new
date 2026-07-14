@@ -1,12 +1,30 @@
 export function dataUrlBlob(dataUrl: string) {
+  const maxDecodedBytes = 10_000_000;
   const comma = dataUrl.indexOf(",");
   const metadata = dataUrl.slice(5, comma).split(";");
   const payload = dataUrl.slice(comma + 1);
-  if (!dataUrl.startsWith("data:") || comma < 6 || metadata.at(-1) !== "base64" || !/^[A-Za-z0-9+/=]+$/.test(payload)) {
+  if (
+    !dataUrl.startsWith("data:") ||
+    comma < 6 ||
+    metadata[0]?.toLowerCase() !== "application/pdf" ||
+    metadata.at(-1)?.toLowerCase() !== "base64" ||
+    !/^[A-Za-z0-9+/=]+$/.test(payload) ||
+    Math.ceil(payload.length * 0.75) > maxDecodedBytes
+  ) {
     throw new Error("Saved PDF data is invalid.");
   }
-  const bytes = Uint8Array.from(atob(payload), char => char.charCodeAt(0));
-  return new Blob([bytes], { type: metadata[0] });
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(payload), char => char.charCodeAt(0));
+  } catch {
+    throw new Error("Saved PDF data is invalid.");
+  }
+  if (bytes.length < 5 || String.fromCharCode(...bytes.slice(0, 5)) !== "%PDF-") {
+    throw new Error("Saved PDF data is invalid.");
+  }
+  const buffer = new ArrayBuffer(bytes.length);
+  new Uint8Array(buffer).set(bytes);
+  return new Blob([buffer], { type: "application/pdf" });
 }
 
 export function openDataUrl(dataUrl: string) {

@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ReviewStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDate, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsDate, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
 export class CreatePerformanceReviewDto {
   @ApiProperty()
@@ -33,21 +33,25 @@ export class CreatePerformanceReviewDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(5_000)
   goals?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(5_000)
   strengths?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(5_000)
   improvements?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(5_000)
   comments?: string;
 
   @ApiPropertyOptional({ enum: ReviewStatus })

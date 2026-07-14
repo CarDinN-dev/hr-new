@@ -7,7 +7,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30.2-alpine
 RUN apk add --no-cache openssl \
   && mkdir -p /etc/nginx/certs \
   && openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \

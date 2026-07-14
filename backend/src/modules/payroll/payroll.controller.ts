@@ -38,11 +38,10 @@ export class PayrollController {
   @Get('payslip/:employeeId')
   payslip(
     @Param('employeeId') employeeId: string,
-    @Query('year') year: number,
-    @Query('month') month: number,
+    @Query() query: GeneratePayrollDto,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.payrollService.payslip(employeeId, Number(year), Number(month), user);
+    return this.payrollService.payslip(employeeId, query.year, query.month, user);
   }
 
   @Get(':id')
@@ -60,6 +59,12 @@ export class PayrollController {
   @Post(':id/approve')
   approve(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.payrollService.approve(id, user);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Post(':id/mark-paid')
+  markPaid(@Param('id') id: string) {
+    return this.payrollService.markPaid(id);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)

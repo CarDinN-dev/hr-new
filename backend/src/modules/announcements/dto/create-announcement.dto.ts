@@ -1,15 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ArrayUnique, IsArray, IsBoolean, IsDate, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ArrayUnique, IsArray, IsBoolean, IsDate, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateAnnouncementDto {
   @ApiProperty({ example: 'Company Holiday' })
   @IsString()
+  @MaxLength(200)
   title: string;
 
   @ApiProperty({ example: 'Office will be closed next Monday.' })
   @IsString()
+  @MaxLength(10_000)
   content: string;
 
   @ApiPropertyOptional({ enum: Role, isArray: true })

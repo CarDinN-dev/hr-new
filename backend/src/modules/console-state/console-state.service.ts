@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -30,6 +30,7 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
   }
 
   async save(dto: SaveConsoleStateDto, user: RequestUser) {
+    this.assertWorkspaceShape(dto.data);
     const current = await this.prisma.hrConsoleState.findUnique({ where: { id: stateId } });
     if (!current) {
       return this.prisma.hrConsoleState.create({
@@ -74,21 +75,28 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
   }
 
   async rollbackLatest(createdById: string) {
-    const [state, backup] = await Promise.all([
-      this.prisma.hrConsoleState.findUnique({ where: { id: stateId } }),
-      this.prisma.hrConsoleStateBackup.findFirst({ orderBy: { createdAt: 'desc' } }),
-    ]);
-    if (!state) throw new NotFoundException('No workspace exists to restore');
-    if (!backup) throw new NotFoundException('No backup is available');
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const [state, backup] = await Promise.all([
+        tx.hrConsoleState.findUnique({ where: { id: stateId } }),
+        tx.hrConsoleStateBackup.findFirst({ orderBy: { createdAt: 'desc' } }),
+      ]);
+      if (!state) throw new NotFoundException('No workspace exists to restore');
+      if (!backup) throw new NotFoundException('No backup is available');
 
-    await this.prisma.$transaction([
-      this.prisma.hrConsoleStateBackup.create({
+      await tx.hrConsoleStateBackup.create({
         data: { data: state.data as Prisma.InputJsonValue, stateUpdatedAt: state.updatedAt, kind: 'ROLLBACK_SAFETY', createdById },
-      }),
-      this.prisma.hrConsoleState.update({ where: { id: stateId }, data: { data: backup.data as Prisma.InputJsonValue, updatedById: createdById } }),
-    ]);
+      });
+      const updated = await tx.hrConsoleState.updateMany({
+        where: { id: stateId, updatedAt: state.updatedAt },
+        data: { data: backup.data as Prisma.InputJsonValue, updatedById: createdById },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException('Workspace changed during rollback. Try again.');
+      }
+      return tx.hrConsoleState.findUnique({ where: { id: stateId } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.trimBackups();
-    return this.get();
+    return restored;
   }
 
   private async ensureScheduledBackup() {
@@ -110,5 +118,28 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
       select: { id: true },
     });
     if (expired.length) await this.prisma.hrConsoleStateBackup.deleteMany({ where: { id: { in: expired.map(item => item.id) } } });
+  }
+
+  private assertWorkspaceShape(data: Record<string, unknown>) {
+    const arrays = [
+      'employees', 'leaves', 'payroll', 'businessTrips', 'expenses', 'loans',
+      'loanRepayments', 'jobs', 'candidates', 'eosRecords', 'documents',
+    ];
+    if (arrays.some((key) => !Array.isArray(data[key]))) {
+      throw new BadRequestException('Workspace data is missing a required record collection');
+    }
+    for (const key of ['attendance', 'attendanceApprovals', 'settings']) {
+      const value = data[key];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new BadRequestException(`Workspace data has an invalid ${key} section`);
+      }
+    }
+    const settings = data.settings as Record<string, unknown>;
+    if (!settings.company || typeof settings.company !== 'object' || Array.isArray(settings.company)) {
+      throw new BadRequestException('Workspace data has an invalid company settings section');
+    }
+    if (!Array.isArray(settings.departments) || !Array.isArray(settings.leaveTypes)) {
+      throw new BadRequestException('Workspace data has invalid settings collections');
+    }
   }
 }

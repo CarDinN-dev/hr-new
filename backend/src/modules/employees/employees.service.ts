@@ -1,8 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { hasHrAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
@@ -88,8 +88,8 @@ export class EmployeesService {
   }
 
   async update(id: string, dto: UpdateEmployeeDto) {
-    await this.ensureExists(id);
-    await this.validateRelations(dto, id);
+    const employee = await this.ensureExists(id);
+    await this.validateRelations(dto, id, employee);
     return this.prisma.employee.update({
       where: { id },
       data: dto,
@@ -98,8 +98,29 @@ export class EmployeesService {
   }
 
   async remove(id: string) {
-    await this.ensureExists(id);
-    return softDelete(this.prisma.employee, id, 'Employee');
+    return this.prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.findFirst({ where: { id, deletedAt: null } });
+      if (!employee) throw new NotFoundException('Employee not found');
+      const [directReport, managedDepartment] = await Promise.all([
+        tx.employee.findFirst({ where: { managerId: id, deletedAt: null }, select: { id: true } }),
+        tx.department.findFirst({ where: { managerId: id, deletedAt: null }, select: { id: true } }),
+      ]);
+      if (directReport || managedDepartment) {
+        throw new BadRequestException('Reassign direct reports and managed departments before deleting this employee');
+      }
+
+      const removed = await tx.employee.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      if (employee.userId) {
+        await tx.user.update({
+          where: { id: employee.userId },
+          data: { isActive: false, sessionVersion: { increment: 1 } },
+        });
+      }
+      return removed;
+    });
   }
 
   async ensureExists(id: string) {
@@ -126,44 +147,49 @@ export class EmployeesService {
     return { id: user.employeeId };
   }
 
-  private async validateRelations(dto: Partial<CreateEmployeeDto>, currentEmployeeId?: string) {
+  private async validateRelations(
+    dto: Partial<CreateEmployeeDto>,
+    currentEmployeeId?: string,
+    current?: { departmentId: string | null; positionId: string | null },
+  ) {
     if (dto.managerId && dto.managerId === currentEmployeeId) {
       throw new ForbiddenException('Employee cannot be their own manager');
     }
 
-    const checks: Promise<unknown>[] = [];
-    if (dto.departmentId) {
-      checks.push(
-        this.prisma.department.findFirst({
-          where: { id: dto.departmentId, deletedAt: null },
-        }),
-      );
+    const departmentId = dto.departmentId ?? current?.departmentId ?? undefined;
+    const positionId = dto.positionId ?? current?.positionId ?? undefined;
+    const [department, position, user] = await Promise.all([
+      departmentId
+        ? this.prisma.department.findFirst({ where: { id: departmentId, deletedAt: null } })
+        : null,
+      positionId
+        ? this.prisma.jobPosition.findFirst({ where: { id: positionId, deletedAt: null } })
+        : null,
+      dto.userId
+        ? this.prisma.user.findFirst({ where: { id: dto.userId, deletedAt: null } })
+        : null,
+    ]);
+    if ((departmentId && !department) || (positionId && !position) || (dto.userId && !user)) {
+      throw new NotFoundException('One or more referenced records were not found');
     }
-    if (dto.positionId) {
-      checks.push(
-        this.prisma.jobPosition.findFirst({
-          where: { id: dto.positionId, deletedAt: null },
-        }),
-      );
-    }
-    if (dto.managerId) {
-      checks.push(
-        this.prisma.employee.findFirst({
-          where: { id: dto.managerId, deletedAt: null },
-        }),
-      );
-    }
-    if (dto.userId) {
-      checks.push(
-        this.prisma.user.findFirst({
-          where: { id: dto.userId, deletedAt: null },
-        }),
-      );
+    if (position?.departmentId && departmentId && position.departmentId !== departmentId) {
+      throw new BadRequestException('The selected position belongs to a different department');
     }
 
-    const results = await Promise.all(checks);
-    if (results.some((result) => !result)) {
-      throw new NotFoundException('One or more referenced records were not found');
+    if (dto.managerId) {
+      let managerId: string | null = dto.managerId;
+      for (let depth = 0; managerId && depth < 100; depth += 1) {
+        if (managerId === currentEmployeeId) {
+          throw new ForbiddenException('Reporting lines cannot contain a cycle');
+        }
+        const manager: { managerId: string | null } | null = await this.prisma.employee.findFirst({
+          where: { id: managerId, deletedAt: null },
+          select: { managerId: true },
+        });
+        if (!manager) throw new NotFoundException('Manager not found');
+        managerId = manager.managerId;
+      }
+      if (managerId) throw new BadRequestException('Reporting line is too deep to validate safely');
     }
   }
 }

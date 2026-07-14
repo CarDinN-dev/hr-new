@@ -37,10 +37,7 @@ export function listArgs(query: PaginationQueryDto, options: ListOptions = {}) {
     throw new BadRequestException(`Unsupported sort field: ${sortBy}`);
   }
 
-  const filters: Record<string, unknown>[] = [];
-  if (!query.includeDeleted) {
-    filters.push({ deletedAt: null });
-  }
+  const filters: Record<string, unknown>[] = [{ deletedAt: null }];
   if (options.where && Object.keys(options.where).length) {
     filters.push(options.where);
   }
@@ -91,11 +88,7 @@ export async function findActiveOrThrow(
 export async function softDelete(
   delegate: Pick<PrismaDelegate, 'update'>,
   id: string,
-  modelName: string,
+  _modelName: string,
 ) {
-  try {
-    return await delegate.update({ where: { id }, data: { deletedAt: new Date() } });
-  } catch {
-    throw new NotFoundException(`${modelName} not found`);
-  }
+  return delegate.update({ where: { id }, data: { deletedAt: new Date() } });
 }

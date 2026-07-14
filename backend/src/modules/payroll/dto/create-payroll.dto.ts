@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PayrollStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export class CreatePayrollDto {
   @ApiProperty()
@@ -12,6 +11,7 @@ export class CreatePayrollDto {
   @Type(() => Number)
   @IsInt()
   @Min(2000)
+  @Max(2100)
   year: number;
 
   @ApiProperty({ example: 7 })
@@ -25,6 +25,7 @@ export class CreatePayrollDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   baseSalary: number;
 
   @ApiPropertyOptional({ example: 5000 })
@@ -32,6 +33,7 @@ export class CreatePayrollDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   allowances?: number;
 
   @ApiPropertyOptional({ example: 1000 })
@@ -39,6 +41,7 @@ export class CreatePayrollDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   deductions?: number;
 
   @ApiPropertyOptional({ example: 2500 })
@@ -46,6 +49,7 @@ export class CreatePayrollDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   bonuses?: number;
 
   @ApiPropertyOptional({ example: 800 })
@@ -53,22 +57,7 @@ export class CreatePayrollDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(1_000_000_000)
   taxAmount?: number;
 
-  @ApiProperty({ example: 82500 })
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  grossPay: number;
-
-  @ApiProperty({ example: 80700 })
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  netPay: number;
-
-  @ApiPropertyOptional({ enum: PayrollStatus })
-  @IsOptional()
-  @IsEnum(PayrollStatus)
-  status?: PayrollStatus;
 }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { defaultState } from "./data";
+import { testState } from "./testState";
 import { applyAttendanceRows, parseAttendanceSheet } from "./attendanceSheet";
 
 describe("attendance sheet import", () => {
   it("imports valid status names and codes without replacing other attendance", () => {
-    const state = defaultState();
+    const state = testState();
     const [first, second] = state.employees;
     const rows = parseAttendanceSheet(`Date,Employee Code,Status\n11/07/2026,${first.fields["Employee Code"]},Present\n2026-07-11,${second.fields["Employee Code"]},A\n2026-02-30,UNKNOWN,L`);
     const result = applyAttendanceRows(state, rows);

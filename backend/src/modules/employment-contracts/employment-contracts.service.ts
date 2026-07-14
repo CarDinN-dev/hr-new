@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { hasHrAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
@@ -20,6 +20,7 @@ export class EmploymentContractsService {
 
   async create(dto: CreateEmploymentContractDto) {
     await this.ensureEmployee(dto.employeeId);
+    this.assertDateRange(dto.startDate, dto.endDate);
     return this.prisma.employmentContract.create({ data: dto, include: contractInclude });
   }
 
@@ -52,8 +53,8 @@ export class EmploymentContractsService {
   }
 
   async update(id: string, dto: UpdateEmploymentContractDto) {
-    await this.ensureExists(id);
-    if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
+    const contract = await this.ensureExists(id);
+    this.assertDateRange(dto.startDate ?? contract.startDate, dto.endDate ?? contract.endDate ?? undefined);
     return this.prisma.employmentContract.update({ where: { id }, data: dto, include: contractInclude });
   }
 
@@ -79,5 +80,12 @@ export class EmploymentContractsService {
   private async ensureExists(id: string) {
     const contract = await this.prisma.employmentContract.findFirst({ where: { id, deletedAt: null } });
     if (!contract) throw new NotFoundException('Employment contract not found');
+    return contract;
+  }
+
+  private assertDateRange(startDate: Date, endDate?: Date) {
+    if (endDate && endDate < startDate) {
+      throw new BadRequestException('endDate must be on or after startDate');
+    }
   }
 }

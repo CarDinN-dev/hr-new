@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -28,12 +28,24 @@ export class UsersService {
   }
 
   async createUser(email: string, password: string, role: Role = Role.EMPLOYEE) {
+    if (
+      password.length < 12
+      || Buffer.byteLength(password, 'utf8') > 72
+      || !/[a-z]/.test(password)
+      || !/[A-Z]/.test(password)
+      || !/\d/.test(password)
+    ) {
+      throw new BadRequestException('Password must be 12-72 bytes and include uppercase, lowercase, and number characters');
+    }
     const existing = await this.findByEmail(email);
     if (existing) {
       throw new ConflictException('Email is already registered');
     }
 
     const saltRounds = Number(this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12));
+    if (!Number.isInteger(saltRounds) || saltRounds < 10 || saltRounds > 15) {
+      throw new Error('BCRYPT_SALT_ROUNDS must be an integer between 10 and 15.');
+    }
     const passwordHash = await bcrypt.hash(password, saltRounds);
     const user = await this.prisma.user.create({
       data: {
