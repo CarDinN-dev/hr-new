@@ -50,7 +50,7 @@ import {
 } from "./data";
 import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
 import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } from "./attendanceSheet";
-import { payrollExportWarnings, payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
+import { payrollExportWarnings, payrollLoanDetails, payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
 import {
   activeEmployees,
   attendanceDaySummary,
@@ -1661,7 +1661,7 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
         </div>
       <DataTable
         empty="No payslips for this period. Run payroll to create drafts."
-        columns={["Code", "Employee", "Gross", "LOP", "Loans", "Net Pay", "Status", "Actions"]}
+        columns={["Code", "Employee", "Gross", "LOP", "Loan deductions", "Net Pay", "Status", "Actions"]}
         rows={slips.map(slip => {
           const employee = state.employees.find(item => item.id === slip.employeeId);
           return [
@@ -1669,11 +1669,11 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
             employeeName(employee),
             formatMoney(slip.gross, state.settings.company.currency),
             `${slip.lopDays}d / ${formatMoney(slip.lopAmount, state.settings.company.currency)}`,
-            formatMoney(slip.loanDeduction ?? 0, state.settings.company.currency),
+            <PayrollLoanDeduction key="loan-deduction" state={state} slip={slip} />,
             formatMoney(slip.net, state.settings.company.currency),
             <Badge key="status" value={slip.status} />,
             employee && <div className="row-actions" key="actions">
-              {slip.status === "Draft" && <><button onClick={() => setModal(<PayslipEditor slip={slip} close={close} save={next => setState(prev => ({ ...prev, payroll: prev.payroll.map(item => item.id === next.id ? next : item) }))} />)}>Adjust</button><button onClick={() => setState(prev => finalizePayrollSlip(prev, slip.id))}>Finalize</button></>}
+              {slip.status === "Draft" && <><button onClick={() => setModal(<PayslipEditor slip={slip} loanDetails={payrollLoanDetails(state, slip)} close={close} save={next => setState(prev => ({ ...prev, payroll: prev.payroll.map(item => item.id === next.id ? next : item) }))} />)}>Adjust</button><button onClick={() => setState(prev => finalizePayrollSlip(prev, slip.id))}>Finalize</button></>}
               <button onClick={() => void withPdf(pdf => savePdf(pdf.savePayslipPdf(slip, employee, state.settings), "payslip", employee.id))}>PDF</button>
             </div>
           ];
@@ -1684,14 +1684,19 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
   );
 }
 
-function PayslipEditor({ slip, save, close }: { slip: PayrollSlip; save: (slip: PayrollSlip) => void; close: () => void }) {
+function PayrollLoanDeduction({ state, slip }: { state: HrState; slip: PayrollSlip }) {
+  const details = payrollLoanDetails(state, slip);
+  return <span><strong>{formatMoney(slip.loanDeduction ?? 0, state.settings.company.currency)}</strong>{details && <><br /><small>{details}</small></>}</span>;
+}
+
+function PayslipEditor({ slip, loanDetails, save, close }: { slip: PayrollSlip; loanDetails: string; save: (slip: PayrollSlip) => void; close: () => void }) {
   const [draft, setDraft] = useState(slip);
   const setNumber = (key: keyof PayrollSlip, value: string) => setDraft(prev => recalcSlip({ ...prev, [key]: Number(value) || 0 }));
   return <div><h2>Adjust payslip</h2><div className="form-grid compact">
     <label>Bonus<input type="number" value={draft.bonus} onChange={event => setNumber("bonus", event.target.value)} /></label>
     <label>Overtime<input type="number" value={draft.overtime} onChange={event => setNumber("overtime", event.target.value)} /></label>
     <label>Deductions<input type="number" value={draft.deductions} onChange={event => setNumber("deductions", event.target.value)} /></label>
-    <label>Loan deductions<input type="number" value={draft.loanDeduction ?? 0} readOnly /><small>Set loan amounts from the Loans tab.</small></label>
+    <label>Loan deductions<input type="number" value={draft.loanDeduction ?? 0} readOnly /><small>{loanDetails || "Set loan amounts from the Loans tab."}</small></label>
     <label>LOP amount<input type="number" value={draft.lopAmount} onChange={event => setNumber("lopAmount", event.target.value)} /></label>
     <label className="wide">Note<input value={draft.note} onChange={event => setDraft(prev => ({ ...prev, note: event.target.value }))} /></label>
   </div><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={() => { save(draft); close(); }}>Save payslip</button></div></div>;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultState } from "./data";
 import { createPayroll, markAllAttendance } from "./domain";
-import { payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
+import { payrollLoanDetails, payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
 
 describe("payroll exports", () => {
   it("creates Qatar WPS SIF rows from payroll slips", () => {
@@ -28,5 +28,21 @@ describe("payroll exports", () => {
 
     expect(filtered).toEqual(expected);
     expect(payrollSheetHtml(state, filtered)).toContain(`>${department}<`);
+  });
+
+  it("includes each scheduled loan in payroll details", () => {
+    let state = defaultState();
+    const employee = state.employees[0];
+    state = {
+      ...state,
+      loans: [{
+        id: "loan-payroll-detail", employeeId: employee.id, type: "Salary advance", principal: 1_200, disbursementDate: "2026-07-01", startPeriod: "2026-07",
+        repaymentMode: "Duration", termMonths: 12, monthlyLimit: 0, status: "Active", reference: "ADV-1200", notes: "", createdOn: "2026-07-01", deductionOverrides: {}
+      }]
+    };
+    const slip = createPayroll(state, 2026, 7).state.payroll.find(item => item.employeeId === employee.id)!;
+
+    expect(payrollLoanDetails(state, slip)).toContain("Salary advance - ADV-1200:");
+    expect(payrollSheetHtml(state, [slip])).toContain("Salary advance - ADV-1200:");
   });
 });

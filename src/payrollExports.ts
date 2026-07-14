@@ -8,12 +8,21 @@ export function payrollSlipsForDepartment(state: HrState, slips: PayrollSlip[], 
   return slips.filter(slip => state.employees.find(employee => employee.id === slip.employeeId)?.fields.Department === department);
 }
 
+export function payrollLoanDetails(state: HrState, slip: PayrollSlip) {
+  const details = (slip.loanDeductions ?? []).map(deduction => {
+    const loan = (state.loans ?? []).find(item => item.id === deduction.loanId);
+    const label = loan ? [loan.type, loan.reference].filter(Boolean).join(" - ") : "Loan";
+    return `${label}: ${deduction.amount.toFixed(2)}`;
+  });
+  return details.join("; ") || (slip.loanDeduction ? `Loan deduction: ${slip.loanDeduction.toFixed(2)}` : "");
+}
+
 export function payrollSheetHtml(state: HrState, slips: PayrollSlip[]) {
   const rows = slips.map(slip => {
     const employee = state.employees.find(item => item.id === slip.employeeId);
-    return [employee?.fields["Employee Code"] ?? "", employeeName(employee), employee?.fields.Department ?? "", employee?.fields["Bank Code"] ?? "", employee?.fields["IBAN No."] || employee?.fields["Account No."] || "", slip.basic, slip.allowances + slip.housing + slip.overtime + slip.bonus, slip.deductions, slip.loanDeduction ?? 0, slip.lopAmount, slip.net, slip.status];
+    return [employee?.fields["Employee Code"] ?? "", employeeName(employee), employee?.fields.Department ?? "", employee?.fields["Bank Code"] ?? "", employee?.fields["IBAN No."] || employee?.fields["Account No."] || "", slip.basic, slip.allowances + slip.housing + slip.overtime + slip.bonus, slip.deductions, slip.loanDeduction ?? 0, payrollLoanDetails(state, slip), slip.lopAmount, slip.net, slip.status];
   });
-  return tableHtml(["Employee Code", "Employee", "Department", "Bank", "IBAN / Account", "Basic", "Extra Income", "Other Deductions", "Loan Deduction", "LOP", "Net Pay", "Status"], rows);
+  return tableHtml(["Employee Code", "Employee", "Department", "Bank", "IBAN / Account", "Basic", "Extra Income", "Other Deductions", "Loan Deduction", "Loan Details", "LOP", "Net Pay", "Status"], rows);
 }
 
 export function sifCsv(state: HrState, slips: PayrollSlip[], year: number, month: number) {
