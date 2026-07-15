@@ -71,6 +71,7 @@ export class AuthController {
         email: user.email,
         role: user.role,
         sessionVersion: user.sessionVersion,
+        employeeId: user.employeeId ?? null,
       },
       csrfToken: user.csrfToken,
     };

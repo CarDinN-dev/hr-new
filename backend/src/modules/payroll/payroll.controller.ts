@@ -12,6 +12,7 @@ import { PayrollService } from './payroll.service';
 
 @ApiTags('Payroll')
 @ApiBearerAuth()
+@Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
 @Controller('payroll')
 export class PayrollController {
   constructor(private readonly payrollService: PayrollService) {}
@@ -24,8 +25,8 @@ export class PayrollController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Post('generate')
-  generate(@Body() dto: GeneratePayrollDto) {
-    return this.payrollService.generate(dto);
+  generate(@Body() dto: GeneratePayrollDto, @CurrentUser() user: RequestUser) {
+    return this.payrollService.generate(dto, user);
   }
 
   @Get()
@@ -63,8 +64,8 @@ export class PayrollController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Post(':id/mark-paid')
-  markPaid(@Param('id') id: string) {
-    return this.payrollService.markPaid(id);
+  markPaid(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.payrollService.markPaid(id, user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)

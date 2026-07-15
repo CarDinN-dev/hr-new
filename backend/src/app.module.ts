@@ -1,10 +1,9 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { AnnouncementsModule } from './modules/announcements/announcements.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { ConsoleStateModule } from './modules/console-state/console-state.module';
 import { CsrfGuard } from './modules/auth/guards/csrf.guard';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
@@ -18,19 +17,25 @@ import { PayrollModule } from './modules/payroll/payroll.module';
 import { PerformanceReviewsModule } from './modules/performance-reviews/performance-reviews.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { AuditModule } from './modules/audit/audit.module';
+import { LoansModule } from './modules/loans/loans.module';
+import { OperationsModule } from './modules/operations/operations.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    AuditModule,
     AuthModule,
-    ConsoleStateModule,
     EmployeesModule,
     DepartmentsModule,
     JobPositionsModule,
     EmploymentContractsModule,
     AttendanceModule,
     LeaveModule,
+    LoansModule,
+    OperationsModule,
     PayrollModule,
     PerformanceReviewsModule,
     DocumentsModule,
@@ -43,4 +48,8 @@ import { HealthController } from './health.controller';
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

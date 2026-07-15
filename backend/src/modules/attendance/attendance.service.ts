@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AttendanceStatus, PayrollStatus, Prisma, Role } from '@prisma/client';
+import { AttendanceStatus, AuditAction, PayrollStatus, Prisma, Role } from '@prisma/client';
 import { hasHrAccess, hasManagementAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
@@ -8,6 +8,7 @@ import { CheckAttendanceDto } from './dto/check-attendance.dto';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
 import { QueryAttendanceDto } from './dto/query-attendance.dto';
 import { UpdateAttendanceDto } from './dto/update-attendance.dto';
+import { AuditService } from '../audit/audit.service';
 
 const attendanceInclude = {
   employee: {
@@ -27,9 +28,12 @@ const attendanceInclude = {
 export class AttendanceService {
   private readonly companyTimeZone = 'Asia/Qatar';
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-  async create(dto: CreateAttendanceDto) {
+  async create(dto: CreateAttendanceDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
     const attendanceDate = this.dayStart(dto.attendanceDate);
     return this.attendanceTransaction(async (tx) => {
@@ -41,9 +45,12 @@ export class AttendanceService {
         throw new ConflictException('Attendance already exists for this employee and date');
       }
       const data = this.manualAttendanceData(dto, attendanceDate);
-      return existing
+      const created = existing
         ? tx.attendance.update({ where: { id: existing.id }, data: { ...data, deletedAt: null }, include: attendanceInclude })
         : tx.attendance.create({ data, include: attendanceInclude });
+      const attendance = await created;
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Attendance', entityId: attendance.id, summary: 'Attendance recorded' });
+      return attendance;
     });
   }
 
@@ -73,7 +80,7 @@ export class AttendanceService {
     return record;
   }
 
-  async update(id: string, dto: UpdateAttendanceDto) {
+  async update(id: string, dto: UpdateAttendanceDto, user: RequestUser) {
     if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
     return this.attendanceTransaction(async (tx) => {
       const record = await this.ensureExists(id, tx);
@@ -92,15 +99,48 @@ export class AttendanceService {
         },
         attendanceDate,
       );
-      return tx.attendance.update({ where: { id }, data, include: attendanceInclude });
+      const updated = await tx.attendance.update({
+        where: { id },
+        data: { ...data, version: { increment: 1 } },
+        include: attendanceInclude,
+      });
+      const previousHours = new Prisma.Decimal(record.workingHours);
+      const nextHours = new Prisma.Decimal(data.workingHours);
+      if (record.status !== data.status || !previousHours.equals(nextHours)) {
+        await tx.attendanceCorrection.create({
+          data: {
+            attendanceId: id,
+            employeeId,
+            correctedById: user.employeeId ?? null,
+            previousStatus: record.status,
+            nextStatus: data.status,
+            previousHours,
+            nextHours,
+            reason: dto.correctionReason ?? dto.notes ?? 'HR attendance correction',
+          },
+        });
+      }
+      await this.audit.record(tx, user, {
+        action: AuditAction.UPDATE,
+        entityType: 'Attendance',
+        entityId: id,
+        summary: 'Attendance corrected',
+        changes: [
+          { field: 'status', previousValue: record.status, nextValue: data.status },
+          { field: 'workingHours', previousValue: previousHours.toFixed(2), nextValue: nextHours.toFixed(2) },
+        ],
+      });
+      return updated;
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: RequestUser) {
     return this.attendanceTransaction(async (tx) => {
       const record = await this.ensureExists(id, tx);
       await this.assertPayrollIsOpen(record.employeeId, record.attendanceDate, tx);
-      return tx.attendance.update({ where: { id }, data: { deletedAt: new Date() } });
+      const removed = await tx.attendance.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } } });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Attendance', entityId: id, summary: 'Attendance archived' });
+      return removed;
     });
   }
 
@@ -129,9 +169,11 @@ export class AttendanceService {
         status: lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT,
         deletedAt: null,
       };
-      return existing
+      const checkedIn = await (existing
         ? tx.attendance.update({ where: { id: existing.id }, data, include: attendanceInclude })
-        : tx.attendance.create({ data, include: attendanceInclude });
+        : tx.attendance.create({ data, include: attendanceInclude }));
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Attendance', entityId: checkedIn.id, summary: 'Employee checked in' });
+      return checkedIn;
     });
   }
 
@@ -155,11 +197,13 @@ export class AttendanceService {
       if (workingHours < 0 || workingHours > 48) {
         throw new BadRequestException('Attendance duration must be between 0 and 48 hours');
       }
-      return tx.attendance.update({
+      const checkedOut = await tx.attendance.update({
         where: { id: record.id },
-        data: { checkOut: now, workingHours },
+        data: { checkOut: now, workingHours, version: { increment: 1 } },
         include: attendanceInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Attendance', entityId: record.id, summary: 'Employee checked out' });
+      return checkedOut;
     });
   }
 
@@ -302,6 +346,7 @@ export class AttendanceService {
       lateMinutes,
       workingHours,
       status: dto.status ?? (lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT),
+      approvalStatus: dto.approvalStatus,
     };
   }
 

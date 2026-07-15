@@ -1,18 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EmploymentStatus, Gender } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDate,
   IsEmail,
   IsEnum,
-  IsNumber,
+  IsDecimal,
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
-  Min,
 } from 'class-validator';
+
+const asDecimalString = ({ value }: { value: unknown }) => String(value);
 
 export class CreateEmployeeDto {
   @ApiProperty({ example: 'EMP-0001' })
@@ -83,12 +83,10 @@ export class CreateEmployeeDto {
   @IsUUID()
   managerId?: string;
 
-  @ApiProperty({ example: 75000 })
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(1_000_000_000)
-  salary: number;
+  @ApiProperty({ example: '75000.00', type: String })
+  @Transform(asDecimalString)
+  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  salary: string;
 
   @ApiPropertyOptional()
   @IsOptional()

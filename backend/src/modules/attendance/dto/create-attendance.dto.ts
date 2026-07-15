@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AttendanceStatus } from '@prisma/client';
+import { AttendanceApprovalStatus, AttendanceStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { IsDate, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
@@ -29,6 +29,11 @@ export class CreateAttendanceDto {
   @IsOptional()
   @IsEnum(AttendanceStatus)
   status?: AttendanceStatus;
+
+  @ApiPropertyOptional({ enum: AttendanceApprovalStatus })
+  @IsOptional()
+  @IsEnum(AttendanceApprovalStatus)
+  approvalStatus?: AttendanceApprovalStatus;
 
   @ApiPropertyOptional()
   @IsOptional()

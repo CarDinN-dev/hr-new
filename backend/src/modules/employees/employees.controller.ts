@@ -7,6 +7,7 @@ import { RequestUser } from '../../common/types/request-user.type';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { UpdateEmployeeDetailsDto } from './dto/update-employee-details.dto';
 import { EmployeesService } from './employees.service';
 
 @ApiTags('Employees')
@@ -17,8 +18,8 @@ export class EmployeesController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Post()
-  create(@Body() dto: CreateEmployeeDto) {
-    return this.employeesService.create(dto);
+  create(@Body() dto: CreateEmployeeDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.create(dto, user);
   }
 
   @Get()
@@ -38,13 +39,19 @@ export class EmployeesController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
-    return this.employeesService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateEmployeeDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.update(id, dto, user);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Patch(':id/details')
+  updateDetails(@Param('id') id: string, @Body() dto: UpdateEmployeeDetailsDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.updateDetails(id, dto, user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.employeesService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.employeesService.remove(id, user);
   }
 }

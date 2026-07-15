@@ -111,6 +111,7 @@ export class AuthService {
         email: session.user.email,
         role: session.user.role,
         sessionVersion: session.user.sessionVersion,
+        employeeId: session.user.employee?.id ?? null,
       },
       csrfToken: session.csrfToken,
     };

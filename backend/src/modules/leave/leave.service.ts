@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { LeaveRequestStatus, PayrollStatus, Prisma, Role } from '@prisma/client';
+import { AuditAction, LeaveRequestStatus, PayrollStatus, Prisma, Role } from '@prisma/client';
 import { hasHrAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, listRecords, paginationMeta, softDelete } from '../../common/utils/crud.util';
@@ -14,6 +14,7 @@ import { QueryLeaveTypesDto } from './dto/query-leave-types.dto';
 import { UpdateLeaveBalanceDto } from './dto/update-leave-balance.dto';
 import { UpdateLeaveRequestDto } from './dto/update-leave-request.dto';
 import { UpdateLeaveTypeDto } from './dto/update-leave-type.dto';
+import { AuditService } from '../audit/audit.service';
 
 const leaveRequestInclude = {
   employee: {
@@ -31,7 +32,7 @@ const leaveBalanceInclude = {
 
 @Injectable()
 export class LeaveService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
   createType(dto: CreateLeaveTypeDto) {
     return this.prisma.leaveType.create({ data: dto });
@@ -138,25 +139,21 @@ export class LeaveService {
   async createRequest(dto: CreateLeaveRequestDto, user: RequestUser) {
     const employeeId = await this.resolveRequestEmployee(dto.employeeId, user);
     const employee = await this.ensureEmployee(employeeId);
-    await this.findTypeById(dto.leaveTypeId);
+    const leaveType = await this.findTypeById(dto.leaveTypeId);
     const startDate = this.leaveDate(dto.startDate);
     const endDate = this.leaveDate(dto.endDate);
-    const totalDays = this.leaveDuration(startDate, endDate, dto.isHalfDay ?? false);
+    const totalDays = new Prisma.Decimal(this.leaveDuration(startDate, endDate, dto.isHalfDay ?? false));
     const year = startDate.getUTCFullYear();
 
     return this.leaveTransaction(async (tx) => {
       await this.assertLeavePeriodAvailable(employeeId, startDate, endDate, undefined, tx);
-      const balance = await this.findBalance(employeeId, dto.leaveTypeId, year, tx);
-      const available = Number(balance.totalDays) - Number(balance.usedDays) - Number(balance.pendingDays);
-      if (available < totalDays) {
-        throw new BadRequestException('Insufficient leave balance');
+      if (leaveType.isPaid) {
+        const balance = await this.findBalance(employeeId, dto.leaveTypeId, year, tx);
+        const available = new Prisma.Decimal(balance.totalDays).minus(balance.usedDays).minus(balance.pendingDays);
+        if (available.lt(totalDays)) throw new BadRequestException('Insufficient leave balance');
+        await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { increment: totalDays } } });
       }
-
-      await tx.leaveBalance.update({
-        where: { id: balance.id },
-        data: { pendingDays: { increment: totalDays } },
-      });
-      return tx.leaveRequest.create({
+      const request = await tx.leaveRequest.create({
         data: {
           employeeId,
           leaveTypeId: dto.leaveTypeId,
@@ -169,6 +166,8 @@ export class LeaveService {
         },
         include: leaveRequestInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'LeaveRequest', entityId: request.id, summary: 'Leave request submitted' });
+      return request;
     });
   }
 
@@ -213,49 +212,51 @@ export class LeaveService {
       const nextStartDate = this.leaveDate(dto.startDate ?? request.startDate);
       const nextEndDate = this.leaveDate(dto.endDate ?? request.endDate);
       const nextIsHalfDay = dto.isHalfDay ?? request.isHalfDay;
-      const nextTotalDays = this.leaveDuration(nextStartDate, nextEndDate, nextIsHalfDay);
+      const nextTotalDays = new Prisma.Decimal(this.leaveDuration(nextStartDate, nextEndDate, nextIsHalfDay));
       await this.assertLeavePeriodAvailable(request.employeeId, nextStartDate, nextEndDate, id, tx);
-      if (dto.leaveTypeId) {
-        const leaveType = await tx.leaveType.findFirst({ where: { id: dto.leaveTypeId, deletedAt: null } });
-        if (!leaveType) throw new NotFoundException('Leave type not found');
-      }
-
       const previousYear = request.startDate.getUTCFullYear();
       const nextYear = nextStartDate.getUTCFullYear();
-      const previousBalance = await this.findBalance(request.employeeId, request.leaveTypeId, previousYear, tx);
-      const nextBalance = await this.findBalance(request.employeeId, nextLeaveTypeId, nextYear, tx);
-      const previousTotalDays = Number(request.totalDays);
-      const sameBalance = previousBalance.id === nextBalance.id;
-      const available =
-        Number(nextBalance.totalDays) - Number(nextBalance.usedDays) - Number(nextBalance.pendingDays) +
-        (sameBalance ? previousTotalDays : 0);
-      if (available < nextTotalDays) {
-        throw new BadRequestException('Insufficient leave balance');
-      }
-      if (Number(previousBalance.pendingDays) < previousTotalDays) {
+      const previousTotalDays = new Prisma.Decimal(request.totalDays);
+      const [previousType, nextType] = await Promise.all([
+        tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } }),
+        tx.leaveType.findFirst({ where: { id: nextLeaveTypeId, deletedAt: null } }),
+      ]);
+      if (!previousType || !nextType) throw new NotFoundException('Leave type not found');
+      const previousBalance = previousType.isPaid ? await this.findBalance(request.employeeId, request.leaveTypeId, previousYear, tx) : null;
+      const nextBalance = nextType.isPaid ? await this.findBalance(request.employeeId, nextLeaveTypeId, nextYear, tx) : null;
+      const sameBalance = Boolean(previousBalance && nextBalance && previousBalance.id === nextBalance.id);
+      if (previousBalance && new Prisma.Decimal(previousBalance.pendingDays).lt(previousTotalDays)) {
         throw new ConflictException('Leave balance is inconsistent. Reconcile the balance before updating this request.');
       }
+      if (nextBalance) {
+        const available = new Prisma.Decimal(nextBalance.totalDays).minus(nextBalance.usedDays).minus(nextBalance.pendingDays).plus(sameBalance ? previousTotalDays : 0);
+        if (available.lt(nextTotalDays)) throw new BadRequestException('Insufficient leave balance');
+      }
 
-      if (sameBalance) {
-        const pendingDelta = nextTotalDays - previousTotalDays;
-        if (pendingDelta !== 0) {
+      if (sameBalance && previousBalance) {
+        const pendingDelta = nextTotalDays.minus(previousTotalDays);
+        if (!pendingDelta.isZero()) {
           await tx.leaveBalance.update({
             where: { id: previousBalance.id },
             data: { pendingDays: { increment: pendingDelta } },
           });
         }
       } else {
+        if (previousBalance) {
         await tx.leaveBalance.update({
           where: { id: previousBalance.id },
           data: { pendingDays: { decrement: previousTotalDays } },
         });
+        }
+        if (nextBalance) {
         await tx.leaveBalance.update({
           where: { id: nextBalance.id },
           data: { pendingDays: { increment: nextTotalDays } },
         });
+        }
       }
 
-      return tx.leaveRequest.update({
+      const updated = await tx.leaveRequest.update({
         where: { id },
         data: {
           leaveTypeId: nextLeaveTypeId,
@@ -267,6 +268,8 @@ export class LeaveService {
         },
         include: leaveRequestInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'LeaveRequest', entityId: id, summary: 'Leave request updated' });
+      return updated;
     });
   }
 
@@ -286,19 +289,21 @@ export class LeaveService {
       }
       await this.assertCanApprove(request.employeeId, user, tx);
 
-      const year = request.startDate.getUTCFullYear();
-      const balance = await this.findBalance(request.employeeId, request.leaveTypeId, year, tx);
-      const totalDays = Number(request.totalDays);
-      if (Number(balance.pendingDays) < totalDays) {
-        throw new ConflictException('Leave balance is inconsistent. Reconcile the balance before deciding this request.');
-      }
-      const balanceUpdate =
-        dto.status === LeaveRequestStatus.APPROVED
+      const leaveType = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
+      if (!leaveType) throw new NotFoundException('Leave type not found');
+      if (leaveType.isPaid) {
+        const year = request.startDate.getUTCFullYear();
+        const balance = await this.findBalance(request.employeeId, request.leaveTypeId, year, tx);
+        const totalDays = new Prisma.Decimal(request.totalDays);
+        if (new Prisma.Decimal(balance.pendingDays).lt(totalDays)) {
+          throw new ConflictException('Leave balance is inconsistent. Reconcile the balance before deciding this request.');
+        }
+        const balanceUpdate = dto.status === LeaveRequestStatus.APPROVED
           ? { pendingDays: { decrement: totalDays }, usedDays: { increment: totalDays } }
           : { pendingDays: { decrement: totalDays } };
-
-      await tx.leaveBalance.update({ where: { id: balance.id }, data: balanceUpdate });
-      return tx.leaveRequest.update({
+        await tx.leaveBalance.update({ where: { id: balance.id }, data: balanceUpdate });
+      }
+      const updated = await tx.leaveRequest.update({
         where: { id },
         data: {
           status: dto.status,
@@ -308,6 +313,8 @@ export class LeaveService {
         },
         include: leaveRequestInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'LeaveRequest', entityId: id, summary: 'Leave request decided', changes: [{ field: 'status', previousValue: request.status, nextValue: dto.status }] });
+      return updated;
     });
   }
 
@@ -326,34 +333,40 @@ export class LeaveService {
         await this.assertPayrollIsOpen(request.employeeId, request.startDate, request.endDate, tx);
       }
 
-      const year = request.startDate.getUTCFullYear();
-      const balance = await this.findBalance(request.employeeId, request.leaveTypeId, year, tx);
-      const totalDays = Number(request.totalDays);
-      const balanceField = request.status === LeaveRequestStatus.APPROVED ? balance.usedDays : balance.pendingDays;
-      if (Number(balanceField) < totalDays) {
-        throw new ConflictException('Leave balance is inconsistent. Reconcile the balance before cancelling this request.');
-      }
-      const balanceUpdate =
-        request.status === LeaveRequestStatus.APPROVED
+      const leaveType = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
+      if (!leaveType) throw new NotFoundException('Leave type not found');
+      if (leaveType.isPaid) {
+        const year = request.startDate.getUTCFullYear();
+        const balance = await this.findBalance(request.employeeId, request.leaveTypeId, year, tx);
+        const totalDays = new Prisma.Decimal(request.totalDays);
+        const balanceField = request.status === LeaveRequestStatus.APPROVED ? balance.usedDays : balance.pendingDays;
+        if (new Prisma.Decimal(balanceField).lt(totalDays)) {
+          throw new ConflictException('Leave balance is inconsistent. Reconcile the balance before cancelling this request.');
+        }
+        const balanceUpdate = request.status === LeaveRequestStatus.APPROVED
           ? { usedDays: { decrement: totalDays } }
           : { pendingDays: { decrement: totalDays } };
-
-      await tx.leaveBalance.update({ where: { id: balance.id }, data: balanceUpdate });
-      return tx.leaveRequest.update({
+        await tx.leaveBalance.update({ where: { id: balance.id }, data: balanceUpdate });
+      }
+      const cancelled = await tx.leaveRequest.update({
         where: { id },
         data: { status: LeaveRequestStatus.CANCELLED },
         include: leaveRequestInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'LeaveRequest', entityId: id, summary: 'Leave request cancelled', changes: [{ field: 'status', previousValue: request.status, nextValue: LeaveRequestStatus.CANCELLED }] });
+      return cancelled;
     });
   }
 
-  async removeRequest(id: string) {
+  async removeRequest(id: string, user: RequestUser) {
     return this.leaveTransaction(async (tx) => {
       const request = await this.ensureRequest(id, tx);
       if (request.status === LeaveRequestStatus.PENDING || request.status === LeaveRequestStatus.APPROVED) {
         throw new BadRequestException('Cancel pending or approved leave before deleting it');
       }
-      return tx.leaveRequest.update({ where: { id }, data: { deletedAt: new Date() } });
+      const removed = await tx.leaveRequest.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'LeaveRequest', entityId: id, summary: 'Leave request archived' });
+      return removed;
     });
   }
 

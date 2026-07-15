@@ -11,6 +11,7 @@ import { PayrollService } from './payroll.service';
 
 @ApiTags('Salary Records')
 @ApiBearerAuth()
+@Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
 @Controller('payroll/salary-records')
 export class SalaryRecordsController {
   constructor(private readonly payrollService: PayrollService) {}

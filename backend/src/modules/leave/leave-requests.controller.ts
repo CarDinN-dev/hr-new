@@ -58,7 +58,7 @@ export class LeaveRequestsController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.leaveService.removeRequest(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leaveService.removeRequest(id, user);
   }
 }

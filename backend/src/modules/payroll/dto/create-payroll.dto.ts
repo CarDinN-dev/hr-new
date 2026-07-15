@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsInt, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsDecimal, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+
+const asDecimalString = ({ value }: { value: unknown }) => String(value);
 
 export class CreatePayrollDto {
   @ApiProperty()
@@ -21,43 +23,33 @@ export class CreatePayrollDto {
   @Max(12)
   month: number;
 
-  @ApiProperty({ example: 75000 })
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(1_000_000_000)
-  baseSalary: number;
+  @ApiProperty({ example: '75000.00', type: String })
+  @Transform(asDecimalString)
+  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  baseSalary: string;
 
-  @ApiPropertyOptional({ example: 5000 })
+  @ApiPropertyOptional({ example: '5000.00', type: String })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(1_000_000_000)
-  allowances?: number;
+  @Transform(asDecimalString)
+  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  allowances?: string;
 
-  @ApiPropertyOptional({ example: 1000 })
+  @ApiPropertyOptional({ example: '1000.00', type: String })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(1_000_000_000)
-  deductions?: number;
+  @Transform(asDecimalString)
+  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  deductions?: string;
 
-  @ApiPropertyOptional({ example: 2500 })
+  @ApiPropertyOptional({ example: '2500.00', type: String })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(1_000_000_000)
-  bonuses?: number;
+  @Transform(asDecimalString)
+  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  bonuses?: string;
 
-  @ApiPropertyOptional({ example: 800 })
+  @ApiPropertyOptional({ example: '800.00', type: String })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  @Max(1_000_000_000)
-  taxAmount?: number;
+  @Transform(asDecimalString)
+  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  taxAmount?: string;
 
 }

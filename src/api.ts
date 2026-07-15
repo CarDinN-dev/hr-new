@@ -33,12 +33,13 @@ export type BackendSession = {
   csrfToken: string;
   role: string;
   sessionVersion: number;
+  employeeId?: string | null;
   stateUpdatedAt?: string;
 };
 
 type BackendSessionResponse = {
   csrfToken: string;
-  user: { id: string; email: string; role: string; sessionVersion: number };
+  user: { id: string; email: string; role: string; sessionVersion: number; employeeId?: string | null };
 };
 
 type BackendDepartment = {
@@ -59,12 +60,18 @@ type BackendEmployee = {
   address?: string | null;
   hireDate: string;
   employmentStatus: string;
-  salary: string | number;
+  salary?: string | number;
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
   department?: BackendDepartment | null;
   position?: { title: string; code: string } | null;
   manager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
+  profile?: Record<string, unknown> | null;
+  bankAccount?: Record<string, unknown> | null;
+  benefits?: Record<string, unknown> | null;
+  credentials?: Array<Record<string, unknown>>;
+  education?: Array<Record<string, unknown>>;
+  salaryRecords?: Array<Record<string, unknown>>;
 };
 
 type BackendLeave = {
@@ -92,19 +99,9 @@ type BackendPayroll = {
   grossPay: string | number;
   netPay: string | number;
   status: string;
+  lineItems?: Array<Record<string, unknown>>;
 };
 
-export type BackendConsoleState = {
-  id: string;
-  data: Partial<HrState>;
-  updatedAt: string;
-};
-
-export type BackendBackupStatus = {
-  count: number;
-  intervalHours: number;
-  latest: { id: string; kind: string; createdAt: string } | null;
-};
 
 export function loadBackendSession(): BackendSession | null {
   try {
@@ -149,64 +146,104 @@ function backendSession(result: BackendSessionResponse): BackendSession {
     email: result.user.email,
     role: result.user.role,
     sessionVersion: result.user.sessionVersion,
+    employeeId: result.user.employeeId,
     csrfToken: result.csrfToken
   };
 }
 
 export async function loadBackendState(current: HrState, session: BackendSession): Promise<{ state: HrState; updatedAt?: string }> {
-  const consoleState = await loadBackendConsoleState();
-  if (consoleState?.data) return { state: { ...current, ...consoleState.data }, updatedAt: consoleState.updatedAt };
-
-  const [employees, departments, leaves, payroll] = await Promise.all([
+  const hasHrAccess = session.role === "SUPER_ADMIN" || session.role === "HR_ADMIN";
+  const [employees, departments, leaveTypes, attendance, leaves, payroll, trips, expenses, loans, jobs, candidates, eos, documents, settings] = await Promise.all([
     apiList<BackendEmployee>("/employees"),
     apiList<BackendDepartment>("/departments"),
+    apiList<Record<string, unknown>>("/leave/types"),
+    apiList<Record<string, unknown>>("/attendance"),
     apiList<BackendLeave>("/leave/requests"),
-    apiList<BackendPayroll>("/payroll")
+    hasHrAccess ? apiList<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>("/payroll") : Promise.resolve([]),
+    apiList<Record<string, unknown>>("/business-trips"),
+    apiList<Record<string, unknown>>("/expenses"),
+    hasHrAccess ? apiList<Record<string, unknown>>("/loans") : Promise.resolve([]),
+    hasHrAccess ? apiList<Record<string, unknown>>("/recruitment/jobs") : Promise.resolve([]),
+    hasHrAccess ? apiList<Record<string, unknown>>("/recruitment/candidates") : Promise.resolve([]),
+    hasHrAccess ? apiList<Record<string, unknown>>("/eos") : Promise.resolve([]),
+    apiList<Record<string, unknown>>("/documents"),
+    apiRequest<Record<string, unknown> | null>("/organization-settings")
   ]);
 
   const departmentNames = departments.map(item => item.name).filter(Boolean);
+  const attendanceState: HrState["attendance"] = {};
+  const attendanceApprovals: HrState["attendanceApprovals"] = {};
+  for (const item of attendance) {
+    const day = dateOnly(String(item.attendanceDate || ""));
+    const employeeId = String(item.employeeId || "");
+    if (!day || !employeeId) continue;
+    attendanceState[day] ??= {};
+    attendanceApprovals[day] ??= {};
+    attendanceState[day][employeeId] = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
+    attendanceApprovals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
+  }
+  const company = settings ? {
+    name: String(settings.name || current.settings.company.name),
+    legalName: String(settings.legalName || current.settings.company.legalName),
+    tagline: String(settings.tagline || ""), address: String(settings.address || ""), phone: String(settings.phone || ""),
+    email: String(settings.email || ""), website: String(settings.website || ""), currency: String(settings.currency || "QAR"),
+    wpsEmployerEid: String(settings.wpsEmployerEid || ""), wpsPayerEid: String(settings.wpsPayerEid || ""),
+    wpsPayerQid: String(settings.wpsPayerQid || ""), wpsPayerBank: String(settings.wpsPayerBank || ""), wpsPayerIban: String(settings.wpsPayerIban || ""),
+    accountPhoto: String(settings.accountPhoto || "")
+  } : current.settings.company;
   return {
     state: {
-    ...current,
-    employees: employees.map(mapEmployee),
-    leaves: leaves.map(mapLeave),
-    payroll: payroll.map(mapPayroll),
-    settings: {
-      ...current.settings,
-      departments: departmentNames.length ? departmentNames : current.settings.departments
-    }
+      ...current,
+      employees: employees.map(mapEmployee),
+      attendance: attendanceState,
+      attendanceApprovals,
+      leaves: leaves.map(mapLeave),
+      payroll: payroll.map(mapPayroll),
+      businessTrips: trips.map(item => ({
+        id: String(item.id), employeeId: String(item.employeeId), destination: String(item.destination || ""), purpose: String(item.purpose || ""),
+        from: dateOnly(String(item.startDate || "")), to: dateOnly(String(item.endDate || "")), days: Number(item.days || 0),
+        perDiem: Number(item.perDiem || 0), travelCost: Number(item.travelCost || 0), advanceAmount: Number(item.advanceAmount || 0),
+        status: titleCase(String(item.status)) as HrState["businessTrips"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
+      })),
+      expenses: expenses.map(item => ({
+        id: String(item.id), employeeId: String(item.employeeId), tripId: item.tripId ? String(item.tripId) : undefined,
+        category: String(item.category || ""), date: dateOnly(String(item.expenseDate || "")), amount: Number(item.amount || 0),
+        description: String(item.description || ""), status: titleCase(String(item.status)) as HrState["expenses"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
+      })),
+      loans: loans.map(mapLoan),
+      loanRepayments: loans.flatMap(item => Array.isArray(item.repayments) ? item.repayments.map(repayment => mapRepayment(repayment as Record<string, unknown>)) : []),
+      jobs: jobs.map(item => ({
+        id: String(item.id), title: String(item.title || ""), dept: String((item.department as Record<string, unknown> | undefined)?.name || ""),
+        openings: Number(item.openings || 1), status: titleCase(String(item.status)) as HrState["jobs"][number]["status"],
+        postedOn: dateOnly(String(item.postedOn || "")), description: String(item.description || "")
+      })),
+      candidates: candidates.map(item => ({
+        id: String(item.id), jobId: String(item.jobId), name: String(item.name || ""), email: String(item.email || ""), phone: String(item.phone || ""),
+        stage: titleCase(String(item.stage)) as HrState["candidates"][number]["stage"], rating: Number(item.rating || 0), notes: String(item.notes || ""),
+        appliedOn: dateOnly(String(item.appliedOn || "")), employeeId: item.employeeId ? String(item.employeeId) : undefined
+      })),
+      eosRecords: eos.map(item => ({
+        id: String(item.id), employeeId: String(item.employeeId), asOf: dateOnly(String(item.asOf || "")), reason: String(item.reason || ""),
+        serviceYears: Number(item.serviceYears || 0), gratuity: Number(item.gratuity || 0), leaveEncashment: Number(item.leaveEncashment || 0),
+        lopDeduction: Number(item.lopDeduction || 0), expenseReimbursement: Number(item.expenseReimbursement || 0), tripAdvanceDeduction: Number(item.tripAdvanceDeduction || 0),
+        netSettlement: Number(item.netSettlement || 0), status: titleCase(String(item.status)) as HrState["eosRecords"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
+      })),
+      documents: documents.map(item => ({
+        id: String(item.id), employeeId: String(item.employeeId), template: String(item.documentType) as HrState["documents"][number]["template"],
+        documentNumber: String(item.documentNumber || item.id), generatedOn: dateOnly(String(item.createdAt || "")), status: "Generated" as const,
+        filename: String(item.fileName || "document"), sizeBytes: item.sizeBytes == null ? undefined : Number(item.sizeBytes), downloadUrl: String(item.fileUrl || "")
+      })),
+      settings: {
+        ...current.settings,
+        company,
+        departments: departmentNames.length ? departmentNames : current.settings.departments,
+        leaveTypes: leaveTypes.map(item => ({ id: String(item.id), name: String(item.name), days: Number(item.annualAllowanceDays || 0) })),
+        workdayHours: Number(settings?.workdayHours || current.settings.workdayHours),
+        halfDayHours: Number(settings?.halfDayHours || current.settings.halfDayHours),
+        loanDeductionCap: { type: settings?.loanCapType === "PERCENT" ? "Percent" : "Amount", value: Number(settings?.loanCapValue || 0) }
+      }
     }
   };
-}
-
-export async function loadBackendConsoleState() {
-  return apiRequest<BackendConsoleState | null>("/console-state");
-}
-
-export async function saveBackendState(state: HrState, session: BackendSession) {
-  return apiRequest<BackendConsoleState>("/console-state", {
-    method: "PUT",
-    csrfToken: session.csrfToken,
-    body: JSON.stringify({ data: state, updatedAt: session.stateUpdatedAt })
-  });
-}
-
-export function loadBackupStatus(session: BackendSession) {
-  return apiRequest<BackendBackupStatus>("/console-state/backups/status");
-}
-
-export function createBackendBackup(session: BackendSession) {
-  return apiRequest<{ id: string; kind: string; createdAt: string }>("/console-state/backups", {
-    method: "POST",
-    csrfToken: session.csrfToken
-  });
-}
-
-export function rollbackLatestBackendBackup(session: BackendSession) {
-  return apiRequest<BackendConsoleState>("/console-state/backups/rollback-latest", {
-    method: "POST",
-    csrfToken: session.csrfToken
-  });
 }
 
 export async function generateBackendPayroll(session: BackendSession, year: number, month: number) {
@@ -224,7 +261,7 @@ export async function logoutBackend(session: BackendSession) {
   });
 }
 
-async function apiList<T>(path: string) {
+export async function apiList<T>(path: string) {
   const records: T[] = [];
   for (let page = 1; page <= 100; page += 1) {
     const separator = path.includes("?") ? "&" : "?";
@@ -237,14 +274,14 @@ async function apiList<T>(path: string) {
   throw new ApiError("The data set is too large to load safely.", 422);
 }
 
-async function apiRequest<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<T> {
+export async function apiRequest<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<T> {
   const envelope = await apiRequestEnvelope<T>(path, init);
   return envelope.data as T;
 }
 
 async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
 
   const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "same-origin" });
@@ -264,12 +301,13 @@ async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfTok
 }
 
 function isHrConsoleRole(role: unknown): role is string {
-  return role === "SUPER_ADMIN" || role === "HR_ADMIN";
+  return role === "SUPER_ADMIN" || role === "HR_ADMIN" || role === "MANAGER" || role === "EMPLOYEE";
 }
 
 function mapEmployee(employee: BackendEmployee): EmployeeRecord {
   const fields = Object.fromEntries(employeeImportColumns.map(column => [column, ""]));
-  const salary = String(Number(employee.salary || 0));
+  const salaryRecord = employee.salaryRecords?.[0];
+  const salary = String(Number(salaryRecord?.baseSalary ?? employee.salary ?? 0));
   const manager = employee.manager
     ? `${employee.manager.employeeCode} - ${employee.manager.firstName} ${employee.manager.lastName}`.trim()
     : "";
@@ -296,8 +334,11 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
       "E-Mail ID (Work)": employee.email,
       "Emergency Contact Name": employee.emergencyContactName || "",
       "Emergency Contact Mobile No.": employee.emergencyContactPhone || "",
+      ...mapEmployeeDetails(employee),
       Basic: salary,
-      Total: salary
+      HRA: String(Number(salaryRecord?.allowances || 0)),
+      "Overtime Amount": String(Number(salaryRecord?.bonuses || 0)),
+      Total: String(Number(salary) + Number(salaryRecord?.allowances || 0) + Number(salaryRecord?.bonuses || 0))
     }
   });
 }
@@ -322,6 +363,9 @@ function mapPayroll(item: BackendPayroll): PayrollSlip {
   const allowances = Number(item.allowances || 0);
   const deductions = Number(item.deductions || 0);
   const bonus = Number(item.bonuses || 0);
+  const lines = item.lineItems ?? [];
+  const lineAmount = (kind: string) => lines.filter(line => line.kind === kind).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  const loanDeductions = lines.filter(line => line.kind === "LOAN_REPAYMENT").map(line => ({ loanId: String(line.loanId || ""), amount: Number(line.amount || 0) }));
   return {
     id: item.id,
     employeeId: item.employeeId,
@@ -333,10 +377,10 @@ function mapPayroll(item: BackendPayroll): PayrollSlip {
     overtime: 0,
     bonus,
     deductions,
-    loanDeduction: 0,
-    loanDeductions: [],
-    lopDays: 0,
-    lopAmount: 0,
+    loanDeduction: loanDeductions.reduce((sum, line) => sum + line.amount, 0),
+    loanDeductions,
+    lopDays: Number(String(lines.find(line => line.kind === "LOSS_OF_PAY")?.description || "").match(/[\d.]+/)?.[0] || 0),
+    lopAmount: lineAmount("LOSS_OF_PAY"),
     gross: Number(item.grossPay || base + allowances + bonus),
     net: Number(item.netPay || 0),
     note: "Synced from backend",
@@ -363,4 +407,70 @@ function dateOnly(value?: string | null) {
 
 function titleCase(value?: string | null) {
   return value ? value.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase()) : "";
+}
+
+function mapEmployeeDetails(employee: BackendEmployee): Record<string, string> {
+  const profile = employee.profile ?? {};
+  const bank = employee.bankAccount ?? {};
+  const benefits = employee.benefits ?? {};
+  const credentials = employee.credentials ?? [];
+  const education = employee.education?.[0] ?? {};
+  const credential = (type: string) => credentials.find(item => item.type === type) ?? {};
+  const qid = credential("QID");
+  const permit = credential("WORK_PERMIT");
+  const passport = credential("PASSPORT");
+  const license = credential("DRIVING_LICENSE");
+  const insurance = credential("INSURANCE");
+  const value = (record: Record<string, unknown>, key: string) => record[key] == null ? "" : String(record[key]);
+  const yesNo = (record: Record<string, unknown>, key: string) => record[key] ? "Yes" : "No";
+  return {
+    "Employee Category": value(profile, "employeeCategory"), "Work Shift": value(profile, "workShift"), Company: value(profile, "company"),
+    "Sponsor Name": value(profile, "sponsorName"), "WPS Sponsor": value(profile, "wpsSponsor"), "Grade/Band": value(profile, "gradeBand"),
+    "Family Status (Yes/No)": value(profile, "familyStatus"), "Leave Policy": value(profile, "leavePolicy"), "Last Rejoin Date": dateOnly(value(profile, "lastRejoinDate")),
+    "Business Unit": value(profile, "businessUnit"), "Working Company Name": value(profile, "workingCompanyName"), "Cost Centre": value(profile, "costCentre"),
+    Nationality: value(profile, "nationality"), "RP/ID Number": value(qid, "number"), "RP/ID Profession": value(profile, "residenceProfession"),
+    "QID Expiry Date": dateOnly(value(qid, "expiryDate")), "Visa Type": value(profile, "visaType"), "Hire Type": value(profile, "hireType"),
+    "Confirmation Date": dateOnly(value(profile, "confirmationDate")), "ESB Date": dateOnly(value(profile, "esbDate")), "Marital Status": value(profile, "maritalStatus"),
+    "Office Mobile No.": value(profile, "officeMobile"), "Personal Mobile No.": value(profile, "personalMobile"), "No. of Dependents": value(profile, "dependents"),
+    "Blood Group": value(profile, "bloodGroup"), "Local Building/Villa #": value(profile, "localBuilding"), "Local Street #": value(profile, "localStreet"),
+    "Local Zone #": value(profile, "localZone"), "International Apartment": value(profile, "internationalApartment"), "International Building": value(profile, "internationalBuilding"),
+    "International Floor": value(profile, "internationalFloor"), "International Street": value(profile, "internationalStreet"), "International State": value(profile, "internationalState"),
+    "International Country": value(profile, "internationalCountry"), "International Zip Code": value(profile, "internationalZipCode"),
+    "Emergency Contact Relationship": value(profile, "emergencyRelationship"), "Salary Pay Type": value(profile, "salaryPayType"), "Office File No.": value(profile, "officeFileNumber"),
+    "Access Card No.": value(profile, "accessCardNumber"), "Bank Code": value(bank, "bankCode"), "IBAN No.": value(bank, "iban"), "Account No.": value(bank, "accountNumber"),
+    "Travel Sector": value(benefits, "travelSector"), "Travel Cost": value(benefits, "travelCost"), "No. of Tickets - Employee (Year)": value(benefits, "employeeTicketsPerYear"),
+    "Ticket Balance (%)": value(benefits, "ticketBalancePercent"), "No. of Tickets - Family": value(benefits, "familyTickets"),
+    "Company Accommodation": yesNo(benefits, "companyAccommodation"), "Company Transportation": yesNo(benefits, "companyTransportation"),
+    "Overtime Eligible": yesNo(benefits, "overtimeEligible"), "Company Food": yesNo(benefits, "companyFood"), "Company Fuel Card": yesNo(benefits, "companyFuelCard"),
+    "Highest Education Qualification": value(education, "qualification"), "Year of Passing": value(education, "yearOfPassing"),
+    "Work Permit No.": value(permit, "number"), "Work Permit Issue Date": dateOnly(value(permit, "issueDate")), "Work Permit Expiry Date": dateOnly(value(permit, "expiryDate")),
+    "Passport No.": value(passport, "number"), "Passport Place of Issue": value(passport, "placeOfIssue"), "Passport Issue Date": dateOnly(value(passport, "issueDate")), "Passport Expiry Date": dateOnly(value(passport, "expiryDate")),
+    "License Type": value(license, "profession"), "Driving License No.": value(license, "number"), "Driving License Expiry Date": dateOnly(value(license, "expiryDate")),
+    "Insurance Card No.": value(insurance, "number"), "Insurance Issue Date": dateOnly(value(insurance, "issueDate")), "Insurance Expiry Date": dateOnly(value(insurance, "expiryDate"))
+  };
+}
+
+function mapLoan(item: Record<string, unknown>): HrState["loans"][number] {
+  const overrides = Array.isArray(item.overrides) ? item.overrides : [];
+  return {
+    id: String(item.id), employeeId: String(item.employeeId), type: String(item.type || "Loan"), principal: Number(item.principal || 0),
+    disbursementDate: dateOnly(String(item.disbursementDate || "")), startPeriod: `${item.startYear}-${String(item.startMonth).padStart(2, "0")}`,
+    repaymentMode: ({ DURATION: "Duration", MONTHLY_LIMIT: "Monthly limit", MANUAL: "Manual" } as const)[String(item.repaymentMode)] ?? "Manual",
+    termMonths: Number(item.termMonths || 1), monthlyLimit: Number(item.monthlyLimit || 0),
+    status: titleCase(String(item.status)) as HrState["loans"][number]["status"], reference: String(item.reference || ""), notes: String(item.notes || ""),
+    createdOn: dateOnly(String(item.createdAt || "")),
+    deductionOverrides: Object.fromEntries(overrides.map(raw => {
+      const row = raw as Record<string, unknown>;
+      return [`${row.year}-${String(row.month).padStart(2, "0")}`, { amount: Number(row.amount || 0), reason: String(row.reason || ""), approvedAboveLimit: Boolean(row.approvedAboveLimit), updatedOn: dateOnly(String(row.updatedAt || "")) }];
+    }))
+  };
+}
+
+function mapRepayment(item: Record<string, unknown>): HrState["loanRepayments"][number] {
+  return {
+    id: String(item.id), loanId: String(item.loanId), payrollId: item.payrollId ? String(item.payrollId) : undefined,
+    year: Number(item.year), month: Number(item.month), amount: Number(item.amount || 0),
+    source: item.source === "PAYROLL" ? "Payroll" : "Manual", status: item.status === "REVERSED" ? "Reversed" : "Posted",
+    note: String(item.note || ""), postedOn: dateOnly(String(item.postedAt || ""))
+  };
 }

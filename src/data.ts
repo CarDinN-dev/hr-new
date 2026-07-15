@@ -180,6 +180,7 @@ export type DocumentLog = {
   status: "Generated";
   filename?: string;
   dataUrl?: string;
+  downloadUrl?: string;
   sizeBytes?: number;
 };
 

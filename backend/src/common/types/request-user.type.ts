@@ -8,4 +8,5 @@ export type RequestUser = {
   sessionVersion: number;
   csrfToken?: string;
   employeeId?: string | null;
+  requestId?: string;
 };

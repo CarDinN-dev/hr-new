@@ -65,6 +65,11 @@ enum AttendanceStatus {
   ON_LEAVE
 }
 
+enum AttendanceApprovalStatus {
+  APPROVED
+  NOT_APPROVED
+}
+
 enum LeaveRequestStatus {
   PENDING
   APPROVED
@@ -94,6 +99,100 @@ enum DocumentVisibility {
   PUBLIC
 }
 
+enum TripStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+enum ExpenseStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum LoanRepaymentMode {
+  DURATION
+  MONTHLY_LIMIT
+  MANUAL
+}
+
+enum LoanStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  SETTLED
+  CANCELLED
+}
+
+enum LoanRepaymentSource {
+  PAYROLL
+  MANUAL
+}
+
+enum LoanRepaymentStatus {
+  POSTED
+  REVERSED
+}
+
+enum RecruitmentJobStatus {
+  OPEN
+  ON_HOLD
+  CLOSED
+}
+
+enum CandidateStage {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+}
+
+enum EosStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
+enum PayrollLineKind {
+  BASE_SALARY
+  ALLOWANCE
+  BONUS
+  FIXED_DEDUCTION
+  TAX
+  LOSS_OF_PAY
+  LOAN_REPAYMENT
+  MANUAL_ADJUSTMENT
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  TRANSITION
+  IMPORT
+  ACCESS
+  LOGIN
+  LOGOUT
+}
+
+enum ImportRunStatus {
+  DRY_RUN
+  APPLIED
+  FAILED
+}
+
+enum ImportItemStatus {
+  CREATED
+  SKIPPED
+  INVALID
+  CONFLICT
+}
+
 model User {
   id                String       @id @default(uuid())
   email             String       @unique
@@ -104,6 +203,7 @@ model User {
   isActive          Boolean      @default(true)
   sessionVersion    Int          @default(0)
   employee          Employee?
+  auditEvents       AuditEvent[]
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   deletedAt         DateTime?
@@ -140,30 +240,43 @@ model Employee {
   salary                Decimal          @db.Decimal(12, 2)
   emergencyContactName  String?
   emergencyContactPhone String?
+  version               Int              @default(1)
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
   deletedAt             DateTime?
 
-  user                  User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
-  department            Department?          @relation("DepartmentEmployees", fields: [departmentId], references: [id], onDelete: SetNull)
-  position              JobPosition?         @relation(fields: [positionId], references: [id], onDelete: SetNull)
-  manager               Employee?            @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
-  directReports         Employee[]           @relation("EmployeeManager")
-  managedDepartments    Department[]         @relation("DepartmentManager")
+  user                  User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  department            Department?             @relation("DepartmentEmployees", fields: [departmentId], references: [id], onDelete: SetNull)
+  position              JobPosition?            @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  manager               Employee?               @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports         Employee[]              @relation("EmployeeManager")
+  managedDepartments    Department[]            @relation("DepartmentManager")
   employmentContracts   EmploymentContract[]
   attendanceRecords     Attendance[]
   leaveBalances         LeaveBalance[]
-  leaveRequests         LeaveRequest[]       @relation("EmployeeLeaveRequests")
-  managedLeaveRequests  LeaveRequest[]       @relation("LeaveManager")
-  approvedLeaveRequests LeaveRequest[]       @relation("LeaveApprover")
+  leaveRequests         LeaveRequest[]          @relation("EmployeeLeaveRequests")
+  managedLeaveRequests  LeaveRequest[]          @relation("LeaveManager")
+  approvedLeaveRequests LeaveRequest[]          @relation("LeaveApprover")
   salaryRecords         SalaryRecord[]
-  payrolls              Payroll[]            @relation("EmployeePayrolls")
-  approvedPayrolls      Payroll[]            @relation("PayrollApprover")
-  performanceReviews    PerformanceReview[]  @relation("ReviewSubject")
-  reviewsGiven          PerformanceReview[]  @relation("ReviewReviewer")
-  documents             EmployeeDocument[]   @relation("EmployeeDocuments")
-  uploadedDocuments     EmployeeDocument[]   @relation("DocumentUploader")
-  createdAnnouncements  Announcement[]       @relation("AnnouncementCreator")
+  payrolls              Payroll[]               @relation("EmployeePayrolls")
+  approvedPayrolls      Payroll[]               @relation("PayrollApprover")
+  performanceReviews    PerformanceReview[]     @relation("ReviewSubject")
+  reviewsGiven          PerformanceReview[]     @relation("ReviewReviewer")
+  documents             EmployeeDocument[]      @relation("EmployeeDocuments")
+  uploadedDocuments     EmployeeDocument[]      @relation("DocumentUploader")
+  createdAnnouncements  Announcement[]          @relation("AnnouncementCreator")
+  profile               EmployeeProfile?
+  bankAccount           EmployeeBankAccount?
+  credentials           EmployeeCredential[]
+  benefits              EmployeeBenefitProfile?
+  education             EmployeeEducation[]
+  businessTrips         BusinessTrip[]
+  expenses              EmployeeExpense[]
+  loans                 EmployeeLoan[]
+  recruitmentCandidates RecruitmentCandidate[]
+  eosRecords            EosRecord[]
+  attendanceCorrections AttendanceCorrection[]  @relation("AttendanceCorrectionEmployee")
+  correctedAttendance   AttendanceCorrection[]  @relation("AttendanceCorrector")
 
   @@index([departmentId])
   @@index([positionId])
@@ -182,10 +295,11 @@ model Department {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  manager       Employee?      @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
-  employees     Employee[]     @relation("DepartmentEmployees")
-  jobPositions  JobPosition[]
-  announcements Announcement[]
+  manager         Employee?        @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
+  employees       Employee[]       @relation("DepartmentEmployees")
+  jobPositions    JobPosition[]
+  announcements   Announcement[]
+  recruitmentJobs RecruitmentJob[]
 
   @@index([managerId])
   @@index([deletedAt])
@@ -232,21 +346,24 @@ model EmploymentContract {
 }
 
 model Attendance {
-  id             String           @id @default(uuid())
+  id             String                   @id @default(uuid())
   employeeId     String
   attendanceDate DateTime
   checkIn        DateTime?
   checkOut       DateTime?
-  isLate         Boolean          @default(false)
-  lateMinutes    Int              @default(0)
-  workingHours   Decimal          @default(0) @db.Decimal(5, 2)
-  status         AttendanceStatus @default(PRESENT)
+  isLate         Boolean                  @default(false)
+  lateMinutes    Int                      @default(0)
+  workingHours   Decimal                  @default(0) @db.Decimal(5, 2)
+  status         AttendanceStatus         @default(PRESENT)
+  approvalStatus AttendanceApprovalStatus @default(NOT_APPROVED)
   notes          String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  version        Int                      @default(1)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
   deletedAt      DateTime?
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee    Employee               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  corrections AttendanceCorrection[]
 
   @@unique([employeeId, attendanceDate])
   @@index([attendanceDate])
@@ -307,6 +424,7 @@ model LeaveRequest {
   approvedById    String?
   approvedAt      DateTime?
   rejectionReason String?
+  version         Int                @default(1)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   deletedAt       DateTime?
@@ -334,6 +452,7 @@ model SalaryRecord {
   taxRate       Decimal   @default(0) @db.Decimal(5, 2)
   effectiveFrom DateTime
   effectiveTo   DateTime?
+  version       Int       @default(1)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
@@ -362,12 +481,15 @@ model Payroll {
   approvedAt   DateTime?
   paidAt       DateTime?
   generatedAt  DateTime      @default(now())
+  version      Int           @default(1)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   deletedAt    DateTime?
 
-  employee   Employee  @relation("EmployeePayrolls", fields: [employeeId], references: [id], onDelete: Cascade)
-  approvedBy Employee? @relation("PayrollApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  employee       Employee          @relation("EmployeePayrolls", fields: [employeeId], references: [id], onDelete: Cascade)
+  approvedBy     Employee?         @relation("PayrollApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  lineItems      PayrollLineItem[]
+  loanRepayments LoanRepayment[]
 
   @@unique([employeeId, year, month])
   @@index([employeeId])
@@ -402,17 +524,24 @@ model PerformanceReview {
 }
 
 model EmployeeDocument {
-  id           String             @id @default(uuid())
-  employeeId   String
-  documentType String
-  fileName     String
-  fileUrl      String
-  uploadedById String
-  expiryDate   DateTime?
-  visibility   DocumentVisibility @default(MANAGER_AND_HR)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  deletedAt    DateTime?
+  id               String             @id @default(uuid())
+  employeeId       String
+  documentType     String
+  fileName         String
+  fileUrl          String             @default("")
+  documentNumber   String?            @unique
+  objectName       String?            @unique
+  objectGeneration String?
+  contentType      String?
+  sizeBytes        Int?
+  sha256           String?
+  uploadedById     String
+  expiryDate       DateTime?
+  visibility       DocumentVisibility @default(MANAGER_AND_HR)
+  version          Int                @default(1)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  deletedAt        DateTime?
 
   employee   Employee @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
   uploadedBy Employee @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
@@ -434,6 +563,7 @@ model Announcement {
   publishedAt   DateTime?
   expiresAt     DateTime?
   isActive      Boolean   @default(true)
+  version       Int       @default(1)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
@@ -464,4 +594,434 @@ model HrConsoleStateBackup {
   createdAt      DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model OrganizationSettings {
+  id                     String   @id @default("default")
+  name                   String
+  legalName              String
+  tagline                String?
+  address                String?
+  phone                  String?
+  email                  String?
+  website                String?
+  currency               String   @default("QAR")
+  wpsEmployerEid         String?
+  wpsPayerEid            String?
+  wpsPayerQid            String?
+  wpsPayerBank           String?
+  wpsPayerIban           String?
+  accountPhoto           String?
+  workdayHours           Decimal  @default(8) @db.Decimal(5, 2)
+  halfDayHours           Decimal  @default(4) @db.Decimal(5, 2)
+  loanCapType            String   @default("AMOUNT")
+  loanCapValue           Decimal  @default(0) @db.Decimal(12, 2)
+  financialPolicyVersion Int      @default(1)
+  version                Int      @default(1)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model EmployeeProfile {
+  employeeId             String    @id
+  employeeCategory       String?
+  workShift              String?
+  company                String?
+  sponsorName            String?
+  wpsSponsor             String?
+  gradeBand              String?
+  familyStatus           String?
+  leavePolicy            String?
+  lastRejoinDate         DateTime?
+  businessUnit           String?
+  workingCompanyName     String?
+  costCentre             String?
+  nationality            String?
+  residenceProfession    String?
+  visaType               String?
+  hireType               String?
+  confirmationDate       DateTime?
+  esbDate                DateTime?
+  maritalStatus          String?
+  officeMobile           String?
+  personalMobile         String?
+  dependents             Int?
+  bloodGroup             String?
+  localBuilding          String?
+  localStreet            String?
+  localZone              String?
+  internationalApartment String?
+  internationalBuilding  String?
+  internationalFloor     String?
+  internationalStreet    String?
+  internationalState     String?
+  internationalCountry   String?
+  internationalZipCode   String?
+  emergencyRelationship  String?
+  salaryPayType          String?
+  officeFileNumber       String?
+  accessCardNumber       String?
+  version                Int       @default(1)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model EmployeeBankAccount {
+  employeeId    String   @id
+  bankCode      String?
+  iban          String?
+  accountNumber String?
+  version       Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model EmployeeCredential {
+  id           String    @id @default(uuid())
+  employeeId   String
+  type         String
+  number       String?
+  profession   String?
+  placeOfIssue String?
+  issueDate    DateTime?
+  expiryDate   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, type])
+  @@index([expiryDate])
+  @@index([deletedAt])
+}
+
+model EmployeeBenefitProfile {
+  employeeId             String   @id
+  travelSector           String?
+  travelCost             Decimal  @default(0) @db.Decimal(12, 2)
+  employeeTicketsPerYear Int      @default(0)
+  ticketBalancePercent   Decimal  @default(0) @db.Decimal(5, 2)
+  familyTickets          Int      @default(0)
+  companyAccommodation   Boolean  @default(false)
+  companyTransportation  Boolean  @default(false)
+  overtimeEligible       Boolean  @default(false)
+  companyFood            Boolean  @default(false)
+  companyFuelCard        Boolean  @default(false)
+  version                Int      @default(1)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model EmployeeEducation {
+  id            String    @id @default(uuid())
+  employeeId    String
+  qualification String
+  yearOfPassing Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([deletedAt])
+}
+
+model AttendanceCorrection {
+  id             String           @id @default(uuid())
+  attendanceId   String
+  employeeId     String
+  correctedById  String?
+  previousStatus AttendanceStatus
+  nextStatus     AttendanceStatus
+  previousHours  Decimal          @db.Decimal(5, 2)
+  nextHours      Decimal          @db.Decimal(5, 2)
+  reason         String
+  createdAt      DateTime         @default(now())
+
+  attendance  Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  employee    Employee   @relation("AttendanceCorrectionEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  correctedBy Employee?  @relation("AttendanceCorrector", fields: [correctedById], references: [id], onDelete: SetNull)
+
+  @@index([attendanceId])
+  @@index([employeeId])
+}
+
+model BusinessTrip {
+  id            String     @id @default(uuid())
+  employeeId    String
+  destination   String
+  purpose       String
+  startDate     DateTime
+  endDate       DateTime
+  days          Decimal    @db.Decimal(7, 2)
+  perDiem       Decimal    @default(0) @db.Decimal(12, 2)
+  travelCost    Decimal    @default(0) @db.Decimal(12, 2)
+  advanceAmount Decimal    @default(0) @db.Decimal(12, 2)
+  status        TripStatus @default(PENDING)
+  version       Int        @default(1)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  deletedAt     DateTime?
+
+  employee Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  expenses EmployeeExpense[]
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model EmployeeExpense {
+  id          String        @id @default(uuid())
+  employeeId  String
+  tripId      String?
+  category    String
+  expenseDate DateTime
+  amount      Decimal       @db.Decimal(12, 2)
+  description String
+  status      ExpenseStatus @default(SUBMITTED)
+  version     Int           @default(1)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  trip     BusinessTrip? @relation(fields: [tripId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([tripId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model EmployeeLoan {
+  id               String            @id @default(uuid())
+  employeeId       String
+  type             String
+  principal        Decimal           @db.Decimal(12, 2)
+  disbursementDate DateTime
+  startYear        Int
+  startMonth       Int
+  repaymentMode    LoanRepaymentMode
+  termMonths       Int               @default(1)
+  monthlyLimit     Decimal           @default(0) @db.Decimal(12, 2)
+  status           LoanStatus        @default(DRAFT)
+  reference        String?
+  notes            String?
+  version          Int               @default(1)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
+
+  employee     Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  overrides    LoanDeductionOverride[]
+  repayments   LoanRepayment[]
+  payrollLines PayrollLineItem[]
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model LoanDeductionOverride {
+  id                 String   @id @default(uuid())
+  loanId             String
+  year               Int
+  month              Int
+  amount             Decimal  @db.Decimal(12, 2)
+  reason             String
+  approvedAboveLimit Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  loan EmployeeLoan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@unique([loanId, year, month])
+}
+
+model LoanRepayment {
+  id         String              @id @default(uuid())
+  loanId     String
+  payrollId  String?
+  year       Int
+  month      Int
+  amount     Decimal             @db.Decimal(12, 2)
+  source     LoanRepaymentSource
+  status     LoanRepaymentStatus @default(POSTED)
+  note       String?
+  postedAt   DateTime            @default(now())
+  reversedAt DateTime?
+  createdAt  DateTime            @default(now())
+
+  loan    EmployeeLoan @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  payroll Payroll?     @relation(fields: [payrollId], references: [id], onDelete: Restrict)
+
+  @@unique([payrollId, loanId])
+  @@index([loanId])
+  @@index([status])
+}
+
+model PayrollLineItem {
+  id          String          @id @default(uuid())
+  payrollId   String
+  loanId      String?
+  kind        PayrollLineKind
+  description String
+  amount      Decimal         @db.Decimal(12, 2)
+  createdAt   DateTime        @default(now())
+
+  payroll Payroll       @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  loan    EmployeeLoan? @relation(fields: [loanId], references: [id], onDelete: Restrict)
+
+  @@index([payrollId])
+  @@index([loanId])
+  @@index([kind])
+}
+
+model RecruitmentJob {
+  id           String               @id @default(uuid())
+  title        String
+  departmentId String?
+  openings     Int                  @default(1)
+  status       RecruitmentJobStatus @default(OPEN)
+  postedOn     DateTime
+  description  String?
+  version      Int                  @default(1)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  deletedAt    DateTime?
+
+  department Department?            @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  candidates RecruitmentCandidate[]
+
+  @@index([departmentId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model RecruitmentCandidate {
+  id         String         @id @default(uuid())
+  jobId      String
+  employeeId String?
+  name       String
+  email      String
+  phone      String?
+  stage      CandidateStage @default(APPLIED)
+  rating     Decimal        @default(0) @db.Decimal(3, 2)
+  notes      String?
+  appliedOn  DateTime
+  version    Int            @default(1)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  deletedAt  DateTime?
+
+  job      RecruitmentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  employee Employee?      @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@index([jobId])
+  @@index([employeeId])
+  @@index([stage])
+  @@index([deletedAt])
+}
+
+model EosRecord {
+  id                   String    @id @default(uuid())
+  employeeId           String
+  asOf                 DateTime
+  reason               String
+  serviceYears         Decimal   @db.Decimal(9, 4)
+  gratuity             Decimal   @db.Decimal(12, 2)
+  leaveEncashment      Decimal   @db.Decimal(12, 2)
+  lopDeduction         Decimal   @db.Decimal(12, 2)
+  expenseReimbursement Decimal   @db.Decimal(12, 2)
+  tripAdvanceDeduction Decimal   @db.Decimal(12, 2)
+  netSettlement        Decimal   @db.Decimal(12, 2)
+  policyVersion        Int       @default(1)
+  status               EosStatus @default(DRAFT)
+  version              Int       @default(1)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model DocumentSequence {
+  key       String   @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model AuditEvent {
+  id          String      @id @default(uuid())
+  actorUserId String?
+  requestId   String?
+  action      AuditAction
+  entityType  String
+  entityId    String?
+  summary     String
+  createdAt   DateTime    @default(now())
+
+  actor   User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  changes AuditChange[]
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model AuditChange {
+  id            String  @id @default(uuid())
+  eventId       String
+  field         String
+  previousValue String?
+  nextValue     String?
+
+  event AuditEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+}
+
+model ImportRun {
+  id                   String          @id @default(uuid())
+  sourceStateUpdatedAt DateTime
+  sourceHash           String          @unique
+  status               ImportRunStatus
+  createdCount         Int             @default(0)
+  skippedCount         Int             @default(0)
+  invalidCount         Int             @default(0)
+  conflictCount        Int             @default(0)
+  startedAt            DateTime        @default(now())
+  completedAt          DateTime?
+
+  items ImportItem[]
+}
+
+model ImportItem {
+  id         String           @id @default(uuid())
+  runId      String
+  entityType String
+  legacyId   String?
+  targetId   String?
+  sourceHash String
+  status     ImportItemStatus
+  reason     String?
+  createdAt  DateTime         @default(now())
+
+  run ImportRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, entityType, sourceHash])
+  @@index([runId, status])
 }

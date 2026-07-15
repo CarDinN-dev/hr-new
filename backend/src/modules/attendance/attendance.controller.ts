@@ -18,8 +18,8 @@ export class AttendanceController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Post()
-  create(@Body() dto: CreateAttendanceDto) {
-    return this.attendanceService.create(dto);
+  create(@Body() dto: CreateAttendanceDto, @CurrentUser() user: RequestUser) {
+    return this.attendanceService.create(dto, user);
   }
 
   @Post('check-in')
@@ -50,13 +50,13 @@ export class AttendanceController {
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateAttendanceDto) {
-    return this.attendanceService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateAttendanceDto, @CurrentUser() user: RequestUser) {
+    return this.attendanceService.update(id, dto, user);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.attendanceService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.attendanceService.remove(id, user);
   }
 }

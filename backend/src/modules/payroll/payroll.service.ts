@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { AttendanceStatus, EmploymentStatus, LeaveRequestStatus, PayrollStatus, Prisma, Role } from '@prisma/client';
+import { AttendanceStatus, AuditAction, EmploymentStatus, LeaveRequestStatus, PayrollLineKind, PayrollStatus, Prisma } from '@prisma/client';
 import { hasHrAccess } from '../../common/constants/access.constants';
+import { money, MoneyInput, nonNegativeMoney, percentageMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -11,6 +12,8 @@ import { QueryPayrollDto } from './dto/query-payroll.dto';
 import { QuerySalaryRecordsDto } from './dto/query-salary-records.dto';
 import { UpdatePayrollDto } from './dto/update-payroll.dto';
 import { UpdateSalaryRecordDto } from './dto/update-salary-record.dto';
+import { AuditService } from '../audit/audit.service';
+import { LoansService } from '../loans/loans.service';
 
 const employeePayrollSelect = {
   id: true,
@@ -26,6 +29,8 @@ const employeePayrollSelect = {
 const payrollInclude = {
   employee: { select: employeePayrollSelect },
   approvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  lineItems: { orderBy: { createdAt: 'asc' as const } },
+  loanRepayments: { orderBy: { postedAt: 'asc' as const } },
 };
 
 const salaryRecordInclude = {
@@ -34,14 +39,28 @@ const salaryRecordInclude = {
 
 @Injectable()
 export class PayrollService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly loans: LoansService,
+    private readonly audit: AuditService,
+  ) {}
 
   async createSalaryRecord(dto: CreateSalaryRecordDto) {
     await this.ensureEmployee(dto.employeeId);
     this.assertDateRange(dto.effectiveFrom, dto.effectiveTo, 'effectiveTo');
     return this.payrollTransaction(async (tx) => {
       await this.assertSalaryPeriodAvailable(dto.employeeId, dto.effectiveFrom, dto.effectiveTo, undefined, tx);
-      return tx.salaryRecord.create({ data: dto, include: salaryRecordInclude });
+      return tx.salaryRecord.create({
+        data: {
+          ...dto,
+          baseSalary: nonNegativeMoney(dto.baseSalary, 'baseSalary', '1000000000'),
+          allowances: nonNegativeMoney(dto.allowances ?? 0, 'allowances', '1000000000'),
+          deductions: nonNegativeMoney(dto.deductions ?? 0, 'deductions', '1000000000'),
+          bonuses: nonNegativeMoney(dto.bonuses ?? 0, 'bonuses', '1000000000'),
+          taxRate: nonNegativeMoney(dto.taxRate ?? 0, 'taxRate', '100'),
+        },
+        include: salaryRecordInclude,
+      });
     });
   }
 
@@ -80,7 +99,19 @@ export class PayrollService {
       const effectiveTo = dto.effectiveTo ?? record.effectiveTo ?? undefined;
       this.assertDateRange(effectiveFrom, effectiveTo, 'effectiveTo');
       await this.assertSalaryPeriodAvailable(record.employeeId, effectiveFrom, effectiveTo, id, tx);
-      return tx.salaryRecord.update({ where: { id }, data: dto, include: salaryRecordInclude });
+      return tx.salaryRecord.update({
+        where: { id },
+        data: {
+          ...dto,
+          baseSalary: dto.baseSalary === undefined ? undefined : nonNegativeMoney(dto.baseSalary, 'baseSalary', '1000000000'),
+          allowances: dto.allowances === undefined ? undefined : nonNegativeMoney(dto.allowances, 'allowances', '1000000000'),
+          deductions: dto.deductions === undefined ? undefined : nonNegativeMoney(dto.deductions, 'deductions', '1000000000'),
+          bonuses: dto.bonuses === undefined ? undefined : nonNegativeMoney(dto.bonuses, 'bonuses', '1000000000'),
+          taxRate: dto.taxRate === undefined ? undefined : nonNegativeMoney(dto.taxRate, 'taxRate', '100'),
+          version: { increment: 1 },
+        },
+        include: salaryRecordInclude,
+      });
     });
   }
 
@@ -91,9 +122,10 @@ export class PayrollService {
 
   async create(dto: CreatePayrollDto) {
     await this.ensureEmployee(dto.employeeId);
-    const totals = this.payrollTotals(dto);
+    const amounts = this.payrollAmounts(dto);
+    const totals = this.payrollTotals(amounts);
     return this.prisma.payroll.create({
-      data: { ...dto, ...totals, status: PayrollStatus.DRAFT },
+      data: { employeeId: dto.employeeId, year: dto.year, month: dto.month, ...amounts, ...totals, status: PayrollStatus.DRAFT },
       include: payrollInclude,
     });
   }
@@ -135,13 +167,20 @@ export class PayrollService {
         throw new BadRequestException('Approved or paid payroll cannot be edited');
       }
       const totals = this.payrollTotals({
-        baseSalary: dto.baseSalary ?? Number(payroll.baseSalary),
-        allowances: dto.allowances ?? Number(payroll.allowances),
-        deductions: dto.deductions ?? Number(payroll.deductions),
-        bonuses: dto.bonuses ?? Number(payroll.bonuses),
-        taxAmount: dto.taxAmount ?? Number(payroll.taxAmount),
+        baseSalary: dto.baseSalary ?? payroll.baseSalary,
+        allowances: dto.allowances ?? payroll.allowances,
+        deductions: dto.deductions ?? payroll.deductions,
+        bonuses: dto.bonuses ?? payroll.bonuses,
+        taxAmount: dto.taxAmount ?? payroll.taxAmount,
       });
-      return tx.payroll.update({ where: { id }, data: { ...dto, ...totals }, include: payrollInclude });
+      const amounts = this.payrollAmounts({
+        baseSalary: dto.baseSalary ?? payroll.baseSalary,
+        allowances: dto.allowances ?? payroll.allowances,
+        deductions: dto.deductions ?? payroll.deductions,
+        bonuses: dto.bonuses ?? payroll.bonuses,
+        taxAmount: dto.taxAmount ?? payroll.taxAmount,
+      });
+      return tx.payroll.update({ where: { id }, data: { ...amounts, ...totals, version: { increment: 1 } }, include: payrollInclude });
     });
   }
 
@@ -155,7 +194,7 @@ export class PayrollService {
     });
   }
 
-  async generate(dto: GeneratePayrollDto) {
+  async generate(dto: GeneratePayrollDto, user: RequestUser) {
     const employees = await this.prisma.employee.findMany({
       where: {
         deletedAt: null,
@@ -189,6 +228,8 @@ export class PayrollService {
           return { record: existing, skipped: true };
         }
 
+        if (existing) await this.loans.postPayrollDeductions(existing.id, dto.year, dto.month, [], tx);
+
         const salaryRecord = await tx.salaryRecord.findFirst({
           where: {
             employeeId: employee.id,
@@ -199,17 +240,18 @@ export class PayrollService {
           orderBy: { effectiveFrom: 'desc' },
         });
 
-        const baseSalary = Number(salaryRecord?.baseSalary ?? employee.salary);
-        const allowances = Number(salaryRecord?.allowances ?? 0);
-        const fixedDeductions = Number(salaryRecord?.deductions ?? 0);
-        const bonuses = Number(salaryRecord?.bonuses ?? 0);
-        const taxRate = Number(salaryRecord?.taxRate ?? 0);
-        const grossPay = baseSalary + allowances + bonuses;
-        const taxAmount = Number(((grossPay * taxRate) / 100).toFixed(2));
+        const baseSalary = nonNegativeMoney(salaryRecord?.baseSalary ?? employee.salary, 'baseSalary');
+        const allowances = nonNegativeMoney(salaryRecord?.allowances ?? 0, 'allowances');
+        const fixedDeductions = nonNegativeMoney(salaryRecord?.deductions ?? 0, 'deductions');
+        const bonuses = nonNegativeMoney(salaryRecord?.bonuses ?? 0, 'bonuses');
+        const taxRate = nonNegativeMoney(salaryRecord?.taxRate ?? 0, 'taxRate');
+        const grossPay = sumMoney([baseSalary, allowances, bonuses]);
+        const taxAmount = percentageMoney(grossPay, taxRate);
         const lopDays = await this.payrollLopDays(employee.id, monthStart, monthEnd, tx);
-        const lopAmount = Number(((baseSalary / 30) * lopDays).toFixed(2));
-        const deductions = fixedDeductions + lopAmount;
-        const netPay = Math.max(0, Number((grossPay - deductions - taxAmount).toFixed(2)));
+        const lopAmount = money(baseSalary.div(30).times(lopDays), 'loss of pay');
+        const loanPlan = await this.loans.preparePayrollDeductions(employee.id, dto.year, dto.month, tx);
+        const deductions = sumMoney([fixedDeductions, lopAmount, loanPlan.total]);
+        const netPay = Prisma.Decimal.max(ZERO_MONEY, grossPay.minus(deductions).minus(taxAmount));
 
         const record = await tx.payroll.upsert({
           where: {
@@ -233,6 +275,7 @@ export class PayrollService {
             approvedAt: null,
             paidAt: null,
             deletedAt: null,
+            version: { increment: 1 },
           },
           create: {
             employeeId: employee.id,
@@ -249,7 +292,27 @@ export class PayrollService {
           },
           include: payrollInclude,
         });
-        return { record, skipped: false };
+        await tx.payrollLineItem.deleteMany({ where: { payrollId: record.id } });
+        const standardLines = [
+          { kind: PayrollLineKind.BASE_SALARY, description: 'Base salary', amount: baseSalary },
+          { kind: PayrollLineKind.ALLOWANCE, description: 'Allowances', amount: allowances },
+          { kind: PayrollLineKind.BONUS, description: 'Bonuses', amount: bonuses },
+          { kind: PayrollLineKind.FIXED_DEDUCTION, description: 'Fixed deductions', amount: fixedDeductions },
+          { kind: PayrollLineKind.LOSS_OF_PAY, description: `Loss of pay (${lopDays.toFixed(2)} days)`, amount: lopAmount },
+          { kind: PayrollLineKind.TAX, description: 'Tax deduction', amount: taxAmount },
+        ].filter((line) => !line.amount.isZero());
+        if (standardLines.length) {
+          await tx.payrollLineItem.createMany({ data: standardLines.map((line) => ({ payrollId: record.id, ...line })) });
+        }
+        await this.loans.postPayrollDeductions(record.id, dto.year, dto.month, loanPlan.deductions, tx);
+        await this.audit.record(tx, user, {
+          action: AuditAction.TRANSITION,
+          entityType: 'Payroll',
+          entityId: record.id,
+          summary: 'Payroll generated from normalized attendance, leave, salary, and loan records',
+        });
+        const hydrated = await tx.payroll.findUniqueOrThrow({ where: { id: record.id }, include: payrollInclude });
+        return { record: hydrated, skipped: false };
       });
       generated.push(result.record);
       if (result.skipped) skippedFinalizedCount += 1;
@@ -272,29 +335,34 @@ export class PayrollService {
       if (payroll.status !== PayrollStatus.GENERATED) {
         throw new BadRequestException('Only generated payroll can be approved');
       }
-      return tx.payroll.update({
+      const updated = await tx.payroll.update({
         where: { id },
         data: {
           status: PayrollStatus.APPROVED,
           approvedById: user.employeeId ?? null,
           approvedAt: new Date(),
+          version: { increment: 1 },
         },
         include: payrollInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'Payroll', entityId: id, summary: 'Payroll approved' });
+      return updated;
     });
   }
 
-  async markPaid(id: string) {
+  async markPaid(id: string, user: RequestUser) {
     return this.payrollTransaction(async (tx) => {
       const payroll = await this.ensurePayroll(id, tx);
       if (payroll.status !== PayrollStatus.APPROVED) {
         throw new BadRequestException('Only approved payroll can be marked paid');
       }
-      return tx.payroll.update({
+      const updated = await tx.payroll.update({
         where: { id },
-        data: { status: PayrollStatus.PAID, paidAt: new Date() },
+        data: { status: PayrollStatus.PAID, paidAt: new Date(), version: { increment: 1 } },
         include: payrollInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'Payroll', entityId: id, summary: 'Payroll marked paid' });
+      return updated;
     });
   }
 
@@ -312,10 +380,7 @@ export class PayrollService {
   }
 
   private payrollAccessWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) return {};
-    if (!user.employeeId) return { employeeId: '__no_employee_profile__' };
-    if (user.role === Role.MANAGER) return { employeeId: user.employeeId };
-    return { employeeId: user.employeeId };
+    return hasHrAccess(user.role) ? {} : { employeeId: '__salary_access_denied__' };
   }
 
   private async payrollLopDays(
@@ -324,7 +389,7 @@ export class PayrollService {
     monthEnd: Date,
     client: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
-    const days = new Map<string, number>();
+    const days = new Map<string, Prisma.Decimal>();
     const attendance = await client.attendance.findMany({
       where: {
         employeeId,
@@ -336,7 +401,7 @@ export class PayrollService {
     });
 
     for (const record of attendance) {
-      days.set(this.dateKey(record.attendanceDate), record.status === AttendanceStatus.ABSENT ? 1 : 0.5);
+      days.set(this.dateKey(record.attendanceDate), new Prisma.Decimal(record.status === AttendanceStatus.ABSENT ? 1 : 0.5));
     }
 
     const unpaidLeaves = await client.leaveRequest.findMany({
@@ -355,14 +420,14 @@ export class PayrollService {
       const leaveStart = leave.startDate > monthStart ? leave.startDate : monthStart;
       const leaveEnd = leave.endDate < monthEnd ? leave.endDate : monthEnd;
       const spanDays = this.inclusiveDays(leave.startDate, leave.endDate);
-      const perDay = Math.min(1, Number(leave.totalDays) / spanDays);
+      const perDay = Prisma.Decimal.min(1, leave.totalDays.div(spanDays));
       for (const date of this.eachDay(leaveStart, leaveEnd)) {
         const key = this.dateKey(date);
-        days.set(key, Math.max(days.get(key) ?? 0, perDay));
+        days.set(key, Prisma.Decimal.max(days.get(key) ?? ZERO_MONEY, perDay));
       }
     }
 
-    return Array.from(days.values()).reduce((sum, value) => sum + value, 0);
+    return sumMoney(Array.from(days.values()));
   }
 
   private *eachDay(start: Date, end: Date) {
@@ -423,15 +488,32 @@ export class PayrollService {
     if (overlap) throw new ConflictException('Salary record dates overlap an existing record');
   }
 
-  private payrollTotals(values: {
-    baseSalary: number;
-    allowances?: number;
-    deductions?: number;
-    bonuses?: number;
-    taxAmount?: number;
+  private payrollAmounts(values: {
+    baseSalary: MoneyInput;
+    allowances?: MoneyInput;
+    deductions?: MoneyInput;
+    bonuses?: MoneyInput;
+    taxAmount?: MoneyInput;
   }) {
-    const grossPay = Number((values.baseSalary + (values.allowances ?? 0) + (values.bonuses ?? 0)).toFixed(2));
-    const netPay = Math.max(0, Number((grossPay - (values.deductions ?? 0) - (values.taxAmount ?? 0)).toFixed(2)));
+    return {
+      baseSalary: nonNegativeMoney(values.baseSalary, 'baseSalary'),
+      allowances: nonNegativeMoney(values.allowances ?? 0, 'allowances'),
+      deductions: nonNegativeMoney(values.deductions ?? 0, 'deductions'),
+      bonuses: nonNegativeMoney(values.bonuses ?? 0, 'bonuses'),
+      taxAmount: nonNegativeMoney(values.taxAmount ?? 0, 'taxAmount'),
+    };
+  }
+
+  private payrollTotals(values: {
+    baseSalary: MoneyInput;
+    allowances?: MoneyInput;
+    deductions?: MoneyInput;
+    bonuses?: MoneyInput;
+    taxAmount?: MoneyInput;
+  }) {
+    const amounts = this.payrollAmounts(values);
+    const grossPay = sumMoney([amounts.baseSalary, amounts.allowances, amounts.bonuses]);
+    const netPay = Prisma.Decimal.max(ZERO_MONEY, grossPay.minus(amounts.deductions).minus(amounts.taxAmount));
     return { grossPay, netPay };
   }
 

@@ -109,18 +109,16 @@ import {
 import {
   backendSessionKey,
   ApiError,
-  createBackendBackup,
-  loadBackupStatus,
   loadBackendSession,
   loadBackendState,
+  generateBackendPayroll,
   loginBackend,
   logoutBackend,
   restoreBackendSession,
-  rollbackLatestBackendBackup,
-  saveBackendState,
   startMicrosoftLogin,
   type BackendSession
 } from "./api";
+import { persistNormalizedStateDelta } from "./normalizedSync";
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
@@ -162,10 +160,6 @@ const appQueryClient = new QueryClient({
 
 function workspaceQueryKey(session: BackendSession) {
   return ["workspace", session.id, session.sessionVersion] as const;
-}
-
-function backupStatusQueryKey(session: BackendSession) {
-  return ["backup-status", session.id, session.sessionVersion] as const;
 }
 
 function backendSessionMarker(session: BackendSession) {
@@ -271,6 +265,7 @@ function App() {
   const hydratedWorkspaceSession = useRef("");
   const backendSessionRef = useRef<BackendSession | null | undefined>(backendSession);
   const stateRef = useRef(state);
+  const persistedStateRef = useRef(state);
   const backendSaveQueue = useRef<Promise<void>>(Promise.resolve());
   stateRef.current = state;
   const workspaceQuery = useQuery({
@@ -334,7 +329,9 @@ function App() {
     const sessionMarker = backendSessionMarker(backendSession);
     if (!workspaceQuery.data || hydratedWorkspaceSession.current === sessionMarker) return;
     hydratedWorkspaceSession.current = sessionMarker;
-    setState(hydrateState(workspaceQuery.data.state));
+    const hydrated = hydrateState(workspaceQuery.data.state);
+    persistedStateRef.current = hydrated;
+    setState(hydrated);
     setBackendSession(prev => prev && workspaceQuery.data.updatedAt ? { ...prev, stateUpdatedAt: workspaceQuery.data.updatedAt } : prev);
     backendReady.current = true;
     setSyncError("");
@@ -379,13 +376,20 @@ function App() {
     const save = backendSaveQueue.current.then(async () => {
       const session = backendSessionRef.current;
       if (!session) throw new Error("Your session has ended. Sign in again.");
-      const saved = await saveBackendState(stateRef.current, session);
-      const nextSession = { ...session, stateUpdatedAt: saved.updatedAt };
+      const previous = persistedStateRef.current;
+      const next = stateRef.current;
+      if (JSON.stringify(previous) === JSON.stringify(next)) return session;
+      await persistNormalizedStateDelta(previous, next, session);
+      const loaded = await loadBackendState(next, session);
+      const hydrated = hydrateState(loaded.state);
+      persistedStateRef.current = hydrated;
+      stateRef.current = hydrated;
+      setState(hydrated);
+      const nextSession = session;
       if (backendSessionRef.current && backendSessionMarker(backendSessionRef.current) === backendSessionMarker(session)) {
         backendSessionRef.current = nextSession;
-        setBackendSession(prev => prev && backendSessionMarker(prev) === backendSessionMarker(session) ? nextSession : prev);
       }
-      queryClient.setQueryData(workspaceQueryKey(nextSession), { state: stateRef.current, updatedAt: saved.updatedAt });
+      queryClient.setQueryData(workspaceQueryKey(nextSession), { state: hydrated });
       setSyncError("");
       return nextSession;
     });
@@ -395,6 +399,17 @@ function App() {
 
   function closeModal() {
     setModal(null);
+  }
+
+  async function refreshWorkspace() {
+    const session = backendSessionRef.current;
+    if (!session) return;
+    const loaded = await loadBackendState(stateRef.current, session);
+    const hydrated = hydrateState(loaded.state);
+    persistedStateRef.current = hydrated;
+    stateRef.current = hydrated;
+    setState(hydrated);
+    queryClient.setQueryData(workspaceQueryKey(session), { state: hydrated });
   }
 
   function savePdf(file: GeneratedPdf | undefined, template: PdfTemplate, employeeId = "") {
@@ -489,6 +504,11 @@ function App() {
     );
   }
 
+  const hrAccess = backendSession.role === "SUPER_ADMIN" || backendSession.role === "HR_ADMIN";
+  const visibleNavItems = hrAccess
+    ? navItems
+    : navItems.filter(item => ["Dashboard", "Employees", "Attendance", "Leave", "Business Trips", "Expenses", "Documents"].includes(item));
+  if (!visibleNavItems.includes(nav)) return <Navigate to={navPaths.Dashboard} replace />;
   const pageHint = pageDescription(nav);
 
   return (
@@ -503,7 +523,7 @@ function App() {
           <button className="sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
-          {navItems.map(item => {
+          {visibleNavItems.map(item => {
             const Icon = navIcon[item];
             return (
               <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}>
@@ -547,18 +567,18 @@ function App() {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
-          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} />}
-          {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} />}
-          {nav === "Leave" && <Leave state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} />}
+          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canManage={hrAccess} canViewSalary={hrAccess} />}
+          {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={hrAccess} />}
+          {nav === "Leave" && <Leave state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canApprove={hrAccess || backendSession.role === "MANAGER"} canDelete={hrAccess} currentEmployeeId={backendSession.employeeId} />}
           {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
           {nav === "Expenses" && <Expenses state={state} setState={setState} notify={notify} />}
           {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} isSuperAdmin={backendSession.role === "SUPER_ADMIN"} />}
-          {nav === "Payroll" && <Payroll state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} />}
+          {nav === "Payroll" && <Payroll state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} backendSession={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
-          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} setBackendSession={setBackendSession} saveBackendNow={saveBackendNow} />}
+          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
         </div>
       </main>
 
@@ -753,7 +773,7 @@ function pageDescription(nav: NavItem) {
   return descriptions[nav];
 }
 
-function Employees({ state, setState, setModal, notify, close, savePdf }: CommonProps) {
+function Employees({ state, setState, setModal, notify, close, savePdf, canManage, canViewSalary }: CommonProps & { canManage: boolean; canViewSalary: boolean }) {
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
@@ -788,9 +808,9 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
         </div>
         <div className="employee-hero-actions">
           <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("employee_directory", state, new Date().getFullYear(), new Date().getMonth() + 1), "employee_directory"))}><Download size={16} /> Directory PDF</button>
-          <button onClick={downloadEmployeeTemplate}><Download size={16} /> Excel template</button>
+          {canManage && <><button onClick={downloadEmployeeTemplate}><Download size={16} /> Excel template</button>
           <label className="button-like"><Upload size={16} /> Import employees<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.xls,.html,.csv,.tsv,text/html,text/csv" onChange={async event => { const file = event.target.files?.[0]; event.currentTarget.value = ""; await importEmployees(file); }} /></label>
-          <button className="primary" onClick={() => edit()}><UserRoundPlus size={16} /> Add employee</button>
+          <button className="primary" onClick={() => edit()}><UserRoundPlus size={16} /> Add employee</button></>}
         </div>
       </div>
       <div className="employee-stats">
@@ -810,7 +830,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
               const salary = employeeSalary(employee);
               return (
                 <article className="employee-card" key={employee.id}>
-                  <button className="employee-card-main" onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={() => edit(employee)} savePdf={savePdf} />)}>
+                  <button className="employee-card-main" onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canManage ? () => edit(employee) : undefined} savePdf={savePdf} canViewSalary={canViewSalary} />)}>
                     <EmployeeAvatar employee={employee} />
                     <span>
                       <strong>{employeeName(employee)}</strong>
@@ -822,13 +842,13 @@ function Employees({ state, setState, setModal, notify, close, savePdf }: Common
                     <span><b>Department</b>{employee.fields.Department || "-"}</span>
                     <span><b>Manager</b>{employee.fields["Reporting Manager Employee Code/Name"] || "-"}</span>
                     <span><b>Joined</b>{formatDate(employee.fields["Joining Date"])}</span>
-                    <span><b>Total pay</b>{formatMoney(salary.total, state.settings.company.currency)}</span>
+                    {canViewSalary && <span><b>Total pay</b>{formatMoney(salary.total, state.settings.company.currency)}</span>}
                   </div>
                   <div className="row-actions">
-                    <button onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={() => edit(employee)} savePdf={savePdf} />)}>Open profile</button>
-                    <button onClick={() => edit(employee)}>Edit</button>
+                    <button onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canManage ? () => edit(employee) : undefined} savePdf={savePdf} canViewSalary={canViewSalary} />)}>Open profile</button>
+                    {canManage && <button onClick={() => edit(employee)}>Edit</button>}
                     <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>PDF</button>
-                    <button className="danger-outline" onClick={() => remove(employee)}><Trash2 size={15} /> Delete</button>
+                    {canManage && <button className="danger-outline" onClick={() => remove(employee)}><Trash2 size={15} /> Delete</button>}
                   </div>
                 </article>
               );
@@ -954,7 +974,7 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
   );
 }
 
-function EmployeeProfile({ employee, state, edit, close, savePdf }: { employee: EmployeeRecord; state: HrState; edit: () => void; close: () => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function EmployeeProfile({ employee, state, edit, close, savePdf, canViewSalary }: { employee: EmployeeRecord; state: HrState; edit?: () => void; close: () => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; canViewSalary: boolean }) {
   const salary = employeeSalary(employee);
   return (
     <div className="employee-profile">
@@ -967,10 +987,10 @@ function EmployeeProfile({ employee, state, edit, close, savePdf }: { employee: 
         {["Employee Code", "Joining Date", "Reporting Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", "Bank Code", "IBAN No."].map(field => (
           <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
         ))}
-        <div><span>Monthly Total</span><strong>{formatMoney(salary.total, state.settings.company.currency)}</strong></div>
+        {canViewSalary && <div><span>Monthly Total</span><strong>{formatMoney(salary.total, state.settings.company.currency)}</strong></div>}
       </section>
       <div className="profile-sections">
-        {employeeProfileSections.map(section => (
+        {employeeProfileSections.filter(section => canViewSalary || section.title !== "Bank & Salary").map(section => (
           <section key={section.title}>
             <h3>{section.title}</h3>
             <div className="profile-field-grid">
@@ -983,14 +1003,14 @@ function EmployeeProfile({ employee, state, edit, close, savePdf }: { employee: 
       </div>
       <div className="modal-actions">
         <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>Profile PDF</button>
-        <button onClick={edit}>Edit</button>
+        {edit && <button onClick={edit}>Edit</button>}
         <button className="primary" onClick={close}>Done</button>
       </div>
     </div>
   );
 }
 
-function Attendance({ state, setState, savePdf, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: (message: string) => void }) {
+function Attendance({ state, setState, savePdf, notify, canManage }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: (message: string) => void; canManage: boolean }) {
   const now = new Date();
   const [date, setDate] = useState(todayISO);
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -1058,12 +1078,12 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
             <h3>Daily Attendance</h3>
             <p>Mark each employee or import a completed attendance sheet.</p>
           </div>
-          <div className="inline-controls">
+          {canManage && <div className="inline-controls">
             <button onClick={downloadAttendanceTemplate}><Download size={16} /> Template</button>
             <label className="button-like"><Upload size={16} /> Import attendance<input type="file" accept=".xls,.html,.csv,.tsv,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
             <button onClick={() => setState(prev => markAllAttendance(prev, date, "P"))}>Mark all present</button>
             <button onClick={() => setState(prev => clearAttendanceDay(prev, date))}>Clear day</button>
-          </div>
+          </div>}
         </div>
 
         <div className="attendance-metrics">
@@ -1071,7 +1091,7 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
           <AttendanceMetric label="Half-day" value={daySummary.H} tone="half" />
           <AttendanceMetric label="Leave" value={daySummary.L} tone="leave" />
           <AttendanceMetric label="Absent" value={daySummary.A} tone="absent" />
-          <AttendanceMetric label="Day LOP estimate" value={formatMoney(payrollImpact, state.settings.company.currency)} tone="payroll" />
+          {canManage && <AttendanceMetric label="Day LOP estimate" value={formatMoney(payrollImpact, state.settings.company.currency)} tone="payroll" />}
         </div>
 
         <div className="attendance-toolbar department-style">
@@ -1107,9 +1127,9 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
                         <strong>{punch.hours}</strong>
                         <Badge value={punch.status} />
                         <Badge value={approval || (needsReview ? "Pending" : code ? "Approved" : "Not marked")} />
-                        <div className="att-btns">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div>
+                        {canManage ? <div className="att-btns">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div> : <span>-</span>}
                       </div>
-                      {needsReview && (
+                      {canManage && needsReview && (
                         <div className="attendance-review">
                           <span><strong>{punch.status}: </strong>{punch.note}</span>
                           <div><button onClick={() => setState(prev => decideAttendance(prev, date, employee.id, "Approved"))}>Approve</button><button className="danger-outline" onClick={() => setState(prev => decideAttendance(prev, date, employee.id, "Not approved"))}>Not approved</button></div>
@@ -1123,7 +1143,7 @@ function Attendance({ state, setState, savePdf, notify }: { state: HrState; setS
           })}
           {!grouped.length && <div className="empty">No attendance records match the filters.</div>}
         </div>
-        <p className="attendance-foot">Marked: <strong>{daySummary.marked}</strong>/{daySummary.total} · Present {daySummary.P} · Half-day {daySummary.H} · Leave {daySummary.L} · Absent {daySummary.A} · Unmarked {daySummary.unmarked} · Day LOP estimate {formatMoney(payrollImpact, state.settings.company.currency)}</p>
+        <p className="attendance-foot">Marked: <strong>{daySummary.marked}</strong>/{daySummary.total} · Present {daySummary.P} · Half-day {daySummary.H} · Leave {daySummary.L} · Absent {daySummary.A} · Unmarked {daySummary.unmarked}{canManage ? ` · Day LOP estimate ${formatMoney(payrollImpact, state.settings.company.currency)}` : ""}</p>
       </div>
 
       <div className="panel">
@@ -1154,12 +1174,12 @@ function AttendanceMetric({ label, value, tone }: { label: string; value: React.
   return <div className={`attendance-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function Leave({ state, setState, setModal, notify, close, savePdf }: CommonProps) {
+function Leave({ state, setState, setModal, notify, close, savePdf, canApprove, canDelete, currentEmployeeId }: CommonProps & { canApprove: boolean; canDelete: boolean; currentEmployeeId?: string | null }) {
   const [status, setStatus] = useState("");
   const rows = state.leaves.filter(item => !status || item.status === status);
 
   function openLeaveForm() {
-    setModal(<LeaveForm state={state} close={close} notify={notify} save={leave => setState(prev => ({ ...prev, leaves: [...prev.leaves, leave] }))} />);
+    setModal(<LeaveForm state={state} close={close} notify={notify} currentEmployeeId={currentEmployeeId} save={leave => setState(prev => ({ ...prev, leaves: [...prev.leaves, leave] }))} />);
   }
 
   return (
@@ -1187,8 +1207,8 @@ function Leave({ state, setState, setModal, notify, close, savePdf }: CommonProp
               leave.reason,
               <Badge key="status" value={leave.status} />,
               <div className="row-actions" key="actions">
-                {leave.status === "Pending" && <><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Approved"))}>Approve</button><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Rejected"))}>Reject</button></>}
-                <button onClick={() => confirmDelete(`${leave.type} request`) && setState(prev => deleteLeave(prev, leave.id))}>Delete</button>
+                {canApprove && leave.status === "Pending" && <><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Approved"))}>Approve</button><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Rejected"))}>Reject</button></>}
+                {(canDelete || leave.status === "Pending" || leave.status === "Approved") && <button onClick={() => confirmDelete(`${leave.type} request`) && setState(prev => deleteLeave(prev, leave.id))}>{canDelete ? "Delete" : "Cancel"}</button>}
               </div>
             ];
           })}
@@ -1199,8 +1219,8 @@ function Leave({ state, setState, setModal, notify, close, savePdf }: CommonProp
   );
 }
 
-function LeaveForm({ state, save, close, notify }: { state: HrState; save: (leave: HrState["leaves"][number]) => void; close: () => void; notify: (message: string) => void }) {
-  const [employeeId, setEmployeeId] = useState(activeEmployees(state.employees)[0]?.id || "");
+function LeaveForm({ state, save, close, notify, currentEmployeeId }: { state: HrState; save: (leave: HrState["leaves"][number]) => void; close: () => void; notify: (message: string) => void; currentEmployeeId?: string | null }) {
+  const [employeeId, setEmployeeId] = useState(currentEmployeeId || activeEmployees(state.employees)[0]?.id || "");
   const [type, setType] = useState(state.settings.leaveTypes[0]?.name || "Annual leave");
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
@@ -1778,7 +1798,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   </section>;
 }
 
-function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonProps) {
+function Payroll({ state, setState, setModal, notify, close, savePdf, backendSession, refreshWorkspace }: CommonProps & { backendSession: BackendSession; refreshWorkspace: () => Promise<void> }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -1795,10 +1815,14 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
   const finalized = slips.filter(slip => slip.status === "Finalized").length;
   const warnings = payrollExportWarnings(state, slips);
 
-  function runPayroll() {
-    const result = createPayroll(state, year, month);
-    setState(result.state);
-    notify(result.created || result.updated ? `${result.created} payslip(s) created, ${result.updated} draft payslip(s) refreshed.` : "Payroll is already finalized or up to date.");
+  async function runPayroll() {
+    try {
+      const result = await generateBackendPayroll(backendSession, year, month);
+      await refreshWorkspace();
+      notify(`${result.length} payroll record(s) processed.`);
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   }
 
   function exportPayrollSheet() {
@@ -1825,7 +1849,7 @@ function Payroll({ state, setState, setModal, notify, close, savePdf }: CommonPr
         <div className="inline-controls">
           <select value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
           <input type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
-          <button className="primary" onClick={runPayroll}>Run payroll</button>
+          <button className="primary" onClick={() => void runPayroll()}>Run payroll</button>
         </div>
       </div>
       <div className="payroll-grid">
@@ -2016,7 +2040,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
             formatDate(doc.generatedOn),
             doc.filename || doc.status,
             <div className="row-actions" key="actions">
-              {doc.dataUrl ? <><button onClick={() => { try { openDataUrl(doc.dataUrl!); } catch (error) { notify(errorMessage(error)); } }}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : <Badge value={doc.status} />}
+              {doc.dataUrl ? <><button onClick={() => { try { openDataUrl(doc.dataUrl!); } catch (error) { notify(errorMessage(error)); } }}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : doc.downloadUrl ? <a className="button-like" href={doc.downloadUrl}>Download</a> : <Badge value={doc.status} />}
               <button className="danger-outline" onClick={() => removeDocument(doc.id, doc.filename || doc.documentNumber)}><Trash2 size={15} /> Delete</button>
             </div>
           ];
@@ -2059,16 +2083,12 @@ function SettingsPage({
   state,
   setState,
   notify,
-  backendSession,
-  setBackendSession,
-  saveBackendNow
+  backendSession
 }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   notify: (message: string) => void;
   backendSession: BackendSession | null;
-  setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null | undefined>>;
-  saveBackendNow: () => Promise<BackendSession>;
 }) {
   const [company, setCompany] = useState(state.settings.company);
   const [departments, setDepartments] = useState(state.settings.departments.join("\n"));
@@ -2077,18 +2097,6 @@ function SettingsPage({
   const [halfDayHours, setHalfDayHours] = useState(state.settings.halfDayHours);
   const [loanCapType, setLoanCapType] = useState(state.settings.loanDeductionCap.type);
   const [loanCapValue, setLoanCapValue] = useState(state.settings.loanDeductionCap.value);
-  const [backupBusy, setBackupBusy] = useState("");
-  const queryClient = useQueryClient();
-  const backupStatusQuery = useQuery({
-    queryKey: backendSession ? backupStatusQueryKey(backendSession) : ["backup-status", "signed-out"],
-    queryFn: () => loadBackupStatus(backendSession!),
-    enabled: Boolean(backendSession)
-  });
-  const backupStatus = backupStatusQuery.data ?? null;
-
-  useEffect(() => {
-    if (backupStatusQuery.error) notify(errorMessage(backupStatusQuery.error));
-  }, [backupStatusQuery.error]);
 
   async function updatePhoto(file?: File) {
     if (!file) return;
@@ -2102,47 +2110,13 @@ function SettingsPage({
 
   function saveSettings() {
     const nextDepartments = departments.split("\n").map(item => item.trim()).filter(Boolean);
-    const nextLeaveTypes = leaveTypes.split("\n").map((line, index) => {
+    const nextLeaveTypes = leaveTypes.split("\n").map(line => {
       const [name, days] = line.split(":");
-      return { id: `lt-${index + 1}`, name: name.trim(), days: Number(days) || 0 };
+      const normalizedName = name.trim();
+      return { id: state.settings.leaveTypes.find(item => item.name.toLowerCase() === normalizedName.toLowerCase())?.id || newId(), name: normalizedName, days: Number(days) || 0 };
     }).filter(item => item.name);
     setState(prev => ({ ...prev, settings: { ...prev.settings, company, departments: nextDepartments, leaveTypes: nextLeaveTypes, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)), loanDeductionCap: { type: loanCapType, value: Math.max(0, loanCapType === "Percent" ? Math.min(100, loanCapValue) : loanCapValue) } } }));
     notify("Settings saved.");
-  }
-
-  async function takeBackup() {
-    if (!backendSession) return;
-    setBackupBusy("backup");
-    try {
-      const session = await saveBackendNow();
-      await createBackendBackup(session);
-      await queryClient.invalidateQueries({ queryKey: backupStatusQueryKey(session) });
-      notify("Backup stored.");
-    } catch (error) {
-      notify(errorMessage(error));
-    } finally {
-      setBackupBusy("");
-    }
-  }
-
-  async function rollbackBackup() {
-    if (!backendSession || !window.confirm("Roll back to the latest backup? Current HR data will be replaced.")) return;
-    setBackupBusy("rollback");
-    try {
-      const session = await saveBackendNow();
-      const restored = await rollbackLatestBackendBackup(session);
-      const nextState = hydrateState(restored.data);
-      const nextSession = { ...session, stateUpdatedAt: restored.updatedAt };
-      setState(nextState);
-      setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: restored.updatedAt } : prev);
-      queryClient.setQueryData(workspaceQueryKey(nextSession), { state: nextState, updatedAt: restored.updatedAt });
-      queryClient.setQueryData(backupStatusQueryKey(nextSession), await loadBackupStatus(nextSession));
-      notify("Latest backup restored.");
-    } catch (error) {
-      notify(errorMessage(error));
-    } finally {
-      setBackupBusy("");
-    }
   }
 
   return <section className="settings-grid">
@@ -2158,9 +2132,8 @@ function SettingsPage({
       </div>
     </div>
     <div className="panel">
-      <div className="panel-head"><h3>Backup & Rollback</h3><span>Automatic every 8 hours</span></div>
-      <p className="muted">{backupStatus?.latest ? `Latest: ${new Date(backupStatus.latest.createdAt).toLocaleString()} (${backupStatus.latest.kind.toLowerCase()})` : "No backup stored yet."}</p>
-      <div className="inline-controls"><button disabled={!!backupBusy} onClick={() => void takeBackup()}>{backupBusy === "backup" ? "Backing up..." : "Take backup now"}</button><button className="danger-outline" disabled={!!backupBusy || !backupStatus?.latest} onClick={() => void rollbackBackup()}>{backupBusy === "rollback" ? "Rolling back..." : "Roll back latest"}</button></div>
+      <div className="panel-head"><h3>Data Protection</h3><span>Managed on Google Cloud</span></div>
+      <p className="muted">The database and private document bucket are backed up by the server schedule. Restore operations are restricted to administrators with server access.</p>
     </div>
     <div className="panel"><div className="panel-head"><h3>Company Profile</h3></div><div className="form-grid compact">
       {(["name", "legalName", "tagline", "address", "phone", "email", "website", "currency", "wpsEmployerEid", "wpsPayerEid", "wpsPayerQid", "wpsPayerBank", "wpsPayerIban"] as const).map(key => {

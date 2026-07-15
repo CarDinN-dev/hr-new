@@ -27,6 +27,7 @@ async function expectRejected(action, message) {
 }
 
 async function main() {
+  const audit = { record: async () => undefined };
   const activeOnly = listArgs({ page: 1, limit: 20, includeDeleted: true }, {});
   assert.deepEqual(activeOnly.where.AND[0], { deletedAt: null });
 
@@ -92,7 +93,7 @@ async function main() {
       },
     }),
   };
-  const leave = new LeaveService(leavePrisma);
+  const leave = new LeaveService(leavePrisma, audit);
   const employee = { role: Role.EMPLOYEE, employeeId: 'self' };
   await leave.updateRequest('request', { employeeId: 'victim', reason: 'updated' }, employee);
   assert.equal('employeeId' in leaveWrite, false);
@@ -106,7 +107,7 @@ async function main() {
     totalDays: 99,
     reason: 'server-calculated',
   }, { role: Role.HR_ADMIN, employeeId: 'hr' });
-  assert.equal(leaveWrite.totalDays, 3);
+  assert.equal(Number(leaveWrite.totalDays), 3);
   assert.equal(leaveWrite.employeeId, 'victim');
   overlappingLeave = true;
   await expectRejected(
@@ -129,7 +130,7 @@ async function main() {
     'Half-day leave must start and end on the same date',
   );
   await expectRejected(
-    () => leave.removeRequest('request'),
+    () => leave.removeRequest('request', employee),
     'Cancel pending or approved leave before deleting it',
   );
 
@@ -226,7 +227,7 @@ async function main() {
     employeeDocument: {
       findFirst: async () => ({ id: 'document', employeeId: 'self', uploadedById: 'self' }),
     },
-  });
+  }, {}, audit);
   await expectRejected(
     () => documents.create({
       employeeId: 'self',
@@ -277,14 +278,14 @@ async function main() {
         }),
       },
     }),
-  });
+  }, {}, audit);
   const manualPayroll = await payroll.create({
     employeeId: 'employee-1', year: 2026, month: 7, baseSalary: 3_000,
     allowances: 200, deductions: 100, bonuses: 50, taxAmount: 25,
     grossPay: 1, netPay: 1, status: PayrollStatus.PAID,
   });
-  assert.equal(manualPayroll.grossPay, 3_250);
-  assert.equal(manualPayroll.netPay, 3_125);
+  assert.equal(manualPayroll.grossPay.toFixed(2), '3250.00');
+  assert.equal(manualPayroll.netPay.toFixed(2), '3125.00');
   assert.equal(manualPayroll.status, PayrollStatus.DRAFT);
   const generation = await payroll.generate({ year: 2026, month: 7 });
   assert.equal(generation.meta.generatedCount, 0);
@@ -301,7 +302,7 @@ async function main() {
       },
     }),
   };
-  const attendance = new AttendanceService(attendancePrisma);
+  const attendance = new AttendanceService(attendancePrisma, audit);
   await attendance.create({
     employeeId: 'employee-1',
     attendanceDate: new Date('2026-07-14T00:00:00Z'),
@@ -311,7 +312,7 @@ async function main() {
     isLate: false,
     lateMinutes: 0,
     workingHours: 99,
-  });
+  }, { role: Role.HR_ADMIN, employeeId: 'hr' });
   assert.equal(attendanceWrite.deletedAt, null);
   assert.equal(attendanceWrite.isLate, true);
   assert.equal(attendanceWrite.lateMinutes, 30);
@@ -332,7 +333,7 @@ async function main() {
         { status: AttendanceStatus.ABSENT, _count: { _all: 30 } },
       ],
     },
-  });
+  }, audit);
   const report = await attendanceReport.report({ page: 2, limit: 20 }, { role: Role.HR_ADMIN });
   assert.equal(report.data.records.length, 1);
   assert.equal(report.data.summary.totalRecords, 250);
@@ -350,8 +351,8 @@ async function main() {
       department: { findFirst: async () => null },
       user: { update: async ({ data }) => (deactivatedUser = data) },
     }),
-  });
-  await employees.remove('employee');
+  }, audit);
+  await employees.remove('employee', { role: Role.HR_ADMIN, employeeId: 'hr' });
   assert.equal(deactivatedUser.isActive, false);
   assert.deepEqual(deactivatedUser.sessionVersion, { increment: 1 });
 
