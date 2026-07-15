@@ -17,7 +17,6 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     void this.ensureScheduledBackup();
-    // ponytail: one process owns this timer; move scheduling outside the app if replicas are added.
     this.backupTimer = setInterval(() => void this.ensureScheduledBackup(), backupIntervalMs);
   }
 
@@ -31,27 +30,27 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
 
   async save(dto: SaveConsoleStateDto, user: RequestUser) {
     this.assertWorkspaceShape(dto.data);
-    const current = await this.prisma.hrConsoleState.findUnique({ where: { id: stateId } });
-    if (!current) {
-      return this.prisma.hrConsoleState.create({
-        data: { id: stateId, data: dto.data as unknown as Prisma.InputJsonValue, updatedById: user.id },
+    return this.consoleTransaction(async (tx) => {
+      const current = await tx.hrConsoleState.findUnique({ where: { id: stateId } });
+      if (!current) {
+        return tx.hrConsoleState.create({
+          data: { id: stateId, data: dto.data as unknown as Prisma.InputJsonValue, updatedById: user.id },
+        });
+      }
+
+      if (!dto.updatedAt || current.updatedAt.toISOString() !== new Date(dto.updatedAt).toISOString()) {
+        throw new ConflictException('Workspace changed in another session. Reload before saving.');
+      }
+
+      const updated = await tx.hrConsoleState.updateMany({
+        where: { id: stateId, updatedAt: current.updatedAt },
+        data: { data: dto.data as unknown as Prisma.InputJsonValue, updatedById: user.id },
       });
-    }
-
-    if (!dto.updatedAt || current.updatedAt.toISOString() !== new Date(dto.updatedAt).toISOString()) {
-      throw new ConflictException('Workspace changed in another session. Reload before saving.');
-    }
-
-    const updated = await this.prisma.hrConsoleState.updateMany({
-      where: { id: stateId, updatedAt: current.updatedAt },
-      data: { data: dto.data as unknown as Prisma.InputJsonValue, updatedById: user.id },
+      if (updated.count !== 1) {
+        throw new ConflictException('Workspace changed in another session. Reload before saving.');
+      }
+      return tx.hrConsoleState.findUnique({ where: { id: stateId } });
     });
-
-    if (updated.count !== 1) {
-      throw new ConflictException('Workspace changed in another session. Reload before saving.');
-    }
-
-    return this.get();
   }
 
   async backupStatus() {
@@ -75,7 +74,7 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
   }
 
   async rollbackLatest(createdById: string) {
-    const restored = await this.prisma.$transaction(async (tx) => {
+    const restored = await this.consoleTransaction(async (tx) => {
       const [state, backup] = await Promise.all([
         tx.hrConsoleState.findUnique({ where: { id: stateId } }),
         tx.hrConsoleStateBackup.findFirst({ orderBy: { createdAt: 'desc' } }),
@@ -94,18 +93,25 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
         throw new ConflictException('Workspace changed during rollback. Try again.');
       }
       return tx.hrConsoleState.findUnique({ where: { id: stateId } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
     await this.trimBackups();
     return restored;
   }
 
   private async ensureScheduledBackup() {
     try {
-      const [state, latest] = await Promise.all([
-        this.prisma.hrConsoleState.findUnique({ where: { id: stateId }, select: { id: true } }),
-        this.prisma.hrConsoleStateBackup.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
-      ]);
-      if (state && (!latest || Date.now() - latest.createdAt.getTime() >= backupIntervalMs)) await this.createBackup('SCHEDULED');
+      const created = await this.consoleTransaction(async (tx) => {
+        const [state, latest] = await Promise.all([
+          tx.hrConsoleState.findUnique({ where: { id: stateId } }),
+          tx.hrConsoleStateBackup.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+        ]);
+        if (!state || (latest && Date.now() - latest.createdAt.getTime() < backupIntervalMs)) return false;
+        await tx.hrConsoleStateBackup.create({
+          data: { data: state.data as Prisma.InputJsonValue, stateUpdatedAt: state.updatedAt, kind: 'SCHEDULED' },
+        });
+        return true;
+      });
+      if (created) await this.trimBackups();
     } catch (error) {
       this.logger.error('Scheduled HR backup failed', error instanceof Error ? error.stack : undefined);
     }
@@ -118,6 +124,19 @@ export class ConsoleStateService implements OnModuleInit, OnModuleDestroy {
       select: { id: true },
     });
     if (expired.length) await this.prisma.hrConsoleStateBackup.deleteMany({ where: { id: { in: expired.map(item => item.id) } } });
+  }
+
+  private async consoleTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034') throw error;
+      }
+    }
+    throw new ConflictException('Workspace changed in another request. Try again.');
   }
 
   private assertWorkspaceShape(data: Record<string, unknown>) {

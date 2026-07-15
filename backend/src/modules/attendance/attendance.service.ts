@@ -168,37 +168,39 @@ export class AttendanceService {
       throw new ForbiddenException('Only managers and HR can access attendance reports');
     }
 
-    const filters = this.buildFilters(query, user);
-    const records = await this.prisma.attendance.findMany({
-      where: { AND: filters },
+    const { page, limit, ...args } = listArgs(query, {
+      allowedSortFields: ['createdAt', 'attendanceDate', 'checkIn', 'checkOut', 'workingHours', 'status'],
+      defaultSortBy: 'attendanceDate',
+      where: { AND: this.buildFilters(query, user) },
       include: attendanceInclude,
-      orderBy: { attendanceDate: 'asc' },
     });
-
-    const summary = records.reduce(
-      (acc, record) => {
-        acc.totalRecords += 1;
-        acc.totalWorkingHours += Number(record.workingHours);
-        acc.byStatus[record.status] = (acc.byStatus[record.status] ?? 0) + 1;
-        if (record.isLate) acc.lateRecords += 1;
-        return acc;
-      },
-      {
-        totalRecords: 0,
-        lateRecords: 0,
-        totalWorkingHours: 0,
-        byStatus: {} as Record<string, number>,
-      },
-    );
+    const [records, totals, lateRecords, statuses] = await Promise.all([
+      this.prisma.attendance.findMany(args),
+      this.prisma.attendance.aggregate({
+        where: args.where,
+        _count: { _all: true },
+        _sum: { workingHours: true },
+      }),
+      this.prisma.attendance.count({ where: { AND: [args.where, { isLate: true }] } }),
+      this.prisma.attendance.groupBy({
+        by: ['status'],
+        where: args.where,
+        _count: { _all: true },
+      }),
+    ]);
+    const totalRecords = totals._count._all;
 
     return {
       data: {
         summary: {
-          ...summary,
-          totalWorkingHours: Number(summary.totalWorkingHours.toFixed(2)),
+          totalRecords,
+          lateRecords,
+          totalWorkingHours: Number(Number(totals._sum.workingHours ?? 0).toFixed(2)),
+          byStatus: Object.fromEntries(statuses.map((status) => [status.status, status._count._all])),
         },
         records,
       },
+      meta: paginationMeta(totalRecords, page, limit),
     };
   }
 

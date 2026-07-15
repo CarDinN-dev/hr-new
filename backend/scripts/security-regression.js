@@ -19,6 +19,7 @@ const { EmployeesService } = require('../dist/modules/employees/employees.servic
 const { LeaveService } = require('../dist/modules/leave/leave.service');
 const { PayrollService } = require('../dist/modules/payroll/payroll.service');
 const { PerformanceReviewsService } = require('../dist/modules/performance-reviews/performance-reviews.service');
+const { createInitialLoginUsers } = require('../prisma/seed');
 
 async function expectRejected(action, message) {
   await assert.rejects(action, (error) => error?.message === message);
@@ -27,6 +28,36 @@ async function expectRejected(action, message) {
 async function main() {
   const activeOnly = listArgs({ page: 1, limit: 20, includeDeleted: true }, {});
   assert.deepEqual(activeOnly.where.AND[0], { deletedAt: null });
+
+  let bootstrapCreates = 0;
+  const existingBootstrapPrisma = {
+    $transaction: async (callback) => callback({
+      user: {
+        findMany: async () => [{ email: 'hr@med-tech.com' }],
+        create: async () => { bootstrapCreates += 1; },
+      },
+    }),
+  };
+  await assert.rejects(
+    () => createInitialLoginUsers(existingBootstrapPrisma, [{
+      email: 'hr@med-tech.com', passwordHash: 'hash', role: Role.SUPER_ADMIN,
+    }], []),
+    /Login bootstrap refused/,
+  );
+  assert.equal(bootstrapCreates, 0);
+  const emptyBootstrapPrisma = {
+    $transaction: async (callback) => callback({
+      user: {
+        findMany: async () => [],
+        create: async () => { bootstrapCreates += 1; },
+      },
+    }),
+  };
+  await createInitialLoginUsers(emptyBootstrapPrisma, [
+    { email: 'hr@med-tech.com', passwordHash: 'hash-1', role: Role.SUPER_ADMIN },
+    { email: 'admin@med-tech.com', passwordHash: 'hash-2', role: Role.HR_ADMIN },
+  ], []);
+  assert.equal(bootstrapCreates, 2);
 
   const request = {
     id: 'request',
@@ -171,6 +202,24 @@ async function main() {
   assert.deepEqual(consoleState.data, { marker: 'original' });
   assert.equal(backups.at(-1).kind, 'ROLLBACK_SAFETY');
 
+  const scheduledBackups = [];
+  const schedulePrisma = {
+    hrConsoleState: { findUnique: async () => ({ data: { marker: 'scheduled' }, updatedAt: new Date() }) },
+    hrConsoleStateBackup: {
+      findFirst: async () => scheduledBackups.at(-1) ?? null,
+      create: async ({ data }) => {
+        scheduledBackups.push({ ...data, createdAt: new Date() });
+      },
+      findMany: async () => [],
+      deleteMany: async () => undefined,
+    },
+    $transaction: async (callback) => callback(schedulePrisma),
+  };
+  const scheduledBackupService = new ConsoleStateService(schedulePrisma);
+  await scheduledBackupService.ensureScheduledBackup();
+  await scheduledBackupService.ensureScheduledBackup();
+  assert.equal(scheduledBackups.length, 1);
+
   const documents = new DocumentsService({
     employee: { findFirst: async () => ({ id: 'employee' }) },
     employeeDocument: {
@@ -203,6 +252,10 @@ async function main() {
   await expectRejected(
     () => announcements.create({ title: 'Foreign', content: 'No', departmentId: 'other-department' }, manager),
     'Managers can only publish announcements to their own department',
+  );
+  await expectRejected(
+    () => announcements.create({ title: 'Privileged', content: 'No', audienceRoles: [Role.HR_ADMIN] }, manager),
+    'Managers can only target employees and managers',
   );
 
   const payroll = new PayrollService({
@@ -263,6 +316,28 @@ async function main() {
   assert.equal(attendanceWrite.lateMinutes, 30);
   assert.equal(attendanceWrite.workingHours, 8);
   assert.equal(attendance.companyDay(new Date('2026-07-13T21:30:00Z')).toISOString(), '2026-07-14T00:00:00.000Z');
+
+  const attendanceReport = new AttendanceService({
+    attendance: {
+      findMany: async ({ skip, take }) => {
+        assert.equal(skip, 20);
+        assert.equal(take, 20);
+        return [{ id: 'paged-record' }];
+      },
+      aggregate: async () => ({ _count: { _all: 250 }, _sum: { workingHours: 1_999.5 } }),
+      count: async () => 12,
+      groupBy: async () => [
+        { status: AttendanceStatus.PRESENT, _count: { _all: 220 } },
+        { status: AttendanceStatus.ABSENT, _count: { _all: 30 } },
+      ],
+    },
+  });
+  const report = await attendanceReport.report({ page: 2, limit: 20 }, { role: Role.HR_ADMIN });
+  assert.equal(report.data.records.length, 1);
+  assert.equal(report.data.summary.totalRecords, 250);
+  assert.equal(report.data.summary.lateRecords, 12);
+  assert.equal(report.data.summary.byStatus.PRESENT, 220);
+  assert.deepEqual(report.meta, { total: 250, page: 2, limit: 20, totalPages: 13 });
 
   let deactivatedUser;
   const employees = new EmployeesService({

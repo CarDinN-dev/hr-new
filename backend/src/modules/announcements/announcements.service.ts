@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { hasHrAccess } from '../../common/constants/access.constants';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
@@ -19,6 +20,7 @@ export class AnnouncementsService {
   async create(dto: CreateAnnouncementDto, user: RequestUser) {
     if (!user.employeeId) throw new NotFoundException('Creator employee profile is required');
     const departmentId = await this.scopedDepartmentId(dto.departmentId, user);
+    this.assertAudienceScope(dto.audienceRoles, user);
     this.validateSchedule(dto.publishedAt, dto.expiresAt);
     return this.prisma.announcement.create({
       data: {
@@ -69,6 +71,7 @@ export class AnnouncementsService {
       ? dto.departmentId
       : await this.scopedDepartmentId(dto.departmentId ?? announcement.departmentId ?? undefined, user);
     if (hasHrAccess(user.role) && dto.departmentId) await this.ensureDepartment(dto.departmentId);
+    this.assertAudienceScope(dto.audienceRoles ?? announcement.audienceRoles, user);
     this.validateSchedule(dto.publishedAt ?? announcement.publishedAt ?? undefined, dto.expiresAt ?? announcement.expiresAt ?? undefined);
     return this.prisma.announcement.update({
       where: { id },
@@ -125,6 +128,13 @@ export class AnnouncementsService {
   private validateSchedule(publishedAt?: Date, expiresAt?: Date) {
     if (publishedAt && expiresAt && expiresAt <= publishedAt) {
       throw new BadRequestException('expiresAt must be after publishedAt');
+    }
+  }
+
+  private assertAudienceScope(audienceRoles: Role[] | undefined, user: RequestUser) {
+    if (hasHrAccess(user.role) || !audienceRoles?.length) return;
+    if (audienceRoles.some((role) => role !== Role.EMPLOYEE && role !== Role.MANAGER)) {
+      throw new ForbiddenException('Managers can only target employees and managers');
     }
   }
 
