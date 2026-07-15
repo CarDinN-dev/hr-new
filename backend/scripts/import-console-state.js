@@ -6,7 +6,14 @@ const prisma = new PrismaClient();
 const apply = process.argv.includes('--apply');
 const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const decimal = (value = 0) => new Prisma.Decimal(String(value || 0).replace(/[^\d.-]/g, '') || '0').toDecimalPlaces(2);
-const date = (value) => value ? new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`) : undefined;
+const date = (value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return undefined;
+  const parsed = /^\d{4}-\d{2}-\d{2}/.test(raw)
+    ? new Date(`${raw.slice(0, 10)}T00:00:00.000Z`)
+    : new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
 const enumValue = (value) => String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
 const present = (value) => value === '' || value == null ? undefined : value;
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
