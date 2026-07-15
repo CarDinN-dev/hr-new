@@ -1,5 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Link,
+  Navigate,
+  Outlet,
+  RouterProvider,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  useNavigate,
+  useRouterState
+} from "@tanstack/react-router";
 import {
   BarChart3,
   BriefcaseBusiness,
@@ -105,13 +117,13 @@ import {
   logoutBackend,
   rollbackLatestBackendBackup,
   saveBackendState,
-  type BackendBackupStatus,
   type BackendSession
 } from "./api";
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
+import { navItemForPath, navPaths } from "./routing";
 import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
@@ -134,6 +146,26 @@ const employeeFieldOptions: Record<string, readonly string[]> = {
   "Company Fuel Card": ["Yes", "No"]
 };
 const LoginScene = React.lazy(() => import("./LoginScene"));
+const appQueryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: (failureCount, error) => !(error instanceof ApiError && [401, 403].includes(error.status)) && failureCount < 2
+    },
+    mutations: { retry: false }
+  }
+});
+
+function workspaceQueryKey(session: BackendSession) {
+  return ["workspace", session.email, session.token] as const;
+}
+
+function backupStatusQueryKey(session: BackendSession) {
+  return ["backup-status", session.email, session.token] as const;
+}
+
 const navIcon = {
   Dashboard: LayoutDashboard,
   Employees: UsersRound,
@@ -215,22 +247,32 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
 }
 
 function App() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const nav = useRouterState({ select: routerState => navItemForPath(routerState.location.pathname) });
   const [state, setState] = useState<HrState>(() => loadState());
-  const [nav, setNav] = useState<NavItem>("Dashboard");
   const [toast, setToast] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modal, setModal] = useState<React.ReactNode>(null);
   const [backendSession, setBackendSession] = useState<BackendSession | null>(() => loadBackendSession());
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
-  const [workspaceLoading, setWorkspaceLoading] = useState(Boolean(backendSession));
-  const [workspaceLoadError, setWorkspaceLoadError] = useState("");
-  const [workspaceLoadAttempt, setWorkspaceLoadAttempt] = useState(0);
   const [syncError, setSyncError] = useState("");
   const backendReady = useRef(false);
+  const hydratedWorkspaceToken = useRef("");
   const backendSessionRef = useRef<BackendSession | null>(backendSession);
   const stateRef = useRef(state);
   const backendSaveQueue = useRef<Promise<void>>(Promise.resolve());
   stateRef.current = state;
+  const workspaceQuery = useQuery({
+    queryKey: backendSession ? workspaceQueryKey(backendSession) : ["workspace", "signed-out"],
+    queryFn: () => loadBackendState(stateRef.current, backendSession!),
+    enabled: Boolean(backendSession),
+    staleTime: Number.POSITIVE_INFINITY
+  });
+  const workspaceLoadError = workspaceQuery.isError ? errorMessage(workspaceQuery.error) : "";
+  const workspaceLoading = Boolean(backendSession) && !workspaceLoadError && (
+    workspaceQuery.isPending || hydratedWorkspaceToken.current !== backendSession?.token
+  );
 
   useEffect(() => {
     localStorage.removeItem(storageKey);
@@ -246,33 +288,23 @@ function App() {
   useEffect(() => {
     if (!backendSession) {
       backendReady.current = false;
-      setWorkspaceLoading(false);
-      setWorkspaceLoadError("");
+      hydratedWorkspaceToken.current = "";
       setSyncError("");
       return;
     }
-    backendReady.current = false;
-    setWorkspaceLoading(true);
-    setWorkspaceLoadError("");
-    loadBackendState(state, backendSession)
-      .then(({ state: nextState, updatedAt }) => {
-        setState(hydrateState(nextState));
-        setBackendSession(prev => prev && updatedAt ? { ...prev, stateUpdatedAt: updatedAt } : prev);
-        backendReady.current = true;
-        setWorkspaceLoading(false);
-        setSyncError("");
-      })
-      .catch(error => {
-        backendReady.current = false;
-        setWorkspaceLoading(false);
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          setBackendSession(null);
-          notify(errorMessage(error));
-          return;
-        }
-        setWorkspaceLoadError(errorMessage(error));
-      });
-  }, [backendSession?.token, workspaceLoadAttempt]);
+    if (workspaceQuery.error instanceof ApiError && [401, 403].includes(workspaceQuery.error.status)) {
+      queryClient.removeQueries({ queryKey: workspaceQueryKey(backendSession) });
+      setBackendSession(null);
+      notify(errorMessage(workspaceQuery.error));
+      return;
+    }
+    if (!workspaceQuery.data || hydratedWorkspaceToken.current === backendSession.token) return;
+    hydratedWorkspaceToken.current = backendSession.token;
+    setState(hydrateState(workspaceQuery.data.state));
+    setBackendSession(prev => prev && workspaceQuery.data.updatedAt ? { ...prev, stateUpdatedAt: workspaceQuery.data.updatedAt } : prev);
+    backendReady.current = true;
+    setSyncError("");
+  }, [backendSession?.token, workspaceQuery.data, workspaceQuery.error, queryClient]);
 
   useEffect(() => {
     if (!backendSession?.token || !backendReady.current) return;
@@ -319,6 +351,7 @@ function App() {
         backendSessionRef.current = nextSession;
         setBackendSession(prev => prev?.token === session.token ? nextSession : prev);
       }
+      queryClient.setQueryData(workspaceQueryKey(nextSession), { state: stateRef.current, updatedAt: saved.updatedAt });
       setSyncError("");
       return nextSession;
     });
@@ -359,6 +392,8 @@ function App() {
 
   async function logout() {
     const session = backendSessionRef.current;
+    queryClient.removeQueries({ queryKey: ["workspace"] });
+    queryClient.removeQueries({ queryKey: ["backup-status"] });
     setBackendSession(null);
     if (!session) return;
     try {
@@ -379,6 +414,10 @@ function App() {
     }
   }
 
+  function setNav(next: NavItem) {
+    void navigate({ to: navPaths[next] });
+  }
+
   if (!backendSession) {
     return (
       <>
@@ -396,7 +435,7 @@ function App() {
           <h1>{workspaceLoading ? "Loading HR workspace" : "Workspace could not be loaded"}</h1>
           <p>{workspaceLoading ? "Your records are being loaded securely." : workspaceLoadError}</p>
           {!workspaceLoading && <div className="modal-actions">
-            <button className="primary" type="button" onClick={() => setWorkspaceLoadAttempt(value => value + 1)}>Try again</button>
+            <button className="primary" type="button" onClick={() => void workspaceQuery.refetch()}>Try again</button>
             <button type="button" onClick={() => void logout()}>Sign out</button>
           </div>}
         </section>
@@ -421,10 +460,10 @@ function App() {
           {navItems.map(item => {
             const Icon = navIcon[item];
             return (
-              <button key={item} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => { setNav(item); setSidebarOpen(false); }}>
+              <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}>
                 <Icon size={18} />
                 {item}
-              </button>
+              </Link>
             );
           })}
         </nav>
@@ -1992,13 +2031,18 @@ function SettingsPage({
   const [halfDayHours, setHalfDayHours] = useState(state.settings.halfDayHours);
   const [loanCapType, setLoanCapType] = useState(state.settings.loanDeductionCap.type);
   const [loanCapValue, setLoanCapValue] = useState(state.settings.loanDeductionCap.value);
-  const [backupStatus, setBackupStatus] = useState<BackendBackupStatus | null>(null);
   const [backupBusy, setBackupBusy] = useState("");
+  const queryClient = useQueryClient();
+  const backupStatusQuery = useQuery({
+    queryKey: backendSession ? backupStatusQueryKey(backendSession) : ["backup-status", "signed-out"],
+    queryFn: () => loadBackupStatus(backendSession!),
+    enabled: Boolean(backendSession)
+  });
+  const backupStatus = backupStatusQuery.data ?? null;
 
   useEffect(() => {
-    if (!backendSession) return;
-    void loadBackupStatus(backendSession).then(setBackupStatus).catch(error => notify(errorMessage(error)));
-  }, [backendSession?.token]);
+    if (backupStatusQuery.error) notify(errorMessage(backupStatusQuery.error));
+  }, [backupStatusQuery.error]);
 
   async function updatePhoto(file?: File) {
     if (!file) return;
@@ -2026,7 +2070,7 @@ function SettingsPage({
     try {
       const session = await saveBackendNow();
       await createBackendBackup(session);
-      setBackupStatus(await loadBackupStatus(session));
+      await queryClient.invalidateQueries({ queryKey: backupStatusQueryKey(session) });
       notify("Backup stored.");
     } catch (error) {
       notify(errorMessage(error));
@@ -2041,9 +2085,12 @@ function SettingsPage({
     try {
       const session = await saveBackendNow();
       const restored = await rollbackLatestBackendBackup(session);
-      setState(hydrateState(restored.data));
+      const nextState = hydrateState(restored.data);
+      const nextSession = { ...session, stateUpdatedAt: restored.updatedAt };
+      setState(nextState);
       setBackendSession(prev => prev ? { ...prev, stateUpdatedAt: restored.updatedAt } : prev);
-      setBackupStatus(await loadBackupStatus({ ...session, stateUpdatedAt: restored.updatedAt }));
+      queryClient.setQueryData(workspaceQueryKey(nextSession), { state: nextState, updatedAt: restored.updatedAt });
+      queryClient.setQueryData(backupStatusQueryKey(nextSession), await loadBackupStatus(nextSession));
       notify("Latest backup restored.");
     } catch (error) {
       notify(errorMessage(error));
@@ -2175,4 +2222,59 @@ function hydrateState(value: Partial<HrState>): HrState {
   };
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+function RootRoute() {
+  return <Outlet />;
+}
+
+const rootRoute = createRootRoute({
+  component: RootRoute,
+  notFoundComponent: () => <Navigate to="/" replace />
+});
+const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: "hr-shell", component: App });
+const dashboardRoute = createRoute({ getParentRoute: () => shellRoute, path: "/" });
+const employeesRoute = createRoute({ getParentRoute: () => shellRoute, path: "employees" });
+const attendanceRoute = createRoute({ getParentRoute: () => shellRoute, path: "attendance" });
+const leaveRoute = createRoute({ getParentRoute: () => shellRoute, path: "leave" });
+const businessTripsRoute = createRoute({ getParentRoute: () => shellRoute, path: "business-trips" });
+const expensesRoute = createRoute({ getParentRoute: () => shellRoute, path: "expenses" });
+const loansRoute = createRoute({ getParentRoute: () => shellRoute, path: "loans" });
+const payrollRoute = createRoute({ getParentRoute: () => shellRoute, path: "payroll" });
+const recruitmentRoute = createRoute({ getParentRoute: () => shellRoute, path: "recruitment" });
+const eosRoute = createRoute({ getParentRoute: () => shellRoute, path: "eos" });
+const documentsRoute = createRoute({ getParentRoute: () => shellRoute, path: "documents" });
+const reportsRoute = createRoute({ getParentRoute: () => shellRoute, path: "reports" });
+const settingsRoute = createRoute({ getParentRoute: () => shellRoute, path: "settings" });
+const routeTree = rootRoute.addChildren([
+  shellRoute.addChildren([
+    dashboardRoute,
+    employeesRoute,
+    attendanceRoute,
+    leaveRoute,
+    businessTripsRoute,
+    expensesRoute,
+    loansRoute,
+    payrollRoute,
+    recruitmentRoute,
+    eosRoute,
+    documentsRoute,
+    reportsRoute,
+    settingsRoute
+  ])
+]);
+const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  scrollRestoration: true
+});
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
+
+createRoot(document.getElementById("root")!).render(
+  <QueryClientProvider client={appQueryClient}>
+    <RouterProvider router={router} />
+  </QueryClientProvider>
+);
