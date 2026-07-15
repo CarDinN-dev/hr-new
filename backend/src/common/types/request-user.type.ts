@@ -1,12 +1,13 @@
-import { Permission, Role } from '@prisma/client';
-
 export type RequestUser = {
   id: string;
   email: string;
-  role: Role;
-  permissions: Permission[];
-  sessionVersion: number;
+  displayName: string;
+  roles: string[];
+  permissions: string[];
+  sessionId: string;
+  authorizationVersion: number;
   csrfToken?: string;
   employeeId?: string | null;
+  departmentScopeIds: string[];
   requestId?: string;
 };

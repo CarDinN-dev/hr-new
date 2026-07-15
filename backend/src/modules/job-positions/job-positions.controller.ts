@@ -1,7 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
+import { RequestUser } from '../../common/types/request-user.type';
 import { CreateJobPositionDto } from './dto/create-job-position.dto';
 import { QueryJobPositionsDto } from './dto/query-job-positions.dto';
 import { UpdateJobPositionDto } from './dto/update-job-position.dto';
@@ -13,31 +14,33 @@ import { JobPositionsService } from './job-positions.service';
 export class JobPositionsController {
   constructor(private readonly jobPositionsService: JobPositionsService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('position.manage')
   @Post()
-  create(@Body() dto: CreateJobPositionDto) {
-    return this.jobPositionsService.create(dto);
+  create(@Body() dto: CreateJobPositionDto, @CurrentUser() user: RequestUser) {
+    return this.jobPositionsService.create(dto, user);
   }
 
+  @Permissions('position.read')
   @Get()
   list(@Query() query: QueryJobPositionsDto) {
     return this.jobPositionsService.list(query);
   }
 
+  @Permissions('position.read')
   @Get(':id')
   findById(@Param('id') id: string) {
     return this.jobPositionsService.findById(id);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('position.manage')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateJobPositionDto) {
-    return this.jobPositionsService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateJobPositionDto, @CurrentUser() user: RequestUser) {
+    return this.jobPositionsService.update(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('position.manage')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.jobPositionsService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.jobPositionsService.remove(id, user);
   }
 }

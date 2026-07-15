@@ -1,44 +1,29 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, Prisma, Role } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { AuditAction, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { UpdateEmployeeDetailsDto } from './dto/update-employee-details.dto';
 import { AuditService } from '../audit/audit.service';
-import { money, nonNegativeMoney } from '../../common/money';
+import { nonNegativeMoney, ZERO_MONEY } from '../../common/money';
+import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 
-const employeeInclude = {
-  department: true,
-  position: true,
+const managerSummarySelect = {
+  id: true, employeeCode: true, firstName: true, lastName: true, email: true,
+} satisfies Prisma.EmployeeSelect;
+
+const employeeSummarySelect = {
+  id: true, employeeCode: true, firstName: true, lastName: true, email: true,
+  phone: true, hireDate: true, employmentStatus: true, departmentId: true, positionId: true,
+  managerId: true, version: true, createdAt: true, updatedAt: true,
+  department: { select: { id: true, name: true, code: true } },
+  position: { select: { id: true, title: true, code: true, level: true } },
   manager: {
-    select: {
-      id: true,
-      employeeCode: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-    },
+    select: managerSummarySelect,
   },
-  user: {
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      isActive: true,
-    },
-  },
-  profile: true,
-  bankAccount: true,
-  benefits: true,
-  credentials: { where: { deletedAt: null } },
-  education: { where: { deletedAt: null } },
-};
-
-const employeeIncludeWithSalary = { ...employeeInclude, salaryRecords: { where: { deletedAt: null }, orderBy: { effectiveFrom: 'desc' as const } } };
+} satisfies Prisma.EmployeeSelect;
 
 @Injectable()
 export class EmployeesService {
@@ -48,8 +33,8 @@ export class EmployeesService {
     await this.validateRelations(dto);
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.create({
-        data: { ...dto, salary: nonNegativeMoney(dto.salary, 'salary', '1000000000') },
-        include: employeeIncludeWithSalary,
+        data: { ...dto, salary: ZERO_MONEY },
+        select: this.projection(user, false),
       });
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Employee', entityId: employee.id, summary: 'Employee created' });
       return employee;
@@ -66,10 +51,10 @@ export class EmployeesService {
 
     const { page, limit, ...args } = listArgs(query, {
       searchFields: ['employeeCode', 'firstName', 'lastName', 'email', 'phone'],
-      allowedSortFields: ['createdAt', 'employeeCode', 'firstName', 'lastName', 'hireDate', 'salary'],
+      allowedSortFields: ['createdAt', 'employeeCode', 'firstName', 'lastName', 'hireDate', ...(user.permissions.includes('payroll.read_compensation') ? ['salary'] : [])],
       defaultSortBy: 'createdAt',
       where: { AND: filters },
-      include: hasHrAccess(user.role) ? employeeIncludeWithSalary : employeeInclude,
+      select: this.projection(user, false),
     });
 
     const [data, total] = await Promise.all([
@@ -77,8 +62,12 @@ export class EmployeesService {
       this.prisma.employee.count({ where: args.where }),
     ]);
 
+    if (this.includesSensitiveFields(user)) {
+      await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'Employee', summary: 'Sensitive employee records viewed' });
+    }
+
     return {
-      data: hasHrAccess(user.role) ? data : data.map((employee) => this.withoutSalary(employee)),
+      data,
       meta: paginationMeta(total, page, limit),
     };
   }
@@ -86,14 +75,18 @@ export class EmployeesService {
   async findById(id: string, user: RequestUser) {
     const employee = await this.prisma.employee.findFirst({
       where: { AND: [{ id }, { deletedAt: null }, this.accessWhere(user)] },
-      include: hasHrAccess(user.role) ? employeeIncludeWithSalary : employeeInclude,
+      select: this.projection(user, id === user.employeeId),
     });
 
     if (!employee) {
       throw new NotFoundException('Employee not found');
     }
 
-    return hasHrAccess(user.role) ? employee : this.withoutSalary(employee);
+    if (this.includesSensitiveFields(user) || id === user.employeeId) {
+      await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'Employee', entityId: id, summary: 'Employee record viewed' });
+    }
+
+    return employee;
   }
 
   async getMyProfile(user: RequestUser) {
@@ -104,14 +97,55 @@ export class EmployeesService {
     return this.findById(user.employeeId, user);
   }
 
+  async updateSelfBasic(dto: UpdateSelfBasicProfileDto, user: RequestUser) {
+    if (!user.employeeId) throw new NotFoundException('No employee profile is linked to this user');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id: user.employeeId! },
+        data: { ...dto, version: { increment: 1 } },
+        select: this.projection(user, true),
+      });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: user.employeeId!, summary: 'Self-service profile updated' });
+      return updated;
+    });
+  }
+
+  async updateSelfBank(dto: UpdateSelfBankDto, user: RequestUser) {
+    if (!user.employeeId) throw new NotFoundException('No employee profile is linked to this user');
+    return this.prisma.$transaction(async (tx) => {
+      const bank = await tx.employeeBankAccount.upsert({
+        where: { employeeId: user.employeeId! },
+        create: { employeeId: user.employeeId!, ...dto },
+        update: { ...dto, version: { increment: 1 } },
+        select: { employeeId: true, bankCode: true, iban: true, accountNumber: true, version: true, updatedAt: true },
+      });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeBankAccount', entityId: user.employeeId!, summary: 'Self-service bank details updated' });
+      return bank;
+    });
+  }
+
+  async updatePayrollBank(id: string, dto: UpdatePayrollBankDto, user: RequestUser) {
+    await this.ensureExists(id);
+    return this.prisma.$transaction(async (tx) => {
+      const bank = await tx.employeeBankAccount.upsert({
+        where: { employeeId: id },
+        create: { employeeId: id, ...dto },
+        update: { ...dto, version: { increment: 1 } },
+        select: { employeeId: true, bankCode: true, iban: true, accountNumber: true, version: true, updatedAt: true },
+      });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeBankAccount', entityId: id, summary: 'Payroll bank details updated' });
+      return bank;
+    });
+  }
+
   async update(id: string, dto: UpdateEmployeeDto, user: RequestUser) {
     const employee = await this.ensureExists(id);
     await this.validateRelations(dto, id, employee);
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.employee.update({
         where: { id },
-        data: { ...dto, salary: dto.salary === undefined ? undefined : nonNegativeMoney(dto.salary, 'salary', '1000000000'), version: { increment: 1 } },
-        include: employeeIncludeWithSalary,
+        data: { ...dto, version: { increment: 1 } },
+        select: this.projection(user, id === user.employeeId),
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: id, summary: 'Employee updated' });
       return updated;
@@ -137,17 +171,35 @@ export class EmployeesService {
       if (employee.userId) {
         await tx.user.update({
           where: { id: employee.userId },
-          data: { isActive: false, sessionVersion: { increment: 1 } },
+          data: { isActive: false, authorizationVersion: { increment: 1 } },
         });
+        await tx.authSession.updateMany({ where: { userId: employee.userId, revokedAt: null }, data: { revokedAt: new Date() } });
       }
       await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Employee', entityId: id, summary: 'Employee archived' });
       return removed;
     });
   }
 
-  async updateDetails(id: string, dto: UpdateEmployeeDetailsDto, user: RequestUser) {
+  async updateDetails(id: string, dto: UpdateHrSensitiveDetailsDto, user: RequestUser) {
     await this.ensureExists(id);
     return this.prisma.$transaction(async (tx) => {
+      const sensitive = dto;
+      if (
+        sensitive.dateOfBirth !== undefined || sensitive.gender !== undefined || sensitive.address !== undefined
+        || sensitive.emergencyContactName !== undefined || sensitive.emergencyContactPhone !== undefined
+      ) {
+        await tx.employee.update({
+          where: { id },
+          data: {
+            dateOfBirth: sensitive.dateOfBirth,
+            gender: sensitive.gender,
+            address: sensitive.address,
+            emergencyContactName: sensitive.emergencyContactName,
+            emergencyContactPhone: sensitive.emergencyContactPhone,
+            version: { increment: 1 },
+          },
+        });
+      }
       if (dto.profile) {
         const source = dto.profile;
         const profile = {
@@ -165,10 +217,6 @@ export class EmployeesService {
         };
         await tx.employeeProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...profile }, update: { ...profile, version: { increment: 1 } } });
       }
-      if (dto.bankAccount) {
-        const bank = { bankCode: this.text(dto.bankAccount.bankCode), iban: this.text(dto.bankAccount.iban), accountNumber: this.text(dto.bankAccount.accountNumber) };
-        await tx.employeeBankAccount.upsert({ where: { employeeId: id }, create: { employeeId: id, ...bank }, update: { ...bank, version: { increment: 1 } } });
-      }
       if (dto.benefits) {
         const source = dto.benefits;
         const benefits = {
@@ -179,7 +227,6 @@ export class EmployeesService {
         };
         await tx.employeeBenefitProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...benefits }, update: { ...benefits, version: { increment: 1 } } });
       }
-      if (dto.salary) await this.updateSalaryHistory(id, dto.salary, tx);
       for (const raw of dto.credentials ?? []) {
         const type = this.text(raw.type);
         if (!type) continue;
@@ -196,7 +243,7 @@ export class EmployeesService {
         if (!existing) await tx.employeeEducation.create({ data: { employeeId: id, qualification, yearOfPassing: this.integer(raw.yearOfPassing) } });
       }
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeDetails', entityId: id, summary: 'Employee profile details updated' });
-      return tx.employee.findUniqueOrThrow({ where: { id }, include: employeeIncludeWithSalary });
+      return tx.employee.findUniqueOrThrow({ where: { id }, select: this.projection(user, id === user.employeeId) });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -209,28 +256,43 @@ export class EmployeesService {
   }
 
   private accessWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) {
-      return {};
+    if (user.permissions.includes('employee.hr.read') || user.permissions.includes('employee.audit.read')) return {};
+    const scopes: Prisma.EmployeeWhereInput[] = [];
+    if (user.employeeId && user.permissions.includes('employee.self.read')) scopes.push({ id: user.employeeId });
+    if (user.employeeId && user.permissions.includes('employee.team.read')) scopes.push({ managerId: user.employeeId });
+    if (user.permissions.includes('employee.department.read') && user.departmentScopeIds.length) {
+      scopes.push({ departmentId: { in: user.departmentScopeIds } });
     }
-
-    if (!user.employeeId) {
-      return { id: '__no_employee_profile__' };
-    }
-
-    if (user.role === Role.MANAGER) {
-      return { OR: [{ id: user.employeeId }, { managerId: user.employeeId }] };
-    }
-
-    return { id: user.employeeId };
+    return scopes.length ? { OR: scopes } : { id: '__no_employee_scope__' };
   }
 
-  private withoutSalary<T extends { salary: unknown; bankAccount?: unknown; benefits?: unknown; salaryRecords?: unknown }>(employee: T) {
-    const safeEmployee = { ...employee } as Record<string, unknown>;
-    delete safeEmployee.salary;
-    delete safeEmployee.bankAccount;
-    delete safeEmployee.benefits;
-    delete safeEmployee.salaryRecords;
-    return safeEmployee;
+  private projection(user: RequestUser, self: boolean): Prisma.EmployeeSelect {
+    const select: Prisma.EmployeeSelect = { ...employeeSummarySelect };
+    if (self && user.permissions.includes('employee.self.read')) {
+      Object.assign(select, {
+        dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,
+      });
+    }
+    if (user.permissions.includes('employee.hr.read_sensitive')) {
+      Object.assign(select, {
+        dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,
+        profile: true, benefits: true,
+        credentials: { where: { deletedAt: null } }, education: { where: { deletedAt: null } },
+      });
+    }
+    if (user.permissions.includes('payroll.read_compensation') || (self && user.permissions.includes('employee.self.read_compensation'))) {
+      Object.assign(select, { salary: true, salaryRecords: { where: { deletedAt: null }, orderBy: { effectiveFrom: 'desc' } } });
+    }
+    if (user.permissions.includes('payroll.read_bank') || (self && user.permissions.includes('employee.self.read_bank'))) {
+      Object.assign(select, { bankAccount: true });
+    }
+    return select;
+  }
+
+  private includesSensitiveFields(user: RequestUser) {
+    return user.permissions.some((permission) => [
+      'employee.hr.read_sensitive', 'payroll.read_compensation', 'payroll.read_bank',
+    ].includes(permission));
   }
 
   private async validateRelations(
@@ -244,18 +306,15 @@ export class EmployeesService {
 
     const departmentId = dto.departmentId ?? current?.departmentId ?? undefined;
     const positionId = dto.positionId ?? current?.positionId ?? undefined;
-    const [department, position, user] = await Promise.all([
+    const [department, position] = await Promise.all([
       departmentId
         ? this.prisma.department.findFirst({ where: { id: departmentId, deletedAt: null } })
         : null,
       positionId
         ? this.prisma.jobPosition.findFirst({ where: { id: positionId, deletedAt: null } })
         : null,
-      dto.userId
-        ? this.prisma.user.findFirst({ where: { id: dto.userId, deletedAt: null } })
-        : null,
     ]);
-    if ((departmentId && !department) || (positionId && !position) || (dto.userId && !user)) {
+    if ((departmentId && !department) || (positionId && !position)) {
       throw new NotFoundException('One or more referenced records were not found');
     }
     if (position?.departmentId && departmentId && position.departmentId !== departmentId) {
@@ -277,22 +336,6 @@ export class EmployeesService {
       }
       if (managerId) throw new BadRequestException('Reporting line is too deep to validate safely');
     }
-  }
-
-  private async updateSalaryHistory(employeeId: string, source: Record<string, unknown>, tx: Prisma.TransactionClient) {
-    const values = {
-      baseSalary: nonNegativeMoney(this.decimalInput(source.baseSalary), 'baseSalary'), allowances: nonNegativeMoney(this.decimalInput(source.allowances), 'allowances'),
-      deductions: nonNegativeMoney(this.decimalInput(source.deductions), 'deductions'), bonuses: nonNegativeMoney(this.decimalInput(source.bonuses), 'bonuses'), taxRate: nonNegativeMoney(this.decimalInput(source.taxRate), 'taxRate'),
-    };
-    const current = await tx.salaryRecord.findFirst({ where: { employeeId, effectiveTo: null, deletedAt: null }, orderBy: { effectiveFrom: 'desc' } });
-    if (current && current.baseSalary.equals(values.baseSalary) && current.allowances.equals(values.allowances) && current.deductions.equals(values.deductions) && current.bonuses.equals(values.bonuses) && current.taxRate.equals(values.taxRate)) return;
-    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-    if (current?.effectiveFrom.getTime() === today.getTime()) await tx.salaryRecord.update({ where: { id: current.id }, data: { ...values, version: { increment: 1 } } });
-    else {
-      if (current) { const yesterday = new Date(today); yesterday.setUTCDate(yesterday.getUTCDate() - 1); await tx.salaryRecord.update({ where: { id: current.id }, data: { effectiveTo: yesterday, version: { increment: 1 } } }); }
-      await tx.salaryRecord.create({ data: { employeeId, ...values, effectiveFrom: today } });
-    }
-    await tx.employee.update({ where: { id: employeeId }, data: { salary: money(values.baseSalary), version: { increment: 1 } } });
   }
 
   private text(value: unknown) { const result = value == null ? '' : String(value).trim(); return result || undefined; }

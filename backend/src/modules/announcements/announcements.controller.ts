@@ -1,8 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { AnnouncementsService } from './announcements.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
@@ -15,31 +14,33 @@ import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 export class AnnouncementsController {
   constructor(private readonly announcementsService: AnnouncementsService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN, Role.MANAGER)
+  @Permissions('announcement.manage')
   @Post()
   create(@Body() dto: CreateAnnouncementDto, @CurrentUser() user: RequestUser) {
     return this.announcementsService.create(dto, user);
   }
 
+  @Permissions('announcement.read')
   @Get()
   list(@Query() query: QueryAnnouncementsDto, @CurrentUser() user: RequestUser) {
     return this.announcementsService.list(query, user);
   }
 
+  @Permissions('announcement.read')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.announcementsService.findById(id, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN, Role.MANAGER)
+  @Permissions('announcement.manage')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateAnnouncementDto, @CurrentUser() user: RequestUser) {
     return this.announcementsService.update(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('announcement.manage')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.announcementsService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.announcementsService.remove(id, user);
   }
 }

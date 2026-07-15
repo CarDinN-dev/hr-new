@@ -1,0 +1,233 @@
+{
+  "permissions": [
+    "organization.read",
+    "department.read",
+    "department.manage",
+    "position.read",
+    "position.manage",
+    "employee.self.read",
+    "employee.self.update_basic",
+    "employee.self.read_documents",
+    "employee.self.manage_documents",
+    "employee.self.read_bank",
+    "employee.self.update_bank",
+    "employee.self.read_compensation",
+    "employee.team.read",
+    "employee.department.read",
+    "employee.hr.read",
+    "employee.hr.create",
+    "employee.hr.update",
+    "employee.hr.terminate",
+    "employee.hr.read_sensitive",
+    "employee.hr.manage_documents",
+    "employee.audit.read",
+    "attendance.self.read",
+    "attendance.self.create",
+    "attendance.self.correct_request",
+    "attendance.team.read",
+    "attendance.team.review",
+    "attendance.department.read",
+    "attendance.department.review",
+    "attendance.hr.read",
+    "attendance.hr.manage",
+    "attendance.audit.read",
+    "leave.self.read",
+    "leave.self.create",
+    "leave.self.cancel",
+    "leave.team.read",
+    "leave.team.approve_manager",
+    "leave.department.read",
+    "leave.department.approve_manager",
+    "leave.hr.read",
+    "leave.hr.approve",
+    "leave.hr.manage",
+    "leave.configure",
+    "leave.audit.read",
+    "expense.self.read",
+    "expense.self.create",
+    "expense.team.read",
+    "expense.team.approve_manager",
+    "expense.department.read",
+    "expense.department.approve_manager",
+    "expense.hr.read",
+    "expense.hr.approve",
+    "expense.audit.read",
+    "trip.self.read",
+    "trip.self.create",
+    "trip.team.read",
+    "trip.team.approve_manager",
+    "trip.department.read",
+    "trip.department.approve_manager",
+    "trip.hr.read",
+    "trip.hr.manage",
+    "trip.audit.read",
+    "loan.self.read",
+    "loan.hr.read",
+    "loan.hr.manage",
+    "loan.audit.read",
+    "document.self.read",
+    "document.self.manage",
+    "document.hr.read",
+    "document.hr.manage",
+    "payroll.self.read_payslip",
+    "payroll.read",
+    "payroll.generate",
+    "payroll.approve",
+    "payroll.mark_paid",
+    "payroll.read_compensation",
+    "payroll.read_bank",
+    "payroll.update_bank",
+    "payroll.export",
+    "payroll.configure",
+    "payroll.audit.read",
+    "recruitment.read",
+    "recruitment.manage",
+    "eos.read",
+    "eos.manage",
+    "contract.self.read",
+    "contract.team.read",
+    "contract.hr.manage",
+    "performance.self.read",
+    "performance.team.read",
+    "performance.team.manage",
+    "performance.hr.manage",
+    "announcement.read",
+    "announcement.manage",
+    "report.read",
+    "report.export",
+    "audit.read",
+    "audit.export",
+    "user.read",
+    "user.manage",
+    "role.read",
+    "role.manage",
+    "role.assign_any",
+    "permission.read",
+    "session.self.read",
+    "session.self.revoke",
+    "session.manage",
+    "system.configure",
+    "import.run",
+    "import.read"
+  ],
+  "roles": [
+    {
+      "code": "EMPLOYEE",
+      "displayName": "Employee",
+      "description": "Personal HR self-service",
+      "inherits": [],
+      "permissions": [
+        "organization.read", "department.read", "position.read", "announcement.read",
+        "employee.self.read", "employee.self.update_basic", "employee.self.read_documents", "employee.self.manage_documents",
+        "employee.self.read_bank", "employee.self.update_bank", "employee.self.read_compensation",
+        "attendance.self.read", "attendance.self.create", "attendance.self.correct_request",
+        "leave.self.read", "leave.self.create", "leave.self.cancel",
+        "expense.self.read", "expense.self.create", "trip.self.read", "trip.self.create", "loan.self.read",
+        "document.self.read", "document.self.manage", "payroll.self.read_payslip",
+        "contract.self.read", "performance.self.read", "session.self.read", "session.self.revoke"
+      ]
+    },
+    {
+      "code": "LINE_MANAGER",
+      "displayName": "Line manager",
+      "description": "Direct-report management and first-stage approvals",
+      "inherits": ["EMPLOYEE"],
+      "permissions": [
+        "employee.team.read", "attendance.team.read", "attendance.team.review", "leave.team.read", "leave.team.approve_manager",
+        "expense.team.read", "expense.team.approve_manager", "trip.team.read", "trip.team.approve_manager",
+        "contract.team.read", "performance.team.read", "performance.team.manage"
+      ]
+    },
+    {
+      "code": "DEPARTMENT_HEAD",
+      "displayName": "Department head",
+      "description": "Managed-department oversight and first-stage approvals",
+      "inherits": ["EMPLOYEE"],
+      "permissions": [
+        "employee.department.read", "attendance.department.read", "attendance.department.review",
+        "leave.department.read", "leave.department.approve_manager", "expense.department.read", "expense.department.approve_manager",
+        "trip.department.read", "trip.department.approve_manager", "contract.team.read", "performance.team.read", "performance.team.manage"
+      ]
+    },
+    {
+      "code": "HR_OFFICER",
+      "displayName": "HR officer",
+      "description": "Day-to-day HR operations without confidential or system access",
+      "inherits": [],
+      "permissions": [
+        "session.self.read",
+        "session.self.revoke",
+        "organization.read", "department.read", "department.manage", "position.read", "position.manage", "announcement.read", "employee.hr.read", "employee.hr.create", "employee.hr.update", "employee.hr.manage_documents",
+        "attendance.hr.read", "attendance.hr.manage", "leave.hr.read", "leave.hr.manage", "leave.configure",
+        "expense.hr.read", "trip.hr.read", "trip.hr.manage", "loan.hr.read", "loan.hr.manage",
+        "document.hr.read", "document.hr.manage", "recruitment.read", "recruitment.manage", "eos.read",
+        "contract.hr.manage", "performance.hr.manage", "announcement.manage", "report.read"
+      ]
+    },
+    {
+      "code": "HR_MANAGER",
+      "displayName": "HR manager",
+      "description": "Confidential HR operations and final approvals",
+      "inherits": ["HR_OFFICER"],
+      "permissions": [
+        "employee.hr.terminate", "employee.hr.read_sensitive", "leave.hr.approve", "expense.hr.approve", "eos.manage", "report.export"
+      ]
+    },
+    {
+      "code": "PAYROLL_OFFICER",
+      "displayName": "Payroll officer",
+      "description": "Payroll, compensation and bank processing",
+      "inherits": [],
+      "permissions": [
+        "session.self.read",
+        "session.self.revoke",
+        "organization.read", "payroll.read", "payroll.generate", "payroll.approve", "payroll.mark_paid", "payroll.read_compensation",
+        "payroll.read_bank", "payroll.update_bank", "payroll.export", "payroll.configure", "report.read", "report.export"
+      ]
+    },
+    {
+      "code": "AUDITOR",
+      "displayName": "Auditor",
+      "description": "Read-only audit and operational review",
+      "inherits": [],
+      "permissions": [
+        "session.self.read",
+        "session.self.revoke",
+        "organization.read", "audit.read", "audit.export", "employee.audit.read", "attendance.audit.read", "leave.audit.read",
+        "expense.audit.read", "trip.audit.read", "loan.audit.read", "payroll.audit.read", "report.read", "report.export"
+      ]
+    },
+    {
+      "code": "SYSTEM_ADMIN",
+      "displayName": "System administrator",
+      "description": "User, role, session and system administration without HR or payroll data access",
+      "inherits": [],
+      "permissions": [
+        "organization.read", "department.read", "position.read", "announcement.read", "user.read", "user.manage",
+        "role.read", "role.manage", "role.assign_any", "permission.read", "session.self.read", "session.self.revoke",
+        "session.manage", "system.configure", "import.run", "import.read"
+      ]
+    }
+  ],
+  "legacyRoleMap": {
+    "EMPLOYEE": ["EMPLOYEE"],
+    "MANAGER": ["EMPLOYEE", "LINE_MANAGER"],
+    "HR_ADMIN": ["HR_MANAGER", "PAYROLL_OFFICER", "AUDITOR"],
+    "SUPER_ADMIN": ["EMPLOYEE", "LINE_MANAGER", "DEPARTMENT_HEAD", "HR_OFFICER", "HR_MANAGER", "PAYROLL_OFFICER", "AUDITOR", "SYSTEM_ADMIN"]
+  },
+  "legacyRoleCompatibilityPermissions": {
+    "HR_ADMIN": ["system.configure", "import.run", "import.read", "user.read", "user.manage"]
+  },
+  "legacyPermissionMap": {
+    "EMPLOYEE_READ_ALL": ["employee.hr.read", "employee.hr.read_sensitive"],
+    "EMPLOYEE_WRITE": ["employee.hr.create", "employee.hr.update", "employee.hr.terminate"],
+    "ATTENDANCE_READ_ALL": ["attendance.hr.read"],
+    "ATTENDANCE_WRITE_ALL": ["attendance.hr.manage"],
+    "LEAVE_APPROVE": ["leave.hr.read", "leave.hr.approve"],
+    "PAYROLL_READ": ["payroll.read", "payroll.read_compensation", "payroll.read_bank"],
+    "PAYROLL_WRITE": ["payroll.generate", "payroll.approve", "payroll.mark_paid", "payroll.configure"],
+    "DOCUMENT_READ_ALL": ["document.hr.read"],
+    "DOCUMENT_WRITE_ALL": ["document.hr.manage"],
+    "ANNOUNCEMENT_WRITE": ["announcement.manage"]
+  }
+}

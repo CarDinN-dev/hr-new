@@ -1,9 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AttendanceStatus, AuditAction, EmploymentStatus, LeaveRequestStatus, PayrollLineKind, PayrollStatus, Prisma } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { hasAnyPermission } from '../../common/authorization';
 import { money, MoneyInput, nonNegativeMoney, percentageMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePayrollDto } from './dto/create-payroll.dto';
 import { CreateSalaryRecordDto } from './dto/create-salary-record.dto';
@@ -21,6 +21,8 @@ const employeePayrollSelect = {
   firstName: true,
   lastName: true,
   email: true,
+  hireDate: true,
+  employmentStatus: true,
   managerId: true,
   department: true,
   position: true,
@@ -45,12 +47,12 @@ export class PayrollService {
     private readonly audit: AuditService,
   ) {}
 
-  async createSalaryRecord(dto: CreateSalaryRecordDto) {
+  async createSalaryRecord(dto: CreateSalaryRecordDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
     this.assertDateRange(dto.effectiveFrom, dto.effectiveTo, 'effectiveTo');
     return this.payrollTransaction(async (tx) => {
       await this.assertSalaryPeriodAvailable(dto.employeeId, dto.effectiveFrom, dto.effectiveTo, undefined, tx);
-      return tx.salaryRecord.create({
+      const record = await tx.salaryRecord.create({
         data: {
           ...dto,
           baseSalary: nonNegativeMoney(dto.baseSalary, 'baseSalary', '1000000000'),
@@ -61,6 +63,8 @@ export class PayrollService {
         },
         include: salaryRecordInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'SalaryRecord', entityId: record.id, summary: 'Salary record created' });
+      return record;
     });
   }
 
@@ -79,6 +83,7 @@ export class PayrollService {
       this.prisma.salaryRecord.findMany(args),
       this.prisma.salaryRecord.count({ where: args.where }),
     ]);
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'SalaryRecord', summary: 'Compensation records viewed' });
     return { data, meta: paginationMeta(total, page, limit) };
   }
 
@@ -88,10 +93,11 @@ export class PayrollService {
       include: salaryRecordInclude,
     });
     if (!record) throw new NotFoundException('Salary record not found');
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'SalaryRecord', entityId: id, summary: 'Compensation record viewed' });
     return record;
   }
 
-  async updateSalaryRecord(id: string, dto: UpdateSalaryRecordDto) {
+  async updateSalaryRecord(id: string, dto: UpdateSalaryRecordDto, user: RequestUser) {
     return this.payrollTransaction(async (tx) => {
       const record = await tx.salaryRecord.findFirst({ where: { id, deletedAt: null } });
       if (!record) throw new NotFoundException('Salary record not found');
@@ -99,7 +105,7 @@ export class PayrollService {
       const effectiveTo = dto.effectiveTo ?? record.effectiveTo ?? undefined;
       this.assertDateRange(effectiveFrom, effectiveTo, 'effectiveTo');
       await this.assertSalaryPeriodAvailable(record.employeeId, effectiveFrom, effectiveTo, id, tx);
-      return tx.salaryRecord.update({
+      const updated = await tx.salaryRecord.update({
         where: { id },
         data: {
           ...dto,
@@ -112,21 +118,31 @@ export class PayrollService {
         },
         include: salaryRecordInclude,
       });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'SalaryRecord', entityId: id, summary: 'Salary record updated' });
+      return updated;
     });
   }
 
-  async removeSalaryRecord(id: string) {
-    await this.ensureSalaryRecord(id);
-    return softDelete(this.prisma.salaryRecord, id, 'Salary record');
+  async removeSalaryRecord(id: string, user: RequestUser) {
+    return this.payrollTransaction(async (tx) => {
+      await this.ensureSalaryRecord(id, tx);
+      const removed = await tx.salaryRecord.update({ where: { id }, data: { deletedAt: new Date() }, include: salaryRecordInclude });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'SalaryRecord', entityId: id, summary: 'Salary record archived' });
+      return removed;
+    });
   }
 
-  async create(dto: CreatePayrollDto) {
+  async create(dto: CreatePayrollDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
     const amounts = this.payrollAmounts(dto);
     const totals = this.payrollTotals(amounts);
-    return this.prisma.payroll.create({
-      data: { employeeId: dto.employeeId, year: dto.year, month: dto.month, ...amounts, ...totals, status: PayrollStatus.DRAFT },
-      include: payrollInclude,
+    return this.payrollTransaction(async (tx) => {
+      const payroll = await tx.payroll.create({
+        data: { employeeId: dto.employeeId, year: dto.year, month: dto.month, ...amounts, ...totals, status: PayrollStatus.DRAFT },
+        include: payrollInclude,
+      });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Payroll', entityId: payroll.id, summary: 'Payroll draft created' });
+      return payroll;
     });
   }
 
@@ -148,6 +164,7 @@ export class PayrollService {
       this.prisma.payroll.findMany(args),
       this.prisma.payroll.count({ where: args.where }),
     ]);
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'Payroll', summary: 'Payroll records viewed' });
     return { data, meta: paginationMeta(total, page, limit) };
   }
 
@@ -157,10 +174,11 @@ export class PayrollService {
       include: payrollInclude,
     });
     if (!payroll) throw new NotFoundException('Payroll record not found');
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'Payroll', entityId: id, summary: 'Payroll record viewed' });
     return payroll;
   }
 
-  async update(id: string, dto: UpdatePayrollDto) {
+  async update(id: string, dto: UpdatePayrollDto, user: RequestUser) {
     return this.payrollTransaction(async (tx) => {
       const payroll = await this.ensurePayroll(id, tx);
       if (payroll.status === PayrollStatus.APPROVED || payroll.status === PayrollStatus.PAID) {
@@ -180,17 +198,21 @@ export class PayrollService {
         bonuses: dto.bonuses ?? payroll.bonuses,
         taxAmount: dto.taxAmount ?? payroll.taxAmount,
       });
-      return tx.payroll.update({ where: { id }, data: { ...amounts, ...totals, version: { increment: 1 } }, include: payrollInclude });
+      const updated = await tx.payroll.update({ where: { id }, data: { ...amounts, ...totals, version: { increment: 1 } }, include: payrollInclude });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Payroll', entityId: id, summary: 'Payroll draft updated' });
+      return updated;
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: RequestUser) {
     return this.payrollTransaction(async (tx) => {
       const payroll = await this.ensurePayroll(id, tx);
       if (payroll.status === PayrollStatus.APPROVED || payroll.status === PayrollStatus.PAID) {
         throw new BadRequestException('Approved or paid payroll cannot be deleted');
       }
-      return tx.payroll.update({ where: { id }, data: { deletedAt: new Date() } });
+      const removed = await tx.payroll.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Payroll', entityId: id, summary: 'Payroll draft archived' });
+      return removed;
     });
   }
 
@@ -367,7 +389,7 @@ export class PayrollService {
   }
 
   async payslip(employeeId: string, year: number, month: number, user: RequestUser) {
-    if (!hasHrAccess(user.role) && user.employeeId !== employeeId) {
+    if (!hasAnyPermission(user, ['payroll.read', 'payroll.audit.read']) && user.employeeId !== employeeId) {
       throw new NotFoundException('Payslip not found');
     }
 
@@ -376,11 +398,15 @@ export class PayrollService {
       include: payrollInclude,
     });
     if (!payroll) throw new NotFoundException('Payslip not found');
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'Payroll', entityId: payroll.id, summary: 'Payslip viewed' });
     return payroll;
   }
 
   private payrollAccessWhere(user: RequestUser) {
-    return hasHrAccess(user.role) ? {} : { employeeId: '__salary_access_denied__' };
+    if (hasAnyPermission(user, ['payroll.read', 'payroll.read_compensation', 'payroll.audit.read'])) return {};
+    return user.employeeId && hasAnyPermission(user, ['payroll.self.read_payslip'])
+      ? { employeeId: user.employeeId }
+      : { employeeId: '__salary_access_denied__' };
   }
 
   private async payrollLopDays(
@@ -459,8 +485,8 @@ export class PayrollService {
     return payroll;
   }
 
-  private async ensureSalaryRecord(id: string) {
-    const record = await this.prisma.salaryRecord.findFirst({ where: { id, deletedAt: null } });
+  private async ensureSalaryRecord(id: string, client: Prisma.TransactionClient | PrismaService = this.prisma) {
+    const record = await client.salaryRecord.findFirst({ where: { id, deletedAt: null } });
     if (!record) throw new NotFoundException('Salary record not found');
   }
 

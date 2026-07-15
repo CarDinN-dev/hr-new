@@ -1,11 +1,13 @@
-import { HttpException, HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import { Role } from '@prisma/client';
+import { AuditAction } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { createHmac, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import { Request, Response } from 'express';
+import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -31,14 +33,11 @@ export function sessionTokenFromRequest(request?: Request) {
 type SessionUser = {
   id: string;
   email: string;
-  role: Role;
-  permissions: JwtPayload['permissions'];
-  sessionVersion: number;
-  employee?: { id: string; deletedAt?: Date | null } | null;
+  authorizationVersion: number;
 };
 
 export type IssuedSession = {
-  user: SessionUser;
+  user: RequestUser;
   accessToken: string;
   csrfToken: string;
 };
@@ -53,6 +52,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly authorization: AuthorizationService,
   ) {
     const saltRounds = Number(this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12));
     if (!Number.isInteger(saltRounds) || saltRounds < 10 || saltRounds > 15) {
@@ -61,20 +61,17 @@ export class AuthService {
     this.dummyPasswordHash = bcrypt.hash(randomBytes(32).toString('hex'), saltRounds);
   }
 
-  async register(dto: RegisterDto) {
-    const user = await this.usersService.createUser(dto.email, dto.password, Role.EMPLOYEE);
-    return this.issueSession(user);
+  register(dto: RegisterDto, actor: RequestUser) {
+    return this.usersService.createUser(dto.email, dto.password, actor);
   }
 
-  async login(dto: LoginDto, ip = 'unknown') {
+  async login(dto: LoginDto, request: Request) {
+    const ip = request.ip || 'unknown';
     await this.checkLoginLimit(ip, dto.email);
 
     const user = await this.usersService.findByEmail(dto.email);
     const activeUser = user && !user.deletedAt && user.isActive && !user.employee?.deletedAt ? user : null;
-    const passwordMatches = await bcrypt.compare(
-      dto.password,
-      activeUser?.passwordHash ?? (await this.dummyPasswordHash),
-    );
+    const passwordMatches = await bcrypt.compare(dto.password, activeUser?.passwordHash ?? (await this.dummyPasswordHash));
     if (!activeUser || !passwordMatches) {
       await this.recordFailedLogin(ip, dto.email);
       throw new UnauthorizedException('Invalid email or password');
@@ -83,25 +80,49 @@ export class AuthService {
     await this.prisma.authThrottle.deleteMany({
       where: { key: { in: [this.accountIpLoginKey(ip, dto.email), this.accountLoginKey(dto.email)] } },
     });
-    const safeUser = this.usersService.toSafeUser(activeUser);
-    return this.issueSession(safeUser);
+    return this.issueSession(activeUser, request, 'local');
   }
 
-  issueSession(user: SessionUser): IssuedSession {
+  async issueSession(user: SessionUser, request: Request, provider: 'local' | 'microsoft'): Promise<IssuedSession> {
+    const authorizationUser = await this.authorization.loadUserContext(user.id);
     const csrfToken = this.csrfToken();
-    return {
-      user,
-      accessToken: this.signToken({
-        sub: user.id,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions,
-        csrfToken,
-        sessionVersion: user.sessionVersion,
-        employeeId: user.employee?.id ?? null,
-      }),
+    const sid = randomUUID();
+    const accessToken = this.signToken({
+      sub: user.id,
+      email: authorizationUser.email,
+      sid,
+      authorizationVersion: authorizationUser.authorizationVersion,
       csrfToken,
-    };
+    });
+    const decoded = this.jwtService.decode(accessToken) as { exp?: number } | null;
+    if (!decoded?.exp) throw new Error('JWT expiry was not generated');
+    const expiresAt = new Date(decoded.exp * 1000);
+    await this.prisma.$transaction([
+      this.prisma.authSession.create({
+        data: {
+          id: sid,
+          userId: user.id,
+          tokenHash: this.tokenHash(accessToken),
+          provider,
+          authorizationVersion: authorizationUser.authorizationVersion,
+          ipHash: this.ipHash(request.ip),
+          userAgent: this.userAgent(request),
+          expiresAt,
+        },
+      }),
+      this.prisma.auditEvent.create({
+        data: {
+          actorUserId: user.id,
+          requestId: this.requestId(request),
+          action: AuditAction.LOGIN,
+          entityType: 'AuthSession',
+          entityId: sid,
+          summary: `${provider} login`,
+        },
+      }),
+    ]);
+    const context = this.authorization.toRequestUser(authorizationUser, { id: sid, csrfToken });
+    return { user: context, accessToken, csrfToken };
   }
 
   browserSession(session: IssuedSession) {
@@ -109,9 +130,13 @@ export class AuthService {
       user: {
         id: session.user.id,
         email: session.user.email,
-        role: session.user.role,
-        sessionVersion: session.user.sessionVersion,
-        employeeId: session.user.employee?.id ?? null,
+        employeeId: session.user.employeeId ?? null,
+        displayName: session.user.displayName,
+        roles: session.user.roles,
+        permissions: session.user.permissions,
+        departmentScopeIds: session.user.departmentScopeIds,
+        sessionId: session.user.sessionId,
+        authorizationVersion: session.user.authorizationVersion,
       },
       csrfToken: session.csrfToken,
     };
@@ -119,24 +144,59 @@ export class AuthService {
 
   setSessionCookie(response: Response, accessToken: string) {
     const production = this.configService.get<string>('NODE_ENV') === 'production';
+    const decoded = this.jwtService.decode(accessToken) as { exp?: number; iat?: number } | null;
+    const maxAge = decoded?.exp && decoded.iat ? Math.max(0, (decoded.exp - decoded.iat) * 1000) : 8 * 60 * 60 * 1000;
     response.cookie(production ? productionSessionCookie : developmentSessionCookie, accessToken, {
       httpOnly: true,
       secure: production,
       sameSite: 'strict',
       path: '/',
-      maxAge: 8 * 60 * 60 * 1000,
+      maxAge,
     });
   }
 
   clearSessionCookie(response: Response) {
     for (const name of [productionSessionCookie, developmentSessionCookie]) {
-      response.clearCookie(name, {
-        httpOnly: true,
-        secure: name === productionSessionCookie,
-        sameSite: 'strict',
-        path: '/',
-      });
+      response.clearCookie(name, { httpOnly: true, secure: name === productionSessionCookie, sameSite: 'strict', path: '/' });
     }
+  }
+
+  async listOwnSessions(user: RequestUser) {
+    return this.prisma.authSession.findMany({
+      where: { userId: user.id },
+      select: { id: true, provider: true, userAgent: true, createdAt: true, lastSeenAt: true, expiresAt: true, revokedAt: true },
+      orderBy: { lastSeenAt: 'desc' },
+    }).then((sessions) => sessions.map((session) => ({ ...session, current: session.id === user.sessionId })));
+  }
+
+  async revokeOwnSession(user: RequestUser, sessionId: string) {
+    const session = await this.prisma.authSession.findFirst({ where: { id: sessionId, userId: user.id }, select: { id: true, revokedAt: true } });
+    if (!session) throw new NotFoundException('Session not found');
+    if (!session.revokedAt) {
+      await this.prisma.$transaction([
+        this.prisma.authSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } }),
+        this.prisma.auditEvent.create({
+          data: { actorUserId: user.id, requestId: user.requestId, action: AuditAction.LOGOUT, entityType: 'AuthSession', entityId: session.id, summary: 'Session revoked' },
+        }),
+      ]);
+    }
+    return { revoked: true, current: session.id === user.sessionId };
+  }
+
+  async logout(user: RequestUser) {
+    await this.revokeOwnSession(user, user.sessionId);
+    return { loggedOut: true };
+  }
+
+  async logoutAll(user: RequestUser) {
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now } }),
+      this.prisma.auditEvent.create({
+        data: { actorUserId: user.id, requestId: user.requestId, action: AuditAction.LOGOUT, entityType: 'AuthSession', entityId: user.id, summary: 'All sessions revoked' },
+      }),
+    ]);
+    return { loggedOut: true };
   }
 
   async consumeMicrosoftLoginStart(ip = 'unknown') {
@@ -147,6 +207,10 @@ export class AuthService {
       throw new HttpException('Too many sign-in attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
     }
     await this.incrementLoginAttempt(key);
+  }
+
+  tokenHash(token: string) {
+    return createHash('sha256').update(token).digest('hex');
   }
 
   private csrfToken() {
@@ -161,12 +225,10 @@ export class AuthService {
       this.prisma.authThrottle.findUnique({ where: { key: this.ipLoginKey(ip) } }),
     ]);
     if (
-      (accountIpRecord && accountIpRecord.resetAt > now && accountIpRecord.count >= 10) ||
-      (accountRecord && accountRecord.resetAt > now && accountRecord.count >= 20) ||
-      (ipRecord && ipRecord.resetAt > now && ipRecord.count >= 50)
-    ) {
-      throw new HttpException('Too many login attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
-    }
+      (accountIpRecord && accountIpRecord.resetAt > now && accountIpRecord.count >= 10)
+      || (accountRecord && accountRecord.resetAt > now && accountRecord.count >= 20)
+      || (ipRecord && ipRecord.resetAt > now && ipRecord.count >= 50)
+    ) throw new HttpException('Too many login attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
   }
 
   private async recordFailedLogin(ip: string, email: string) {
@@ -185,14 +247,8 @@ export class AuthService {
       INSERT INTO "AuthThrottle" ("key", "count", "resetAt", "updatedAt")
       VALUES (${key}, 1, ${resetAt}, NOW())
       ON CONFLICT ("key") DO UPDATE SET
-        "count" = CASE
-          WHEN "AuthThrottle"."resetAt" <= ${now} THEN 1
-          ELSE "AuthThrottle"."count" + 1
-        END,
-        "resetAt" = CASE
-          WHEN "AuthThrottle"."resetAt" <= ${now} THEN ${resetAt}
-          ELSE "AuthThrottle"."resetAt"
-        END,
+        "count" = CASE WHEN "AuthThrottle"."resetAt" <= ${now} THEN 1 ELSE "AuthThrottle"."count" + 1 END,
+        "resetAt" = CASE WHEN "AuthThrottle"."resetAt" <= ${now} THEN ${resetAt} ELSE "AuthThrottle"."resetAt" END,
         "updatedAt" = NOW()
     `;
   }
@@ -210,13 +266,21 @@ export class AuthService {
   }
 
   private throttleKey(kind: string, value: string) {
-    const secret = this.configService.getOrThrow<string>('JWT_SECRET');
-    return `${kind}:${createHmac('sha256', secret).update(value).digest('hex')}`;
+    return `${kind}:${createHmac('sha256', this.configService.getOrThrow<string>('JWT_SECRET')).update(value).digest('hex')}`;
   }
 
-  async logout(userId: string) {
-    await this.usersService.revokeSessions(userId);
-    return { loggedOut: true };
+  private ipHash(ip?: string) {
+    return ip ? createHmac('sha256', this.configService.getOrThrow<string>('JWT_SECRET')).update(ip).digest('hex') : null;
+  }
+
+  private userAgent(request: Request) {
+    const value = request.get('user-agent')?.trim();
+    return value ? value.slice(0, 512) : null;
+  }
+
+  private requestId(request: Request) {
+    const value = (request as Request & { requestId?: unknown }).requestId;
+    return typeof value === 'string' ? value : undefined;
   }
 
   private signToken(payload: JwtPayload): string {

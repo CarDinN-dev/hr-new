@@ -16,6 +16,7 @@
     "strictPropertyInitialization": false,
     "noImplicitAny": true,
     "forceConsistentCasingInFileNames": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "resolveJsonModule": true
   }
 }

@@ -1,9 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { AuditAction, LegacyRole, Prisma } from '@prisma/client';
+import { hasAnyPermission, hasPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { QueryAnnouncementsDto } from './dto/query-announcements.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
@@ -15,21 +16,25 @@ const announcementInclude = {
 
 @Injectable()
 export class AnnouncementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
   async create(dto: CreateAnnouncementDto, user: RequestUser) {
     if (!user.employeeId) throw new NotFoundException('Creator employee profile is required');
     const departmentId = await this.scopedDepartmentId(dto.departmentId, user);
     this.assertAudienceScope(dto.audienceRoles, user);
     this.validateSchedule(dto.publishedAt, dto.expiresAt);
-    return this.prisma.announcement.create({
-      data: {
-        ...dto,
-        departmentId,
-        audienceRoles: dto.audienceRoles ?? [],
-        createdById: user.employeeId,
-      },
-      include: announcementInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const announcement = await tx.announcement.create({
+        data: {
+          ...dto,
+          departmentId,
+          audienceRoles: dto.audienceRoles ?? [],
+          createdById: user.employeeId!,
+        },
+        include: announcementInclude,
+      });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Announcement', entityId: announcement.id, summary: 'Announcement created' });
+      return announcement;
     });
   }
 
@@ -64,29 +69,32 @@ export class AnnouncementsService {
 
   async update(id: string, dto: UpdateAnnouncementDto, user: RequestUser) {
     const announcement = await this.ensureExists(id);
-    if (!hasHrAccess(user.role) && announcement.createdById !== user.employeeId) {
-      throw new ForbiddenException('Managers can only update announcements they created');
-    }
-    const departmentId = hasHrAccess(user.role)
-      ? dto.departmentId
-      : await this.scopedDepartmentId(dto.departmentId ?? announcement.departmentId ?? undefined, user);
-    if (hasHrAccess(user.role) && dto.departmentId) await this.ensureDepartment(dto.departmentId);
+    const departmentId = dto.departmentId;
+    if (dto.departmentId) await this.ensureDepartment(dto.departmentId);
     this.assertAudienceScope(dto.audienceRoles ?? announcement.audienceRoles, user);
     this.validateSchedule(dto.publishedAt ?? announcement.publishedAt ?? undefined, dto.expiresAt ?? announcement.expiresAt ?? undefined);
-    return this.prisma.announcement.update({
-      where: { id },
-      data: { ...dto, departmentId },
-      include: announcementInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.announcement.update({
+        where: { id },
+        data: { ...dto, departmentId } as Prisma.AnnouncementUncheckedUpdateInput,
+        include: announcementInclude,
+      });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Announcement', entityId: id, summary: 'Announcement updated' });
+      return updated;
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: RequestUser) {
     await this.ensureExists(id);
-    return softDelete(this.prisma.announcement, id, 'Announcement');
+    return this.prisma.$transaction(async (tx) => {
+      const removed = await tx.announcement.update({ where: { id }, data: { deletedAt: new Date() }, include: announcementInclude });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Announcement', entityId: id, summary: 'Announcement archived' });
+      return removed;
+    });
   }
 
   private async accessWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) return {};
+    if (hasPermission(user, 'announcement.manage')) return {};
     const now = new Date();
     const employee = user.employeeId
       ? await this.prisma.employee.findFirst({
@@ -102,27 +110,15 @@ export class AnnouncementsService {
         { isActive: true },
         { OR: [{ publishedAt: null }, { publishedAt: { lte: now } }] },
         { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-        { OR: [{ audienceRoles: { isEmpty: true } }, { audienceRoles: { has: user.role } }] },
+        { OR: [{ audienceRoles: { isEmpty: true } }, { audienceRoles: { hasSome: this.legacyAudienceRoles(user) } }] },
         departmentScope,
       ],
     };
   }
 
-  private async scopedDepartmentId(requestedDepartmentId: string | undefined, user: RequestUser) {
-    if (hasHrAccess(user.role)) {
-      if (requestedDepartmentId) await this.ensureDepartment(requestedDepartmentId);
-      return requestedDepartmentId;
-    }
-    if (!user.employeeId) throw new NotFoundException('Creator employee profile is required');
-    const employee = await this.prisma.employee.findFirst({
-      where: { id: user.employeeId, deletedAt: null },
-      select: { departmentId: true },
-    });
-    if (!employee?.departmentId) throw new ForbiddenException('Managers must belong to a department to publish announcements');
-    if (requestedDepartmentId && requestedDepartmentId !== employee.departmentId) {
-      throw new ForbiddenException('Managers can only publish announcements to their own department');
-    }
-    return employee.departmentId;
+  private async scopedDepartmentId(requestedDepartmentId: string | undefined, _user: RequestUser) {
+    if (requestedDepartmentId) await this.ensureDepartment(requestedDepartmentId);
+    return requestedDepartmentId;
   }
 
   private validateSchedule(publishedAt?: Date, expiresAt?: Date) {
@@ -131,11 +127,19 @@ export class AnnouncementsService {
     }
   }
 
-  private assertAudienceScope(audienceRoles: Role[] | undefined, user: RequestUser) {
-    if (hasHrAccess(user.role) || !audienceRoles?.length) return;
-    if (audienceRoles.some((role) => role !== Role.EMPLOYEE && role !== Role.MANAGER)) {
-      throw new ForbiddenException('Managers can only target employees and managers');
+  private assertAudienceScope(audienceRoles: LegacyRole[] | undefined, _user: RequestUser) {
+    if (audienceRoles?.some((role) => !Object.values(LegacyRole).includes(role))) {
+      throw new ForbiddenException('Announcement audience is invalid');
     }
+  }
+
+  private legacyAudienceRoles(user: RequestUser): LegacyRole[] {
+    const roles = new Set<LegacyRole>();
+    if (user.employeeId) roles.add(LegacyRole.EMPLOYEE);
+    if (hasAnyPermission(user, ['employee.team.read', 'employee.department.read'])) roles.add(LegacyRole.MANAGER);
+    if (hasAnyPermission(user, ['employee.hr.read', 'payroll.read', 'audit.read'])) roles.add(LegacyRole.HR_ADMIN);
+    if (hasAnyPermission(user, ['user.manage', 'system.configure'])) roles.add(LegacyRole.SUPER_ADMIN);
+    return [...roles];
   }
 
   private async ensureDepartment(departmentId: string) {

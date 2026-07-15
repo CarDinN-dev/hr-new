@@ -1,18 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { EmploymentStatus, Gender } from '@prisma/client';
-import { Transform, Type } from 'class-transformer';
+import { EmploymentStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
   IsDate,
   IsEmail,
   IsEnum,
-  IsDecimal,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
 } from 'class-validator';
-
-const asDecimalString = ({ value }: { value: unknown }) => String(value);
 
 export class CreateEmployeeDto {
   @ApiProperty({ example: 'EMP-0001' })
@@ -41,23 +38,6 @@ export class CreateEmployeeDto {
   @MaxLength(50)
   phone?: string;
 
-  @ApiPropertyOptional({ example: '1992-04-15' })
-  @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  dateOfBirth?: Date;
-
-  @ApiPropertyOptional({ enum: Gender })
-  @IsOptional()
-  @IsEnum(Gender)
-  gender?: Gender;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  @MaxLength(2_000)
-  address?: string;
-
   @ApiProperty({ example: '2024-01-10' })
   @Type(() => Date)
   @IsDate()
@@ -83,25 +63,4 @@ export class CreateEmployeeDto {
   @IsUUID()
   managerId?: string;
 
-  @ApiProperty({ example: '75000.00', type: String })
-  @Transform(asDecimalString)
-  @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
-  salary: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  emergencyContactName?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  emergencyContactPhone?: string;
-
-  @ApiPropertyOptional({ description: 'Existing user id to link this employee profile to' })
-  @IsOptional()
-  @IsUUID()
-  userId?: string;
 }

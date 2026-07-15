@@ -42,6 +42,7 @@ export type LeaveRequest = {
   days: number;
   reason: string;
   status: LeaveStatus;
+  reviewStage?: "Manager" | "HR";
   appliedOn: string;
   decidedOn?: string;
 };
@@ -269,6 +270,8 @@ export const reportTemplates: Array<{ id: PdfTemplate; label: string; descriptio
 
 export const navItems = [
   "Dashboard",
+  "My HR",
+  "Team",
   "Employees",
   "Attendance",
   "Leave",
@@ -280,6 +283,8 @@ export const navItems = [
   "EOS",
   "Documents",
   "Reports",
+  "Audit",
+  "System",
   "Settings"
 ] as const;
 

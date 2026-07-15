@@ -1,8 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { CreateSalaryRecordDto } from './dto/create-salary-record.dto';
 import { QuerySalaryRecordsDto } from './dto/query-salary-records.dto';
@@ -11,36 +10,37 @@ import { PayrollService } from './payroll.service';
 
 @ApiTags('Salary Records')
 @ApiBearerAuth()
-@Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
 @Controller('payroll/salary-records')
 export class SalaryRecordsController {
   constructor(private readonly payrollService: PayrollService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('payroll.configure')
   @Post()
-  create(@Body() dto: CreateSalaryRecordDto) {
-    return this.payrollService.createSalaryRecord(dto);
+  create(@Body() dto: CreateSalaryRecordDto, @CurrentUser() user: RequestUser) {
+    return this.payrollService.createSalaryRecord(dto, user);
   }
 
+  @Permissions('payroll.read_compensation')
   @Get()
   list(@Query() query: QuerySalaryRecordsDto, @CurrentUser() user: RequestUser) {
     return this.payrollService.listSalaryRecords(query, user);
   }
 
+  @Permissions('payroll.read_compensation')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.payrollService.findSalaryRecordById(id, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('payroll.configure')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateSalaryRecordDto) {
-    return this.payrollService.updateSalaryRecord(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateSalaryRecordDto, @CurrentUser() user: RequestUser) {
+    return this.payrollService.updateSalaryRecord(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('payroll.configure')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.payrollService.removeSalaryRecord(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.payrollService.removeSalaryRecord(id, user);
   }
 }

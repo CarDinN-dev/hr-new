@@ -1,8 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { CreateLeaveBalanceDto } from './dto/create-leave-balance.dto';
 import { QueryLeaveBalancesDto } from './dto/query-leave-balances.dto';
@@ -15,31 +14,33 @@ import { LeaveService } from './leave.service';
 export class LeaveBalancesController {
   constructor(private readonly leaveService: LeaveService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('leave.configure')
   @Post()
-  create(@Body() dto: CreateLeaveBalanceDto) {
-    return this.leaveService.createBalance(dto);
+  create(@Body() dto: CreateLeaveBalanceDto, @CurrentUser() user: RequestUser) {
+    return this.leaveService.createBalance(dto, user);
   }
 
+  @AnyPermission('leave.self.read', 'leave.team.read', 'leave.department.read', 'leave.hr.read', 'leave.audit.read')
   @Get()
   list(@Query() query: QueryLeaveBalancesDto, @CurrentUser() user: RequestUser) {
     return this.leaveService.listBalances(query, user);
   }
 
+  @AnyPermission('leave.self.read', 'leave.team.read', 'leave.department.read', 'leave.hr.read', 'leave.audit.read')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.leaveService.findBalanceById(id, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('leave.configure')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateLeaveBalanceDto) {
-    return this.leaveService.updateBalance(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateLeaveBalanceDto, @CurrentUser() user: RequestUser) {
+    return this.leaveService.updateBalance(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('leave.configure')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.leaveService.removeBalance(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leaveService.removeBalance(id, user);
   }
 }

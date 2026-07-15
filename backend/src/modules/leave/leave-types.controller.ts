@@ -1,7 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
+import { RequestUser } from '../../common/types/request-user.type';
 import { CreateLeaveTypeDto } from './dto/create-leave-type.dto';
 import { QueryLeaveTypesDto } from './dto/query-leave-types.dto';
 import { UpdateLeaveTypeDto } from './dto/update-leave-type.dto';
@@ -13,31 +14,33 @@ import { LeaveService } from './leave.service';
 export class LeaveTypesController {
   constructor(private readonly leaveService: LeaveService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('leave.configure')
   @Post()
-  create(@Body() dto: CreateLeaveTypeDto) {
-    return this.leaveService.createType(dto);
+  create(@Body() dto: CreateLeaveTypeDto, @CurrentUser() user: RequestUser) {
+    return this.leaveService.createType(dto, user);
   }
 
+  @AnyPermission('leave.self.read', 'leave.configure')
   @Get()
   list(@Query() query: QueryLeaveTypesDto) {
     return this.leaveService.listTypes(query);
   }
 
+  @AnyPermission('leave.self.read', 'leave.configure')
   @Get(':id')
   findById(@Param('id') id: string) {
     return this.leaveService.findTypeById(id);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('leave.configure')
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateLeaveTypeDto) {
-    return this.leaveService.updateType(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateLeaveTypeDto, @CurrentUser() user: RequestUser) {
+    return this.leaveService.updateType(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('leave.configure')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.leaveService.removeType(id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leaveService.removeType(id, user);
   }
 }

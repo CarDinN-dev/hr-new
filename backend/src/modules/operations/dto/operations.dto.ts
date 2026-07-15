@@ -43,6 +43,10 @@ export class CreateRecruitmentJobDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 5000) description?: string;
 }
 
+export class UpdateRecruitmentJobDto extends PartialType(CreateRecruitmentJobDto) {
+  @ApiPropertyOptional({ enum: RecruitmentJobStatus }) @IsOptional() @IsEnum(RecruitmentJobStatus) status?: RecruitmentJobStatus;
+}
+
 export class CreateCandidateDto {
   @ApiProperty() @IsUUID() jobId: string;
   @ApiProperty() @IsString() @Length(1, 200) name: string;
@@ -52,6 +56,8 @@ export class CreateCandidateDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @Length(1, 2000) notes?: string;
   @ApiProperty() @Type(() => Date) @IsDate() appliedOn: Date;
 }
+
+export class UpdateCandidateDto extends PartialType(CreateCandidateDto) {}
 
 export class TransitionCandidateDto {
   @ApiProperty({ enum: CandidateStage }) @IsEnum(CandidateStage) stage: CandidateStage;

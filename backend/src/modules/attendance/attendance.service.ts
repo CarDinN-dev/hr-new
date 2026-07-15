@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AttendanceStatus, AuditAction, PayrollStatus, Prisma, Role } from '@prisma/client';
-import { hasHrAccess, hasManagementAccess } from '../../common/constants/access.constants';
+import { AttendanceStatus, AuditAction, PayrollStatus, Prisma } from '@prisma/client';
+import { hasAnyPermission, hasPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -208,7 +208,7 @@ export class AttendanceService {
   }
 
   async report(query: QueryAttendanceDto, user: RequestUser) {
-    if (!hasManagementAccess(user.role)) {
+    if (!hasAnyPermission(user, ['attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read'])) {
       throw new ForbiddenException('Only managers and HR can access attendance reports');
     }
 
@@ -265,18 +265,20 @@ export class AttendanceService {
   }
 
   private accessWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) return {};
-    if (!user.employeeId) return { employeeId: '__no_employee_profile__' };
-    if (user.role === Role.MANAGER) {
-      return { OR: [{ employeeId: user.employeeId }, { employee: { managerId: user.employeeId } }] };
+    if (hasAnyPermission(user, ['attendance.hr.read', 'attendance.audit.read'])) return {};
+    const scopes: Prisma.AttendanceWhereInput[] = [];
+    if (user.employeeId && hasPermission(user, 'attendance.self.read')) scopes.push({ employeeId: user.employeeId });
+    if (user.employeeId && hasPermission(user, 'attendance.team.read')) scopes.push({ employee: { managerId: user.employeeId } });
+    if (hasPermission(user, 'attendance.department.read') && user.departmentScopeIds.length) {
+      scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
     }
-    return { employeeId: user.employeeId };
+    return scopes.length ? { OR: scopes } : { employeeId: '__no_employee_scope__' };
   }
 
   private async resolveSelfOrHrEmployee(employeeId: string | undefined, user: RequestUser) {
     const targetEmployeeId = employeeId ?? user.employeeId;
     if (!targetEmployeeId) throw new NotFoundException('No employee profile is linked to this user');
-    if (employeeId && !hasHrAccess(user.role)) {
+    if (employeeId && employeeId !== user.employeeId && !hasPermission(user, 'attendance.hr.manage')) {
       throw new ForbiddenException('Only HR can check attendance for another employee');
     }
     await this.ensureEmployee(targetEmployeeId);

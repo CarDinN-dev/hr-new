@@ -1,9 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ReviewStatus, Role } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { AuditAction, Prisma, ReviewStatus } from '@prisma/client';
+import { hasPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreatePerformanceReviewDto } from './dto/create-performance-review.dto';
 import { QueryPerformanceReviewsDto } from './dto/query-performance-reviews.dto';
 import { UpdatePerformanceReviewDto } from './dto/update-performance-review.dto';
@@ -15,12 +16,13 @@ const reviewInclude = {
 
 @Injectable()
 export class PerformanceReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
   async create(dto: CreatePerformanceReviewDto, user: RequestUser) {
-    const reviewerId = hasHrAccess(user.role) ? dto.reviewerId ?? user.employeeId : user.employeeId;
+    const hrManage = hasPermission(user, 'performance.hr.manage');
+    const reviewerId = hrManage ? dto.reviewerId ?? user.employeeId : user.employeeId;
     if (!reviewerId) throw new NotFoundException('Reviewer employee profile is required');
-    if (!hasHrAccess(user.role) && dto.reviewerId && dto.reviewerId !== reviewerId) {
+    if (!hrManage && dto.reviewerId && dto.reviewerId !== reviewerId) {
       throw new ForbiddenException('Managers cannot submit reviews as another employee');
     }
     await this.ensureEmployee(dto.employeeId);
@@ -28,9 +30,13 @@ export class PerformanceReviewsService {
     await this.assertCanReview(dto.employeeId, user);
     this.assertReviewPeriod(dto.reviewPeriodStart, dto.reviewPeriodEnd);
     this.assertManagerStatus(dto.status, user);
-    return this.prisma.performanceReview.create({
-      data: { ...dto, reviewerId },
-      include: reviewInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const review = await tx.performanceReview.create({
+        data: { ...dto, reviewerId },
+        include: reviewInclude,
+      });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'PerformanceReview', entityId: review.id, summary: 'Performance review created' });
+      return review;
     });
   }
 
@@ -66,11 +72,12 @@ export class PerformanceReviewsService {
   async update(id: string, dto: UpdatePerformanceReviewDto, user: RequestUser) {
     const review = await this.ensureExists(id);
     await this.assertCanReview(review.employeeId, user);
-    if (!hasHrAccess(user.role) && review.reviewerId !== user.employeeId) {
+    const hrManage = hasPermission(user, 'performance.hr.manage');
+    if (!hrManage && review.reviewerId !== user.employeeId) {
       throw new ForbiddenException('Managers can only update reviews they created');
     }
     if (
-      !hasHrAccess(user.role)
+      !hrManage
       && review.status !== ReviewStatus.DRAFT
       && review.status !== ReviewStatus.SUBMITTED
     ) {
@@ -82,7 +89,7 @@ export class PerformanceReviewsService {
     }
 
     let reviewerId = dto.reviewerId;
-    if (!hasHrAccess(user.role)) {
+    if (!hrManage) {
       if (!user.employeeId) throw new NotFoundException('Reviewer employee profile is required');
       if (reviewerId && reviewerId !== user.employeeId) {
         throw new ForbiddenException('Managers cannot submit reviews as another employee');
@@ -98,40 +105,42 @@ export class PerformanceReviewsService {
     );
     this.assertManagerStatus(dto.status, user);
 
-    return this.prisma.performanceReview.update({
-      where: { id },
-      data: { ...dto, reviewerId },
-      include: reviewInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.performanceReview.update({
+        where: { id },
+        data: { ...dto, reviewerId },
+        include: reviewInclude,
+      });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'PerformanceReview', entityId: id, summary: 'Performance review updated' });
+      return updated;
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: RequestUser) {
     await this.ensureExists(id);
-    return softDelete(this.prisma.performanceReview, id, 'Performance review');
+    return this.prisma.$transaction(async (tx) => {
+      const removed = await tx.performanceReview.update({ where: { id }, data: { deletedAt: new Date() }, include: reviewInclude });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'PerformanceReview', entityId: id, summary: 'Performance review archived' });
+      return removed;
+    });
   }
 
   private accessWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) return {};
-    if (!user.employeeId) return { employeeId: '__no_employee_profile__' };
-    if (user.role === Role.MANAGER) {
-      return {
-        OR: [
-          { employeeId: user.employeeId },
-          { reviewerId: user.employeeId },
-          { employee: { managerId: user.employeeId } },
-        ],
-      };
-    }
-    return { employeeId: user.employeeId };
+    if (hasPermission(user, 'performance.hr.manage')) return {};
+    const scopes: Prisma.PerformanceReviewWhereInput[] = [];
+    if (user.employeeId && hasPermission(user, 'performance.self.read')) scopes.push({ employeeId: user.employeeId });
+    if (user.employeeId && hasPermission(user, 'performance.team.read')) scopes.push({ OR: [{ reviewerId: user.employeeId }, { employee: { managerId: user.employeeId } }] });
+    if (hasPermission(user, 'performance.team.read') && user.departmentScopeIds.length) scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
+    return scopes.length ? { OR: scopes } : { employeeId: '__no_review_scope__' };
   }
 
   private async assertCanReview(employeeId: string, user: RequestUser) {
-    if (hasHrAccess(user.role)) return;
-    if (!user.employeeId || user.role !== Role.MANAGER) {
+    if (hasPermission(user, 'performance.hr.manage')) return;
+    if (!user.employeeId || !hasPermission(user, 'performance.team.manage')) {
       throw new ForbiddenException('Only managers and HR can create or update reviews');
     }
     const employee = await this.prisma.employee.findFirst({
-      where: { id: employeeId, managerId: user.employeeId, deletedAt: null },
+      where: { id: employeeId, deletedAt: null, OR: [{ managerId: user.employeeId }, { departmentId: { in: user.departmentScopeIds } }] },
     });
     if (!employee) throw new ForbiddenException('Managers can only review direct reports');
   }
@@ -153,7 +162,7 @@ export class PerformanceReviewsService {
 
   private assertManagerStatus(status: ReviewStatus | undefined, user: RequestUser) {
     if (
-      !hasHrAccess(user.role)
+      !hasPermission(user, 'performance.hr.manage')
       && status
       && status !== ReviewStatus.DRAFT
       && status !== ReviewStatus.SUBMITTED

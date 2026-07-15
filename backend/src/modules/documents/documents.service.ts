@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, DocumentVisibility, Prisma, Role } from '@prisma/client';
+import { AuditAction, DocumentVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { hasPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -27,16 +27,17 @@ export class DocumentsService {
 
   async create(dto: CreateDocumentDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
-    const uploadedById = hasHrAccess(user.role) ? dto.uploadedById ?? user.employeeId : user.employeeId;
+    const manageAll = hasPermission(user, 'document.hr.manage');
+    const uploadedById = manageAll ? dto.uploadedById ?? user.employeeId : user.employeeId;
     if (!uploadedById) throw new NotFoundException('Uploader employee profile is required');
 
-    if (!hasHrAccess(user.role) && dto.employeeId !== user.employeeId) {
+    if (!manageAll && dto.employeeId !== user.employeeId) {
       throw new ForbiddenException('Employees can only upload documents for themselves');
     }
-    if (!hasHrAccess(user.role) && dto.uploadedById && dto.uploadedById !== uploadedById) {
+    if (!manageAll && dto.uploadedById && dto.uploadedById !== uploadedById) {
       throw new ForbiddenException('Employees cannot upload documents as another employee');
     }
-    if (!hasHrAccess(user.role) && dto.visibility === DocumentVisibility.PUBLIC) {
+    if (!manageAll && dto.visibility === DocumentVisibility.PUBLIC) {
       throw new ForbiddenException('Only HR can publish documents to all employees');
     }
     await this.ensureEmployee(uploadedById);
@@ -54,12 +55,13 @@ export class DocumentsService {
   async upload(dto: UploadDocumentDto, file: Express.Multer.File | undefined, user: RequestUser) {
     if (!file?.buffer?.length) throw new BadRequestException('A document file is required');
     await this.ensureEmployee(dto.employeeId);
-    const uploadedById = hasHrAccess(user.role) ? dto.uploadedById ?? user.employeeId : user.employeeId;
+    const manageAll = hasPermission(user, 'document.hr.manage');
+    const uploadedById = manageAll ? dto.uploadedById ?? user.employeeId : user.employeeId;
     if (!uploadedById) throw new NotFoundException('Uploader employee profile is required');
-    if (!hasHrAccess(user.role) && dto.employeeId !== user.employeeId) {
+    if (!manageAll && dto.employeeId !== user.employeeId) {
       throw new ForbiddenException('Employees can only upload documents for themselves');
     }
-    if (!hasHrAccess(user.role) && dto.visibility === DocumentVisibility.PUBLIC) {
+    if (!manageAll && dto.visibility === DocumentVisibility.PUBLIC) {
       throw new ForbiddenException('Only HR can publish documents to all employees');
     }
     await this.ensureEmployee(uploadedById);
@@ -110,6 +112,7 @@ export class DocumentsService {
     const document = await this.findById(id, user);
     if (!document.objectName) throw new NotFoundException('Stored document content is not available');
     const buffer = await this.storage.download(document.objectName, document.objectGeneration);
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'EmployeeDocument', entityId: id, summary: 'Document content downloaded' });
     return { buffer, fileName: document.fileName, contentType: document.contentType ?? 'application/octet-stream' };
   }
 
@@ -146,16 +149,17 @@ export class DocumentsService {
 
   async update(id: string, dto: UpdateDocumentDto, user: RequestUser) {
     const document = await this.findById(id, user);
-    if (!hasHrAccess(user.role) && document.employeeId !== user.employeeId) {
+    const manageAll = hasPermission(user, 'document.hr.manage');
+    if (!manageAll && document.employeeId !== user.employeeId) {
       throw new ForbiddenException('Cannot update this document');
     }
-    if (!hasHrAccess(user.role) && dto.employeeId && dto.employeeId !== document.employeeId) {
+    if (!manageAll && dto.employeeId && dto.employeeId !== document.employeeId) {
       throw new ForbiddenException('Employees cannot reassign document ownership');
     }
-    if (!hasHrAccess(user.role) && dto.uploadedById && dto.uploadedById !== document.uploadedById) {
+    if (!manageAll && dto.uploadedById && dto.uploadedById !== document.uploadedById) {
       throw new ForbiddenException('Employees cannot change the document uploader');
     }
-    if (!hasHrAccess(user.role) && dto.visibility === DocumentVisibility.PUBLIC) {
+    if (!manageAll && dto.visibility === DocumentVisibility.PUBLIC) {
       throw new ForbiddenException('Only HR can publish documents to all employees');
     }
     if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
@@ -169,7 +173,7 @@ export class DocumentsService {
 
   async remove(id: string, user: RequestUser) {
     const document = await this.findById(id, user);
-    if (!hasHrAccess(user.role) && document.employeeId !== user.employeeId) {
+    if (!hasPermission(user, 'document.hr.manage') && document.employeeId !== user.employeeId) {
       throw new ForbiddenException('Cannot delete this document');
     }
     return this.documentTransaction(async (tx) => {
@@ -180,18 +184,8 @@ export class DocumentsService {
   }
 
   private visibilityWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) return {};
+    if (hasPermission(user, 'document.hr.read')) return {};
     if (!user.employeeId) return { visibility: DocumentVisibility.PUBLIC };
-    if (user.role === Role.MANAGER) {
-      return {
-        OR: [
-          { visibility: DocumentVisibility.PUBLIC },
-          { employeeId: user.employeeId, visibility: { in: [DocumentVisibility.EMPLOYEE_ONLY, DocumentVisibility.MANAGER_AND_HR] } },
-          { employee: { managerId: user.employeeId }, visibility: DocumentVisibility.MANAGER_AND_HR },
-          { uploadedById: user.employeeId },
-        ],
-      };
-    }
     return {
       OR: [
         { visibility: DocumentVisibility.PUBLIC },

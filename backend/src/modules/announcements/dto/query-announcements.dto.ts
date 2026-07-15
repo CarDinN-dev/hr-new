@@ -1,14 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
+import { LegacyRole } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class QueryAnnouncementsDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ enum: Role })
+  @ApiPropertyOptional({ enum: LegacyRole })
   @IsOptional()
-  @IsEnum(Role)
-  audienceRole?: Role;
+  @IsEnum(LegacyRole)
+  audienceRole?: LegacyRole;
 
   @ApiPropertyOptional()
   @IsOptional()

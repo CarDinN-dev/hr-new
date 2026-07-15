@@ -1,8 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { AttendanceService } from './attendance.service';
 import { CheckAttendanceDto } from './dto/check-attendance.dto';
@@ -16,45 +15,49 @@ import { UpdateAttendanceDto } from './dto/update-attendance.dto';
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('attendance.hr.manage')
   @Post()
   create(@Body() dto: CreateAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.create(dto, user);
   }
 
+  @Permissions('attendance.self.create')
   @Post('check-in')
   checkIn(@Body() dto: CheckAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.checkIn(dto, user);
   }
 
+  @Permissions('attendance.self.create')
   @Post('check-out')
   checkOut(@Body() dto: CheckAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.checkOut(dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN, Role.MANAGER)
+  @AnyPermission('attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read')
   @Get('reports/summary')
   report(@Query() query: QueryAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.report(query, user);
   }
 
+  @AnyPermission('attendance.self.read', 'attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read')
   @Get()
   list(@Query() query: QueryAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.list(query, user);
   }
 
+  @AnyPermission('attendance.self.read', 'attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.attendanceService.findById(id, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('attendance.hr.manage')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.update(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('attendance.hr.manage')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.attendanceService.remove(id, user);

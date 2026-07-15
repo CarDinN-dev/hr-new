@@ -1,10 +1,9 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Logger, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Permissions } from '../../common/decorators/permissions.decorator';
 import { Public } from '../../common/decorators/public.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -22,10 +21,10 @@ export class AuthController {
   ) {}
 
   @ApiBearerAuth()
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('user.manage')
   @Post('register')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(@Body() dto: RegisterDto, @CurrentUser() user: RequestUser) {
+    return this.authService.register(dto, user);
   }
 
   @Public()
@@ -35,7 +34,7 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const session = await this.authService.login(dto, request.ip);
+    const session = await this.authService.login(dto, request);
     this.authService.setSessionCookie(response, session.accessToken);
     return this.authService.browserSession(session);
   }
@@ -63,25 +62,60 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
+  @Permissions('session.self.read')
   @Get('me')
   me(@CurrentUser() user: RequestUser) {
     return {
       user: {
         id: user.id,
         email: user.email,
-        role: user.role,
-        sessionVersion: user.sessionVersion,
         employeeId: user.employeeId ?? null,
+        displayName: user.displayName,
+        roles: user.roles,
+        permissions: user.permissions,
+        departmentScopeIds: user.departmentScopeIds,
+        sessionId: user.sessionId,
+        authorizationVersion: user.authorizationVersion,
       },
       csrfToken: user.csrfToken,
     };
   }
 
   @ApiBearerAuth()
+  @Permissions('session.self.read')
+  @Get('sessions')
+  sessions(@CurrentUser() user: RequestUser) {
+    return this.authService.listOwnSessions(user);
+  }
+
+  @ApiBearerAuth()
+  @Permissions('session.self.revoke')
+  @Delete('sessions/:id')
+  async revokeSession(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.revokeOwnSession(user, id);
+    if (result.current) this.authService.clearSessionCookie(response);
+    return result;
+  }
+
+  @ApiBearerAuth()
+  @Permissions('session.self.revoke')
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   logout(@CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) {
     this.authService.clearSessionCookie(response);
-    return this.authService.logout(user.id);
+    return this.authService.logout(user);
+  }
+
+  @ApiBearerAuth()
+  @Permissions('session.self.revoke')
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  logoutAll(@CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) {
+    this.authService.clearSessionCookie(response);
+    return this.authService.logoutAll(user);
   }
 }

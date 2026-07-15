@@ -1,12 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { AuditAction, Prisma } from '@prisma/client';
+import { hasPermission } from '../../common/authorization';
+import { nonNegativeMoney } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmploymentContractDto } from './dto/create-employment-contract.dto';
 import { QueryEmploymentContractsDto } from './dto/query-employment-contracts.dto';
 import { UpdateEmploymentContractDto } from './dto/update-employment-contract.dto';
+import { AuditService } from '../audit/audit.service';
 
 const contractInclude = {
   employee: {
@@ -14,14 +16,24 @@ const contractInclude = {
   },
 };
 
+const contractSummarySelect = {
+  id: true, employeeId: true, contractType: true, startDate: true, endDate: true, currency: true,
+  workingHoursPerWeek: true, status: true, terms: true, createdAt: true, updatedAt: true, deletedAt: true,
+  employee: contractInclude.employee,
+} satisfies Prisma.EmploymentContractSelect;
+
 @Injectable()
 export class EmploymentContractsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
-  async create(dto: CreateEmploymentContractDto) {
+  async create(dto: CreateEmploymentContractDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
     this.assertDateRange(dto.startDate, dto.endDate);
-    return this.prisma.employmentContract.create({ data: dto, include: contractInclude });
+    return this.prisma.$transaction(async (tx) => {
+      const contract = await tx.employmentContract.create({ data: { ...dto, salary: nonNegativeMoney(dto.salary, 'salary') }, include: contractInclude });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'EmploymentContract', entityId: contract.id, summary: 'Employment contract created' });
+      return contract;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async list(query: QueryEmploymentContractsDto, user: RequestUser) {
@@ -30,11 +42,12 @@ export class EmploymentContractsService {
     if (query.contractType) filters.push({ contractType: query.contractType });
     if (query.status) filters.push({ status: query.status });
 
+    const canReadSalary = hasPermission(user, 'contract.hr.manage');
     const { page, limit, ...args } = listArgs(query, {
-      allowedSortFields: ['createdAt', 'startDate', 'endDate', 'salary', 'status'],
+      allowedSortFields: canReadSalary ? ['createdAt', 'startDate', 'endDate', 'salary', 'status'] : ['createdAt', 'startDate', 'endDate', 'status'],
       defaultSortBy: 'createdAt',
       where: { AND: filters },
-      include: contractInclude,
+      select: canReadSalary ? { ...contractSummarySelect, salary: true } : contractSummarySelect,
     });
     const [data, total] = await Promise.all([
       this.prisma.employmentContract.findMany(args),
@@ -46,30 +59,47 @@ export class EmploymentContractsService {
   async findById(id: string, user: RequestUser) {
     const contract = await this.prisma.employmentContract.findFirst({
       where: { AND: [{ id }, { deletedAt: null }, this.accessWhere(user)] },
-      include: contractInclude,
+      select: hasPermission(user, 'contract.hr.manage') || user.employeeId === (await this.contractEmployeeId(id))
+        ? { ...contractSummarySelect, salary: true }
+        : contractSummarySelect,
     });
     if (!contract) throw new NotFoundException('Employment contract not found');
     return contract;
   }
 
-  async update(id: string, dto: UpdateEmploymentContractDto) {
+  async update(id: string, dto: UpdateEmploymentContractDto, user: RequestUser) {
     const contract = await this.ensureExists(id);
     this.assertDateRange(dto.startDate ?? contract.startDate, dto.endDate ?? contract.endDate ?? undefined);
-    return this.prisma.employmentContract.update({ where: { id }, data: dto, include: contractInclude });
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.employmentContract.update({ where: { id }, data: { ...dto, salary: dto.salary === undefined ? undefined : nonNegativeMoney(dto.salary, 'salary') }, include: contractInclude });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmploymentContract', entityId: id, summary: 'Employment contract updated' });
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: RequestUser) {
     await this.ensureExists(id);
-    return softDelete(this.prisma.employmentContract, id, 'Employment contract');
+    return this.prisma.$transaction(async (tx) => {
+      const removed = await tx.employmentContract.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'EmploymentContract', entityId: id, summary: 'Employment contract archived' });
+      return removed;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   private accessWhere(user: RequestUser) {
-    if (hasHrAccess(user.role)) return {};
-    if (!user.employeeId) return { employeeId: '__no_employee_profile__' };
-    if (user.role === Role.MANAGER) {
-      return { OR: [{ employeeId: user.employeeId }, { employee: { managerId: user.employeeId } }] };
+    if (hasPermission(user, 'contract.hr.manage')) return {};
+    const scopes: Prisma.EmploymentContractWhereInput[] = [];
+    if (user.employeeId && hasPermission(user, 'contract.self.read')) scopes.push({ employeeId: user.employeeId });
+    if (user.employeeId && hasPermission(user, 'contract.team.read')) scopes.push({ employee: { managerId: user.employeeId } });
+    if (hasPermission(user, 'contract.team.read') && user.departmentScopeIds.length) {
+      scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
     }
-    return { employeeId: user.employeeId };
+    return scopes.length ? { OR: scopes } : { employeeId: '__no_contract_scope__' };
+  }
+
+  private async contractEmployeeId(id: string) {
+    const contract = await this.prisma.employmentContract.findFirst({ where: { id, deletedAt: null }, select: { employeeId: true } });
+    return contract?.employeeId;
   }
 
   private async ensureEmployee(employeeId: string) {

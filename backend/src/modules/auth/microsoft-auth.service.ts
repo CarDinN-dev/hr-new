@@ -1,6 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Role } from '@prisma/client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { Request, Response } from 'express';
 import * as oidc from 'openid-client';
@@ -122,11 +121,10 @@ export class MicrosoftAuthService {
       || !user.isActive
       || user.deletedAt
       || user.employee?.deletedAt
-      || (user.role !== Role.SUPER_ADMIN && user.role !== Role.HR_ADMIN)
     ) {
       throw new UnauthorizedException('Microsoft account is not authorized for this application.');
     }
-    return this.authService.issueSession(user);
+    return this.authService.issueSession(user, request, 'microsoft');
   }
 
   private validateIdentityClaims(claims: Record<string, unknown>) {

@@ -2,6 +2,8 @@ import type { NavItem } from "./data";
 
 export const navPaths = {
   Dashboard: "/",
+  "My HR": "/me",
+  Team: "/team",
   Employees: "/employees",
   Attendance: "/attendance",
   Leave: "/leave",
@@ -13,6 +15,8 @@ export const navPaths = {
   EOS: "/eos",
   Documents: "/documents",
   Reports: "/reports",
+  Audit: "/audit",
+  System: "/system",
   Settings: "/settings"
 } as const satisfies Record<NavItem, string>;
 

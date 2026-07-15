@@ -1,9 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AttendanceStatus, AuditAction, CandidateStage, EosStatus, ExpenseStatus, Prisma,
-  RecruitmentJobStatus, Role, TripStatus,
+  RecruitmentJobStatus, TripStatus,
 } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { hasAnyPermission, hasPermission } from '../../common/authorization';
 import { money, nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
 import { paginationMeta } from '../../common/utils/crud.util';
@@ -12,7 +12,7 @@ import { AuditService } from '../audit/audit.service';
 import {
   CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
   EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
-  TransitionExpenseDto, TransitionTripDto, UpdateOrganizationSettingsDto,
+  TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
 
 const employeeSummary = { id: true, employeeCode: true, firstName: true, lastName: true, departmentId: true, managerId: true };
@@ -22,7 +22,7 @@ export class OperationsService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
   async createTrip(dto: CreateTripDto, user: RequestUser) {
-    const employeeId = await this.resolveEmployee(dto.employeeId, user);
+    const employeeId = await this.resolveEmployee(dto.employeeId, user, 'trip.hr.manage');
     const days = this.inclusiveDays(dto.startDate, dto.endDate);
     return this.transaction(async (tx) => {
       const trip = await tx.businessTrip.create({
@@ -41,16 +41,16 @@ export class OperationsService {
   }
 
   async listTrips(query: EmployeeScopedQueryDto, user: RequestUser) {
-    const filters = await this.employeeFilters(query.employeeId, user);
+    const filters = await this.employeeFilters(query.employeeId, user, 'trip');
     if (query.status) filters.push({ status: query.status as TripStatus });
     return this.paginated(this.prisma.businessTrip, query, { AND: filters, deletedAt: null }, { employee: { select: employeeSummary } });
   }
 
   async transitionTrip(id: string, dto: TransitionTripDto, user: RequestUser) {
     return this.transaction(async (tx) => {
-      const trip = await tx.businessTrip.findFirst({ where: { id, deletedAt: null }, include: { employee: true } });
+      const trip = await tx.businessTrip.findFirst({ where: { id, deletedAt: null } });
       if (!trip) throw new NotFoundException('Business trip not found');
-      await this.assertManagerOrHr(trip.employeeId, user, tx);
+      await this.assertManagerOrHr(trip.employeeId, user, tx, 'trip');
       const allowed: Record<TripStatus, TripStatus[]> = {
         PENDING: [TripStatus.APPROVED, TripStatus.REJECTED], APPROVED: [TripStatus.CLOSED], REJECTED: [], CLOSED: [],
       };
@@ -62,11 +62,11 @@ export class OperationsService {
   }
 
   removeTrip(id: string, user: RequestUser) {
-    return this.removeEmployeeOwnedRecord('businessTrip', 'BusinessTrip', id, user, TripStatus.PENDING);
+    return this.removeEmployeeOwnedRecord('businessTrip', 'BusinessTrip', id, user, TripStatus.PENDING, 'trip.hr.manage');
   }
 
   async createExpense(dto: CreateExpenseDto, user: RequestUser) {
-    const employeeId = await this.resolveEmployee(dto.employeeId, user);
+    const employeeId = await this.resolveEmployee(dto.employeeId, user, 'expense.hr.approve');
     return this.transaction(async (tx) => {
       if (dto.tripId) {
         const trip = await tx.businessTrip.findFirst({ where: { id: dto.tripId, employeeId, deletedAt: null } });
@@ -82,7 +82,7 @@ export class OperationsService {
   }
 
   async listExpenses(query: EmployeeScopedQueryDto, user: RequestUser) {
-    const filters = await this.employeeFilters(query.employeeId, user);
+    const filters = await this.employeeFilters(query.employeeId, user, 'expense');
     if (query.status) filters.push({ status: query.status as ExpenseStatus });
     return this.paginated(this.prisma.employeeExpense, query, { AND: filters, deletedAt: null }, { employee: { select: employeeSummary }, trip: true });
   }
@@ -91,7 +91,7 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const expense = await tx.employeeExpense.findFirst({ where: { id, deletedAt: null } });
       if (!expense) throw new NotFoundException('Expense not found');
-      await this.assertManagerOrHr(expense.employeeId, user, tx);
+      await this.assertManagerOrHr(expense.employeeId, user, tx, 'expense');
       const allowed: Record<ExpenseStatus, ExpenseStatus[]> = {
         SUBMITTED: [ExpenseStatus.APPROVED, ExpenseStatus.REJECTED], APPROVED: [ExpenseStatus.PAID], REJECTED: [], PAID: [],
       };
@@ -103,7 +103,7 @@ export class OperationsService {
   }
 
   removeExpense(id: string, user: RequestUser) {
-    return this.removeEmployeeOwnedRecord('employeeExpense', 'EmployeeExpense', id, user, ExpenseStatus.SUBMITTED);
+    return this.removeEmployeeOwnedRecord('employeeExpense', 'EmployeeExpense', id, user, ExpenseStatus.SUBMITTED, 'expense.hr.approve');
   }
 
   async createJob(dto: CreateRecruitmentJobDto, user: RequestUser) {
@@ -118,6 +118,29 @@ export class OperationsService {
   listJobs(query: QueryRecruitmentDto) {
     const where = { deletedAt: null, status: query.status, OR: query.search ? [{ title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined };
     return this.paginated(this.prisma.recruitmentJob, query, where, { department: true, candidates: true });
+  }
+
+  async updateJob(id: string, dto: UpdateRecruitmentJobDto, user: RequestUser) {
+    if (dto.departmentId) await this.ensureDepartment(dto.departmentId);
+    return this.transaction(async (tx) => {
+      const existing = await tx.recruitmentJob.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Recruitment job not found');
+      const updated = await tx.recruitmentJob.update({ where: { id }, data: { ...dto, version: { increment: 1 } }, include: { department: true } });
+      await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentJob', id, 'Recruitment job updated');
+      return updated;
+    });
+  }
+
+  removeJob(id: string, user: RequestUser) {
+    return this.transaction(async (tx) => {
+      const existing = await tx.recruitmentJob.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Recruitment job not found');
+      const now = new Date();
+      await tx.recruitmentCandidate.updateMany({ where: { jobId: id, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } });
+      const removed = await tx.recruitmentJob.update({ where: { id }, data: { deletedAt: now, version: { increment: 1 } } });
+      await this.record(tx, user, AuditAction.DELETE, 'RecruitmentJob', id, 'Recruitment job and linked candidates archived');
+      return removed;
+    });
   }
 
   async createCandidate(dto: CreateCandidateDto, user: RequestUser) {
@@ -138,6 +161,28 @@ export class OperationsService {
       OR: query.search ? [{ name: { contains: query.search, mode: Prisma.QueryMode.insensitive } }, { email: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined,
     };
     return this.paginated(this.prisma.recruitmentCandidate, query, where, { job: { include: { department: true } }, employee: { select: employeeSummary } });
+  }
+
+  async updateCandidate(id: string, dto: UpdateCandidateDto, user: RequestUser) {
+    return this.transaction(async (tx) => {
+      const existing = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Candidate not found');
+      if (dto.jobId) {
+        const job = await tx.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null } });
+        if (!job) throw new NotFoundException('Open recruitment job not found');
+      }
+      const updated = await tx.recruitmentCandidate.update({
+        where: { id },
+        data: {
+          ...dto,
+          email: dto.email?.trim().toLowerCase(),
+          rating: dto.rating === undefined ? undefined : nonNegativeMoney(dto.rating, 'rating'),
+          version: { increment: 1 },
+        },
+      });
+      await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentCandidate', id, 'Candidate details updated');
+      return updated;
+    });
   }
 
   async transitionCandidate(id: string, dto: TransitionCandidateDto, user: RequestUser) {
@@ -260,28 +305,36 @@ export class OperationsService {
     });
   }
 
-  private async resolveEmployee(requested: string | undefined, user: RequestUser) {
+  private async resolveEmployee(requested: string | undefined, user: RequestUser, allPermission: string) {
     const id = requested ?? user.employeeId;
     if (!id) throw new NotFoundException('No employee profile is linked to this user');
-    if (requested && requested !== user.employeeId && !hasHrAccess(user.role)) throw new ForbiddenException('Only HR can submit for another employee');
+    if (requested && requested !== user.employeeId && !hasPermission(user, allPermission)) throw new ForbiddenException('Cannot submit for another employee');
     const employee = await this.prisma.employee.findFirst({ where: { id, deletedAt: null } });
     if (!employee) throw new NotFoundException('Employee not found');
     return id;
   }
 
-  private async employeeFilters(requested: string | undefined, user: RequestUser): Promise<Record<string, unknown>[]> {
-    if (hasHrAccess(user.role)) return requested ? [{ employeeId: requested }] : [];
-    if (!user.employeeId) return [{ employeeId: '__no_employee_profile__' }];
-    if (requested && requested !== user.employeeId && user.role !== Role.MANAGER) throw new ForbiddenException('Cannot access another employee');
-    if (user.role === Role.MANAGER) return [{ OR: [{ employeeId: user.employeeId }, { employee: { managerId: user.employeeId } }] }, ...(requested ? [{ employeeId: requested }] : [])];
-    return [{ employeeId: user.employeeId }];
+  private async employeeFilters(requested: string | undefined, user: RequestUser, resource: 'trip' | 'expense'): Promise<Record<string, unknown>[]> {
+    if (hasAnyPermission(user, [`${resource}.hr.read`, `${resource}.audit.read`])) return requested ? [{ employeeId: requested }] : [];
+    const scopes: Record<string, unknown>[] = [];
+    if (user.employeeId && hasPermission(user, `${resource}.self.read`)) scopes.push({ employeeId: user.employeeId });
+    if (user.employeeId && hasPermission(user, `${resource}.team.read`)) scopes.push({ employee: { managerId: user.employeeId } });
+    if (hasPermission(user, `${resource}.department.read`) && user.departmentScopeIds.length) scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
+    return [{ OR: scopes.length ? scopes : [{ employeeId: '__no_employee_scope__' }] }, ...(requested ? [{ employeeId: requested }] : [])];
   }
 
-  private async assertManagerOrHr(employeeId: string, user: RequestUser, tx: Prisma.TransactionClient) {
-    if (hasHrAccess(user.role)) return;
-    if (user.role !== Role.MANAGER || !user.employeeId) throw new ForbiddenException('Manager or HR access required');
-    const report = await tx.employee.findFirst({ where: { id: employeeId, managerId: user.employeeId, deletedAt: null } });
-    if (!report) throw new ForbiddenException('Managers can only decide requests for direct reports');
+  private async assertManagerOrHr(employeeId: string, user: RequestUser, tx: Prisma.TransactionClient, resource: 'trip' | 'expense') {
+    const hrPermission = resource === 'trip' ? 'trip.hr.manage' : 'expense.hr.approve';
+    if (hasPermission(user, hrPermission)) return;
+    const report = await tx.employee.findFirst({ where: {
+      id: employeeId,
+      deletedAt: null,
+      OR: [
+        ...(user.employeeId && hasPermission(user, `${resource}.team.approve_manager`) ? [{ managerId: user.employeeId }] : []),
+        ...(hasPermission(user, `${resource}.department.approve_manager`) ? [{ departmentId: { in: user.departmentScopeIds } }] : []),
+      ],
+    }, select: { id: true } });
+    if (!report) throw new ForbiddenException('Employee is outside the managed scope');
   }
 
   private async ensureDepartment(id: string) {
@@ -325,6 +378,7 @@ export class OperationsService {
     id: string,
     user: RequestUser,
     editableStatus: TripStatus | ExpenseStatus,
+    allPermission: string,
   ) {
     return this.transaction(async (tx) => {
       const delegate = tx[delegateName] as unknown as {
@@ -333,7 +387,7 @@ export class OperationsService {
       };
       const record = await delegate.findFirst({ where: { id, deletedAt: null } });
       if (!record) throw new NotFoundException(`${entityType} not found`);
-      if (!hasHrAccess(user.role)) {
+      if (!hasPermission(user, allPermission)) {
         if (!user.employeeId || record.employeeId !== user.employeeId) throw new ForbiddenException(`Cannot delete this ${entityType.toLowerCase()}`);
         if (record.status !== editableStatus) throw new BadRequestException(`Only an unprocessed ${entityType.toLowerCase()} can be deleted`);
       }

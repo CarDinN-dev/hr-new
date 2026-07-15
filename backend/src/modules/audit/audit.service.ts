@@ -40,7 +40,7 @@ export class AuditService {
     const [data, total] = await Promise.all([
       this.prisma.auditEvent.findMany({
         where,
-        include: { actor: { select: { id: true, email: true, role: true } }, changes: true },
+        include: { actor: { select: { id: true, email: true } }, changes: true },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

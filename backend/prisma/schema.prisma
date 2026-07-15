@@ -7,14 +7,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
+enum LegacyRole {
   SUPER_ADMIN
   HR_ADMIN
   MANAGER
   EMPLOYEE
+
+  @@map("Role")
 }
 
-enum Permission {
+enum LegacyPermission {
   EMPLOYEE_READ_ALL
   EMPLOYEE_WRITE
   ATTENDANCE_READ_ALL
@@ -25,6 +27,8 @@ enum Permission {
   DOCUMENT_READ_ALL
   DOCUMENT_WRITE_ALL
   ANNOUNCEMENT_WRITE
+
+  @@map("Permission")
 }
 
 enum Gender {
@@ -72,9 +76,21 @@ enum AttendanceApprovalStatus {
 
 enum LeaveRequestStatus {
   PENDING
+  PENDING_MANAGER
+  PENDING_HR
   APPROVED
   REJECTED
   CANCELLED
+}
+
+enum LeaveDecisionStage {
+  MANAGER
+  HR
+}
+
+enum LeaveDecisionOutcome {
+  APPROVED
+  REJECTED
 }
 
 enum PayrollStatus {
@@ -194,22 +210,124 @@ enum ImportItemStatus {
 }
 
 model User {
-  id                String       @id @default(uuid())
-  email             String       @unique
-  microsoftObjectId String?      @unique
-  passwordHash      String
-  role              Role         @default(EMPLOYEE)
-  permissions       Permission[] @default([])
-  isActive          Boolean      @default(true)
-  sessionVersion    Int          @default(0)
-  employee          Employee?
-  auditEvents       AuditEvent[]
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  deletedAt         DateTime?
+  id                   String             @id @default(uuid())
+  email                String             @unique
+  microsoftObjectId    String?            @unique
+  passwordHash         String
+  role                 LegacyRole         @default(EMPLOYEE) @map("role")
+  permissions          LegacyPermission[] @default([]) @map("permissions")
+  isActive             Boolean            @default(true)
+  sessionVersion       Int                @default(0)
+  authorizationVersion Int                @default(1)
+  rbacMigratedAt       DateTime?
+  employee             Employee?
+  auditEvents          AuditEvent[]
+  roles                UserRole[]         @relation("AssignedUserRoles")
+  rolesAssigned        UserRole[]         @relation("UserRoleAssigner")
+  rolesCreated         Role[]             @relation("RoleCreator")
+  permissionsAssigned  RolePermission[]   @relation("RolePermissionAssigner")
+  sessions             AuthSession[]
+  leaveDecisions       LeaveDecision[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  deletedAt            DateTime?
 
   @@index([role])
+  @@index([authorizationVersion])
   @@index([deletedAt])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  code        String   @unique @db.VarChar(100)
+  displayName String   @db.VarChar(160)
+  description String?
+  isBuiltIn   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  version     Int      @default(1)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?            @relation("RoleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@index([isActive])
+  @@index([createdById])
+  @@map("RbacRole")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique @db.VarChar(160)
+  displayName String   @db.VarChar(200)
+  description String?
+  category    String   @db.VarChar(80)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+
+  @@index([category])
+  @@map("RbacPermission")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  assignedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  assignedBy   User?      @relation("RolePermissionAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@index([assignedById])
+}
+
+model UserRole {
+  id           String    @id @default(uuid())
+  userId       String
+  roleId       String
+  assignedById String?
+  assignedAt   DateTime  @default(now())
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  reason       String?
+  updatedAt    DateTime  @updatedAt
+
+  user       User  @relation("AssignedUserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role       Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedBy User? @relation("UserRoleAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, roleId])
+  @@index([userId, revokedAt, expiresAt])
+  @@index([roleId, revokedAt, expiresAt])
+  @@index([assignedById])
+}
+
+model AuthSession {
+  id                   String    @id @default(uuid())
+  userId               String
+  tokenHash            String    @unique @db.VarChar(64)
+  provider             String    @db.VarChar(32)
+  authorizationVersion Int
+  ipHash               String?   @db.VarChar(64)
+  userAgent            String?   @db.VarChar(512)
+  createdAt            DateTime  @default(now())
+  lastSeenAt           DateTime  @default(now())
+  expiresAt            DateTime
+  revokedAt            DateTime?
+  updatedAt            DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([expiresAt])
 }
 
 model AuthThrottle {
@@ -419,7 +537,7 @@ model LeaveRequest {
   totalDays       Decimal            @db.Decimal(5, 2)
   isHalfDay       Boolean            @default(false)
   reason          String?
-  status          LeaveRequestStatus @default(PENDING)
+  status          LeaveRequestStatus
   managerId       String?
   approvedById    String?
   approvedAt      DateTime?
@@ -433,6 +551,7 @@ model LeaveRequest {
   leaveType  LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
   manager    Employee? @relation("LeaveManager", fields: [managerId], references: [id], onDelete: SetNull)
   approvedBy Employee? @relation("LeaveApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  decisions  LeaveDecision[]
 
   @@index([employeeId])
   @@index([leaveTypeId])
@@ -440,6 +559,24 @@ model LeaveRequest {
   @@index([approvedById])
   @@index([status])
   @@index([deletedAt])
+}
+
+model LeaveDecision {
+  id          String               @id @default(uuid())
+  requestId   String
+  actorUserId String
+  stage       LeaveDecisionStage
+  outcome     LeaveDecisionOutcome
+  fromStatus  LeaveRequestStatus
+  toStatus    LeaveRequestStatus
+  reason      String?
+  createdAt   DateTime             @default(now())
+
+  request LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor   User         @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
 model SalaryRecord {
@@ -557,7 +694,7 @@ model Announcement {
   id            String    @id @default(uuid())
   title         String
   content       String
-  audienceRoles Role[]    @default([])
+  audienceRoles LegacyRole[] @default([])
   departmentId  String?
   createdById   String
   publishedAt   DateTime?

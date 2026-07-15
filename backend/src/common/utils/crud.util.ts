@@ -16,6 +16,7 @@ type ListOptions = {
   allowedSortFields?: string[];
   where?: Record<string, unknown>;
   include?: Record<string, unknown>;
+  select?: Record<string, unknown>;
 };
 
 export function paginationMeta(total: number, page: number, limit: number) {
@@ -27,7 +28,7 @@ export function paginationMeta(total: number, page: number, limit: number) {
   };
 }
 
-export function listArgs(query: PaginationQueryDto, options: ListOptions = {}) {
+export function listArgs(query: PaginationQueryDto, options: ListOptions = {}): any {
   const page = query.page || 1;
   const limit = query.limit || 20;
   const skip = (page - 1) * limit;
@@ -56,7 +57,8 @@ export function listArgs(query: PaginationQueryDto, options: ListOptions = {}) {
     skip,
     take: limit,
     orderBy: { [sortBy]: query.sortOrder || 'desc' },
-    include: options.include,
+    include: options.select ? undefined : options.include,
+    select: options.select,
     page,
     limit,
   };

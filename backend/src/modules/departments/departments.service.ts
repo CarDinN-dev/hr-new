@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { listRecords, softDelete } from '../../common/utils/crud.util';
+import { AuditAction } from '@prisma/client';
+import { RequestUser } from '../../common/types/request-user.type';
+import { listRecords } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { QueryDepartmentsDto } from './dto/query-departments.dto';
 import { UpdateDepartmentDto } from './dto/update-department.dto';
@@ -19,11 +22,15 @@ const departmentInclude = {
 
 @Injectable()
 export class DepartmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
-  async create(dto: CreateDepartmentDto) {
+  async create(dto: CreateDepartmentDto, user: RequestUser) {
     await this.validateManager(dto.managerId);
-    return this.prisma.department.create({ data: dto, include: departmentInclude });
+    return this.prisma.$transaction(async (tx) => {
+      const department = await tx.department.create({ data: dto, include: departmentInclude });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Department', entityId: department.id, summary: 'Department created' });
+      return department;
+    });
   }
 
   list(query: QueryDepartmentsDto) {
@@ -45,13 +52,17 @@ export class DepartmentsService {
     return department;
   }
 
-  async update(id: string, dto: UpdateDepartmentDto) {
+  async update(id: string, dto: UpdateDepartmentDto, user: RequestUser) {
     await this.findById(id);
     await this.validateManager(dto.managerId);
-    return this.prisma.department.update({ where: { id }, data: dto, include: departmentInclude });
+    return this.prisma.$transaction(async (tx) => {
+      const department = await tx.department.update({ where: { id }, data: dto, include: departmentInclude });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Department', entityId: id, summary: 'Department updated' });
+      return department;
+    });
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: RequestUser) {
     await this.findById(id);
     const [employee, position] = await Promise.all([
       this.prisma.employee.findFirst({ where: { departmentId: id, deletedAt: null }, select: { id: true } }),
@@ -60,7 +71,11 @@ export class DepartmentsService {
     if (employee || position) {
       throw new BadRequestException('Reassign active employees and positions before deleting this department');
     }
-    return softDelete(this.prisma.department, id, 'Department');
+    return this.prisma.$transaction(async (tx) => {
+      const department = await tx.department.update({ where: { id }, data: { deletedAt: new Date() }, include: departmentInclude });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Department', entityId: id, summary: 'Department archived' });
+      return department;
+    });
   }
 
   private async validateManager(managerId?: string) {

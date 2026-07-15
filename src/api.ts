@@ -11,7 +11,8 @@ import {
 const env = import.meta as unknown as { env?: { VITE_API_URL?: string } };
 
 export const apiBaseUrl = (env.env?.VITE_API_URL || "/api/v1").replace(/\/$/, "");
-export const backendSessionKey = "medtech-hr-erp-backend-session-v1";
+export const backendSessionKey = "medtech-hr-erp-backend-session-v2";
+export const authorizationExpiredEvent = "medtech-hr-authorization-expired";
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -30,16 +31,29 @@ export class ApiError extends Error {
 export type BackendSession = {
   id: string;
   email: string;
+  displayName: string;
   csrfToken: string;
-  role: string;
-  sessionVersion: number;
+  roles: string[];
+  permissions: string[];
+  departmentScopeIds: string[];
+  sessionId: string;
+  authorizationVersion: number;
   employeeId?: string | null;
-  stateUpdatedAt?: string;
 };
 
 type BackendSessionResponse = {
   csrfToken: string;
-  user: { id: string; email: string; role: string; sessionVersion: number; employeeId?: string | null };
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    roles: string[];
+    permissions: string[];
+    departmentScopeIds: string[];
+    sessionId: string;
+    authorizationVersion: number;
+    employeeId?: string | null;
+  };
 };
 
 type BackendDepartment = {
@@ -100,6 +114,7 @@ type BackendPayroll = {
   netPay: string | number;
   status: string;
   lineItems?: Array<Record<string, unknown>>;
+  employee?: BackendEmployee;
 };
 
 
@@ -108,7 +123,9 @@ export function loadBackendSession(): BackendSession | null {
     const raw = sessionStorage.getItem(backendSessionKey) || localStorage.getItem(backendSessionKey);
     localStorage.removeItem(backendSessionKey);
     const session = raw ? JSON.parse(raw) as Partial<BackendSession> : null;
-    return session?.id && session?.csrfToken && session.email && Number.isInteger(session.sessionVersion) && isHrConsoleRole(session.role)
+    return session?.id && session?.csrfToken && session.email && session.sessionId
+      && Number.isInteger(session.authorizationVersion) && Array.isArray(session.roles)
+      && Array.isArray(session.permissions) && Array.isArray(session.departmentScopeIds)
       ? session as BackendSession
       : null;
   } catch {
@@ -138,36 +155,56 @@ export function startMicrosoftLogin() {
 }
 
 function backendSession(result: BackendSessionResponse): BackendSession {
-  if (!isHrConsoleRole(result.user.role)) {
-    throw new ApiError("This console is limited to HR administrators.", 403);
-  }
   return {
     id: result.user.id,
     email: result.user.email,
-    role: result.user.role,
-    sessionVersion: result.user.sessionVersion,
+    displayName: result.user.displayName,
+    roles: result.user.roles,
+    permissions: result.user.permissions,
+    departmentScopeIds: result.user.departmentScopeIds,
+    sessionId: result.user.sessionId,
+    authorizationVersion: result.user.authorizationVersion,
     employeeId: result.user.employeeId,
     csrfToken: result.csrfToken
   };
 }
 
+export function hasPermission(session: BackendSession, permission: string) {
+  return session.permissions.includes(permission);
+}
+
+export function hasAnyPermission(session: BackendSession, ...permissions: string[]) {
+  return permissions.some(permission => hasPermission(session, permission));
+}
+
+export function hasAllPermissions(session: BackendSession, ...permissions: string[]) {
+  return permissions.every(permission => hasPermission(session, permission));
+}
+
 export async function loadBackendState(current: HrState, session: BackendSession): Promise<{ state: HrState; updatedAt?: string }> {
-  const hasHrAccess = session.role === "SUPER_ADMIN" || session.role === "HR_ADMIN";
+  const listWhen = <T>(allowed: boolean, path: string) => allowed ? apiList<T>(path) : Promise.resolve([] as T[]);
+  const getWhen = <T>(allowed: boolean, path: string) => allowed ? apiRequest<T>(path) : Promise.resolve(null as T);
+  const broadEmployeeRead = hasAnyPermission(session, "employee.team.read", "employee.department.read", "employee.hr.read", "employee.audit.read");
+  const employeesRequest = broadEmployeeRead
+    ? apiList<BackendEmployee>("/employees")
+    : hasPermission(session, "employee.self.read")
+      ? apiRequest<BackendEmployee>("/employees/me").then(employee => employee ? [employee] : [])
+      : Promise.resolve([] as BackendEmployee[]);
   const [employees, departments, leaveTypes, attendance, leaves, payroll, trips, expenses, loans, jobs, candidates, eos, documents, settings] = await Promise.all([
-    apiList<BackendEmployee>("/employees"),
-    apiList<BackendDepartment>("/departments"),
-    apiList<Record<string, unknown>>("/leave/types"),
-    apiList<Record<string, unknown>>("/attendance"),
-    apiList<BackendLeave>("/leave/requests"),
-    hasHrAccess ? apiList<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>("/payroll") : Promise.resolve([]),
-    apiList<Record<string, unknown>>("/business-trips"),
-    apiList<Record<string, unknown>>("/expenses"),
-    hasHrAccess ? apiList<Record<string, unknown>>("/loans") : Promise.resolve([]),
-    hasHrAccess ? apiList<Record<string, unknown>>("/recruitment/jobs") : Promise.resolve([]),
-    hasHrAccess ? apiList<Record<string, unknown>>("/recruitment/candidates") : Promise.resolve([]),
-    hasHrAccess ? apiList<Record<string, unknown>>("/eos") : Promise.resolve([]),
-    apiList<Record<string, unknown>>("/documents"),
-    apiRequest<Record<string, unknown> | null>("/organization-settings")
+    employeesRequest,
+    listWhen<BackendDepartment>(hasPermission(session, "department.read"), "/departments"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "leave.self.read", "leave.configure"), "/leave/types"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.self.read", "attendance.team.read", "attendance.department.read", "attendance.hr.read", "attendance.audit.read"), "/attendance"),
+    listWhen<BackendLeave>(hasAnyPermission(session, "leave.self.read", "leave.team.read", "leave.department.read", "leave.hr.read", "leave.audit.read"), "/leave/requests"),
+    listWhen<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>(hasAnyPermission(session, "payroll.self.read_payslip", "payroll.read", "payroll.audit.read"), "/payroll"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "trip.self.read", "trip.team.read", "trip.department.read", "trip.hr.read", "trip.audit.read"), "/business-trips"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "expense.self.read", "expense.team.read", "expense.department.read", "expense.hr.read", "expense.audit.read"), "/expenses"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "loan.self.read", "loan.hr.read", "loan.audit.read"), "/loans"),
+    listWhen<Record<string, unknown>>(hasPermission(session, "recruitment.read"), "/recruitment/jobs"),
+    listWhen<Record<string, unknown>>(hasPermission(session, "recruitment.read"), "/recruitment/candidates"),
+    listWhen<Record<string, unknown>>(hasPermission(session, "eos.read"), "/eos"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "document.self.read", "document.hr.read"), "/documents"),
+    getWhen<Record<string, unknown> | null>(hasPermission(session, "organization.read"), "/organization-settings")
   ]);
 
   const departmentNames = departments.map(item => item.name).filter(Boolean);
@@ -191,10 +228,19 @@ export async function loadBackendState(current: HrState, session: BackendSession
     wpsPayerQid: String(settings.wpsPayerQid || ""), wpsPayerBank: String(settings.wpsPayerBank || ""), wpsPayerIban: String(settings.wpsPayerIban || ""),
     accountPhoto: String(settings.accountPhoto || "")
   } : current.settings.company;
+  const employeeMap = new Map(employees.map(employee => [employee.id, employee]));
+  for (const payrollRecord of payroll) {
+    if (!payrollRecord.employee || employeeMap.has(payrollRecord.employee.id)) continue;
+    employeeMap.set(payrollRecord.employee.id, {
+      ...payrollRecord.employee,
+      salary: payrollRecord.baseSalary,
+      salaryRecords: [{ baseSalary: payrollRecord.baseSalary, allowances: payrollRecord.allowances, bonuses: payrollRecord.bonuses }]
+    });
+  }
   return {
     state: {
       ...current,
-      employees: employees.map(mapEmployee),
+      employees: [...employeeMap.values()].map(mapEmployee),
       attendance: attendanceState,
       attendanceApprovals,
       leaves: leaves.map(mapLeave),
@@ -293,15 +339,12 @@ async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfTok
   }
 
   if (!response.ok || payload?.success === false) {
+    if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(authorizationExpiredEvent));
     throw new ApiError(payload?.message || `API request failed (${response.status})`, response.status);
   }
 
   if (payload && "data" in payload) return payload as ApiEnvelope<T>;
   return { success: true, data: payload as T };
-}
-
-function isHrConsoleRole(role: unknown): role is string {
-  return role === "SUPER_ADMIN" || role === "HR_ADMIN" || role === "MANAGER" || role === "EMPLOYEE";
 }
 
 function mapEmployee(employee: BackendEmployee): EmployeeRecord {
@@ -353,6 +396,7 @@ function mapLeave(leave: BackendLeave): HrState["leaves"][number] {
     days: Number(leave.totalDays || 0),
     reason: leave.reason || "",
     status: mapLeaveStatus(leave.status),
+    reviewStage: leave.status === "PENDING_MANAGER" ? "Manager" : leave.status === "PENDING_HR" ? "HR" : undefined,
     appliedOn: dateOnly(leave.createdAt),
     decidedOn: dateOnly(leave.approvedAt)
   };

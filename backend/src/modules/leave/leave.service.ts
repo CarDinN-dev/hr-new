@@ -1,8 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, LeaveRequestStatus, PayrollStatus, Prisma, Role } from '@prisma/client';
-import { hasHrAccess } from '../../common/constants/access.constants';
+import { AuditAction, LeaveDecisionOutcome, LeaveDecisionStage, LeaveRequestStatus, PayrollStatus, Prisma } from '@prisma/client';
+import { hasAnyPermission, hasPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, listRecords, paginationMeta, softDelete } from '../../common/utils/crud.util';
+import { listArgs, listRecords, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateLeaveBalanceDto } from './dto/create-leave-balance.dto';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
@@ -23,6 +23,7 @@ const leaveRequestInclude = {
   leaveType: true,
   manager: { select: { id: true, firstName: true, lastName: true, email: true } },
   approvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  decisions: { orderBy: { createdAt: 'asc' as const }, select: { id: true, stage: true, outcome: true, fromStatus: true, toStatus: true, reason: true, createdAt: true } },
 };
 
 const leaveBalanceInclude = {
@@ -34,8 +35,12 @@ const leaveBalanceInclude = {
 export class LeaveService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
-  createType(dto: CreateLeaveTypeDto) {
-    return this.prisma.leaveType.create({ data: dto });
+  createType(dto: CreateLeaveTypeDto, user: RequestUser) {
+    return this.leaveTransaction(async (tx) => {
+      const type = await tx.leaveType.create({ data: dto });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'LeaveType', entityId: type.id, summary: 'Leave type created' });
+      return type;
+    });
   }
 
   listTypes(query: QueryLeaveTypesDto) {
@@ -52,26 +57,38 @@ export class LeaveService {
     return type;
   }
 
-  async updateType(id: string, dto: UpdateLeaveTypeDto) {
+  async updateType(id: string, dto: UpdateLeaveTypeDto, user: RequestUser) {
     await this.findTypeById(id);
-    return this.prisma.leaveType.update({ where: { id }, data: dto });
+    return this.leaveTransaction(async (tx) => {
+      const type = await tx.leaveType.update({ where: { id }, data: dto });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'LeaveType', entityId: id, summary: 'Leave type updated' });
+      return type;
+    });
   }
 
-  async removeType(id: string) {
+  async removeType(id: string, user: RequestUser) {
     await this.findTypeById(id);
     const activeBalance = await this.prisma.leaveBalance.findFirst({
       where: { leaveTypeId: id, deletedAt: null },
       select: { id: true },
     });
     if (activeBalance) throw new BadRequestException('Remove active leave balances before deleting this leave type');
-    return softDelete(this.prisma.leaveType, id, 'Leave type');
+    return this.leaveTransaction(async (tx) => {
+      const type = await tx.leaveType.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'LeaveType', entityId: id, summary: 'Leave type archived' });
+      return type;
+    });
   }
 
-  async createBalance(dto: CreateLeaveBalanceDto) {
+  async createBalance(dto: CreateLeaveBalanceDto, user: RequestUser) {
     await this.ensureEmployee(dto.employeeId);
     await this.findTypeById(dto.leaveTypeId);
     this.assertBalanceValues(dto.totalDays, dto.usedDays ?? 0, dto.pendingDays ?? 0);
-    return this.prisma.leaveBalance.create({ data: dto, include: leaveBalanceInclude });
+    return this.leaveTransaction(async (tx) => {
+      const balance = await tx.leaveBalance.create({ data: dto, include: leaveBalanceInclude });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'LeaveBalance', entityId: balance.id, summary: 'Leave balance created' });
+      return balance;
+    });
   }
 
   async listBalances(query: QueryLeaveBalancesDto, user: RequestUser) {
@@ -102,7 +119,7 @@ export class LeaveService {
     return balance;
   }
 
-  async updateBalance(id: string, dto: UpdateLeaveBalanceDto) {
+  async updateBalance(id: string, dto: UpdateLeaveBalanceDto, user: RequestUser) {
     return this.leaveTransaction(async (tx) => {
       const balance = await tx.leaveBalance.findFirst({ where: { id, deletedAt: null } });
       if (!balance) throw new NotFoundException('Leave balance not found');
@@ -111,11 +128,13 @@ export class LeaveService {
         dto.usedDays ?? Number(balance.usedDays),
         dto.pendingDays ?? Number(balance.pendingDays),
       );
-      return tx.leaveBalance.update({ where: { id }, data: dto, include: leaveBalanceInclude });
+      const updated = await tx.leaveBalance.update({ where: { id }, data: dto, include: leaveBalanceInclude });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'LeaveBalance', entityId: id, summary: 'Leave balance updated' });
+      return updated;
     });
   }
 
-  async removeBalance(id: string) {
+  async removeBalance(id: string, user: RequestUser) {
     return this.leaveTransaction(async (tx) => {
       const balance = await tx.leaveBalance.findFirst({ where: { id, deletedAt: null } });
       if (!balance) throw new NotFoundException('Leave balance not found');
@@ -126,13 +145,15 @@ export class LeaveService {
           employeeId: balance.employeeId,
           leaveTypeId: balance.leaveTypeId,
           startDate: { gte: yearStart, lte: yearEnd },
-          status: { in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.APPROVED] },
+          status: { in: [LeaveRequestStatus.PENDING_MANAGER, LeaveRequestStatus.PENDING_HR, LeaveRequestStatus.APPROVED] },
           deletedAt: null,
         },
         select: { id: true },
       });
       if (activeRequest) throw new BadRequestException('Cancel active leave requests before deleting this balance');
-      return tx.leaveBalance.update({ where: { id }, data: { deletedAt: new Date() } });
+      const removed = await tx.leaveBalance.update({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'LeaveBalance', entityId: id, summary: 'Leave balance archived' });
+      return removed;
     });
   }
 
@@ -163,6 +184,7 @@ export class LeaveService {
           isHalfDay: dto.isHalfDay ?? false,
           reason: dto.reason,
           managerId: employee.managerId,
+          status: employee.managerId ? LeaveRequestStatus.PENDING_MANAGER : LeaveRequestStatus.PENDING_HR,
         },
         include: leaveRequestInclude,
       });
@@ -204,7 +226,7 @@ export class LeaveService {
     return this.leaveTransaction(async (tx) => {
       const request = await this.ensureRequest(id, tx);
       await this.assertCanCancel(request.employeeId, user);
-      if (request.status !== LeaveRequestStatus.PENDING) {
+      if (!([LeaveRequestStatus.PENDING_MANAGER, LeaveRequestStatus.PENDING_HR] as LeaveRequestStatus[]).includes(request.status)) {
         throw new BadRequestException('Only pending leave requests can be updated');
       }
 
@@ -284,21 +306,27 @@ export class LeaveService {
 
     return this.leaveTransaction(async (tx) => {
       const request = await this.ensureRequest(id, tx);
-      if (request.status !== LeaveRequestStatus.PENDING) {
+      if (!([LeaveRequestStatus.PENDING_MANAGER, LeaveRequestStatus.PENDING_HR] as LeaveRequestStatus[]).includes(request.status)) {
         throw new BadRequestException('Only pending leave requests can be approved or rejected');
       }
-      await this.assertCanApprove(request.employeeId, user, tx);
+      if (request.employeeId === user.employeeId) throw new ForbiddenException('Self-approval is not permitted');
+      await this.assertCanApprove(request.employeeId, request.status, user, tx);
+
+      const managerStage = request.status === LeaveRequestStatus.PENDING_MANAGER;
+      const nextStatus = managerStage && dto.status === LeaveRequestStatus.APPROVED
+        ? LeaveRequestStatus.PENDING_HR
+        : dto.status;
 
       const leaveType = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
       if (!leaveType) throw new NotFoundException('Leave type not found');
-      if (leaveType.isPaid) {
+      if (leaveType.isPaid && nextStatus !== LeaveRequestStatus.PENDING_HR) {
         const year = request.startDate.getUTCFullYear();
         const balance = await this.findBalance(request.employeeId, request.leaveTypeId, year, tx);
         const totalDays = new Prisma.Decimal(request.totalDays);
         if (new Prisma.Decimal(balance.pendingDays).lt(totalDays)) {
           throw new ConflictException('Leave balance is inconsistent. Reconcile the balance before deciding this request.');
         }
-        const balanceUpdate = dto.status === LeaveRequestStatus.APPROVED
+        const balanceUpdate = nextStatus === LeaveRequestStatus.APPROVED
           ? { pendingDays: { decrement: totalDays }, usedDays: { increment: totalDays } }
           : { pendingDays: { decrement: totalDays } };
         await tx.leaveBalance.update({ where: { id: balance.id }, data: balanceUpdate });
@@ -306,14 +334,25 @@ export class LeaveService {
       const updated = await tx.leaveRequest.update({
         where: { id },
         data: {
-          status: dto.status,
-          rejectionReason: dto.status === LeaveRequestStatus.REJECTED ? dto.rejectionReason : null,
-          approvedById: user.employeeId ?? null,
-          approvedAt: new Date(),
+          status: nextStatus,
+          rejectionReason: nextStatus === LeaveRequestStatus.REJECTED ? dto.rejectionReason : null,
+          approvedById: managerStage ? null : user.employeeId ?? null,
+          approvedAt: managerStage ? null : new Date(),
         },
         include: leaveRequestInclude,
       });
-      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'LeaveRequest', entityId: id, summary: 'Leave request decided', changes: [{ field: 'status', previousValue: request.status, nextValue: dto.status }] });
+      await tx.leaveDecision.create({
+        data: {
+          requestId: id,
+          actorUserId: user.id,
+          stage: managerStage ? LeaveDecisionStage.MANAGER : LeaveDecisionStage.HR,
+          outcome: dto.status === LeaveRequestStatus.APPROVED ? LeaveDecisionOutcome.APPROVED : LeaveDecisionOutcome.REJECTED,
+          fromStatus: request.status,
+          toStatus: nextStatus,
+          reason: dto.rejectionReason,
+        },
+      });
+      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'LeaveRequest', entityId: id, summary: managerStage ? 'Manager leave decision recorded' : 'HR leave decision recorded', changes: [{ field: 'status', previousValue: request.status, nextValue: nextStatus }] });
       return updated;
     });
   }
@@ -323,7 +362,8 @@ export class LeaveService {
       const request = await this.ensureRequest(id, tx);
       await this.assertCanCancel(request.employeeId, user);
       const cancellableStatuses: LeaveRequestStatus[] = [
-        LeaveRequestStatus.PENDING,
+        LeaveRequestStatus.PENDING_MANAGER,
+        LeaveRequestStatus.PENDING_HR,
         LeaveRequestStatus.APPROVED,
       ];
       if (!cancellableStatuses.includes(request.status)) {
@@ -361,7 +401,7 @@ export class LeaveService {
   async removeRequest(id: string, user: RequestUser) {
     return this.leaveTransaction(async (tx) => {
       const request = await this.ensureRequest(id, tx);
-      if (request.status === LeaveRequestStatus.PENDING || request.status === LeaveRequestStatus.APPROVED) {
+      if (([LeaveRequestStatus.PENDING_MANAGER, LeaveRequestStatus.PENDING_HR, LeaveRequestStatus.APPROVED] as LeaveRequestStatus[]).includes(request.status)) {
         throw new BadRequestException('Cancel pending or approved leave before deleting it');
       }
       const removed = await tx.leaveRequest.update({ where: { id }, data: { deletedAt: new Date() } });
@@ -381,31 +421,37 @@ export class LeaveService {
   }
 
   private accessWhere(user: RequestUser): Record<string, unknown> {
-    if (hasHrAccess(user.role)) return {};
-    if (!user.employeeId) return { employeeId: '__no_employee_profile__' };
-    if (user.role === Role.MANAGER) {
-      return { OR: [{ employeeId: user.employeeId }, { employee: { managerId: user.employeeId } }] };
+    if (hasAnyPermission(user, ['leave.hr.read', 'leave.audit.read'])) return {};
+    const scopes: Prisma.LeaveRequestWhereInput[] = [];
+    if (user.employeeId && hasPermission(user, 'leave.self.read')) scopes.push({ employeeId: user.employeeId });
+    if (user.employeeId && hasPermission(user, 'leave.team.read')) scopes.push({ employee: { managerId: user.employeeId } });
+    if (hasPermission(user, 'leave.department.read') && user.departmentScopeIds.length) {
+      scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
     }
-    return { employeeId: user.employeeId };
+    return scopes.length ? { OR: scopes } : { employeeId: '__no_leave_scope__' };
   }
 
   private async resolveRequestEmployee(employeeId: string | undefined, user: RequestUser) {
     const targetEmployeeId = employeeId ?? user.employeeId;
     if (!targetEmployeeId) throw new NotFoundException('No employee profile is linked to this user');
-    if (employeeId && !hasHrAccess(user.role)) {
+    if (employeeId && employeeId !== user.employeeId && !hasPermission(user, 'leave.hr.manage')) {
       throw new ForbiddenException('Only HR can submit leave for another employee');
     }
     return targetEmployeeId;
   }
 
   private async assertCanAccessEmployee(employeeId: string, user: RequestUser) {
-    if (hasHrAccess(user.role)) return;
+    if (hasAnyPermission(user, ['leave.hr.read', 'leave.audit.read'])) return;
     if (!user.employeeId) throw new ForbiddenException('Employee profile is required');
     if (employeeId === user.employeeId) return;
-    if (user.role === Role.MANAGER) {
+    if (hasPermission(user, 'leave.team.read')) {
       const employee = await this.prisma.employee.findFirst({
         where: { id: employeeId, managerId: user.employeeId, deletedAt: null },
       });
+      if (employee) return;
+    }
+    if (hasPermission(user, 'leave.department.read')) {
+      const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, departmentId: { in: user.departmentScopeIds }, deletedAt: null }, select: { id: true } });
       if (employee) return;
     }
     throw new ForbiddenException('Cannot access leave history for this employee');
@@ -413,21 +459,30 @@ export class LeaveService {
 
   private async assertCanApprove(
     employeeId: string,
+    status: LeaveRequestStatus,
     user: RequestUser,
     client: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
-    if (hasHrAccess(user.role)) return;
-    if (!user.employeeId || user.role !== Role.MANAGER) {
-      throw new ForbiddenException('Only managers or HR can approve leave requests');
+    if (status === LeaveRequestStatus.PENDING_HR) {
+      if (!hasPermission(user, 'leave.hr.approve')) throw new ForbiddenException('HR final approval permission is required');
+      return;
     }
-    const employee = await client.employee.findFirst({
-      where: { id: employeeId, managerId: user.employeeId, deletedAt: null },
-    });
-    if (!employee) throw new ForbiddenException('Managers can only approve direct reports');
+    const teamAllowed = Boolean(user.employeeId && hasPermission(user, 'leave.team.approve_manager'));
+    const departmentAllowed = hasPermission(user, 'leave.department.approve_manager') && user.departmentScopeIds.length > 0;
+    if (!teamAllowed && !departmentAllowed) throw new ForbiddenException('Manager-stage approval permission is required');
+    const employee = await client.employee.findFirst({ where: {
+      id: employeeId,
+      deletedAt: null,
+      OR: [
+        ...(teamAllowed ? [{ managerId: user.employeeId }] : []),
+        ...(departmentAllowed ? [{ departmentId: { in: user.departmentScopeIds } }] : []),
+      ],
+    }, select: { id: true } });
+    if (!employee) throw new ForbiddenException('Employee is outside the managed scope');
   }
 
   private async assertCanCancel(employeeId: string, user: RequestUser) {
-    if (hasHrAccess(user.role) || employeeId === user.employeeId) return;
+    if (hasPermission(user, 'leave.hr.manage') || employeeId === user.employeeId) return;
     throw new ForbiddenException('Cannot cancel another employee leave request');
   }
 
@@ -491,7 +546,7 @@ export class LeaveService {
         employeeId,
         id: excludeId ? { not: excludeId } : undefined,
         deletedAt: null,
-        status: { in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.APPROVED] },
+        status: { in: [LeaveRequestStatus.PENDING_MANAGER, LeaveRequestStatus.PENDING_HR, LeaveRequestStatus.APPROVED] },
         startDate: { lte: endDate },
         endDate: { gte: startDate },
       },

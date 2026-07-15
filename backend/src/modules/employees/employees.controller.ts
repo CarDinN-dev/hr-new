@@ -1,13 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { UpdateEmployeeDetailsDto } from './dto/update-employee-details.dto';
+import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 import { EmployeesService } from './employees.service';
 
 @ApiTags('Employees')
@@ -16,40 +15,61 @@ import { EmployeesService } from './employees.service';
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('employee.hr.create')
   @Post()
   create(@Body() dto: CreateEmployeeDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.create(dto, user);
   }
 
+  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.department.read', 'employee.hr.read', 'employee.audit.read')
   @Get()
   list(@Query() query: QueryEmployeesDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.list(query, user);
   }
 
+  @Permissions('employee.self.read')
   @Get('me')
   me(@CurrentUser() user: RequestUser) {
     return this.employeesService.getMyProfile(user);
   }
 
+  @Permissions('employee.self.update_basic')
+  @Patch('me/basic')
+  updateMyBasic(@Body() dto: UpdateSelfBasicProfileDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.updateSelfBasic(dto, user);
+  }
+
+  @Permissions('employee.self.update_bank')
+  @Patch('me/bank')
+  updateMyBank(@Body() dto: UpdateSelfBankDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.updateSelfBank(dto, user);
+  }
+
+  @Permissions('payroll.update_bank')
+  @Patch(':id/bank')
+  updatePayrollBank(@Param('id') id: string, @Body() dto: UpdatePayrollBankDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.updatePayrollBank(id, dto, user);
+  }
+
+  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.department.read', 'employee.hr.read', 'employee.audit.read')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.employeesService.findById(id, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('employee.hr.update')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateEmployeeDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.update(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('employee.hr.read_sensitive', 'employee.hr.update')
   @Patch(':id/details')
-  updateDetails(@Param('id') id: string, @Body() dto: UpdateEmployeeDetailsDto, @CurrentUser() user: RequestUser) {
+  updateDetails(@Param('id') id: string, @Body() dto: UpdateHrSensitiveDetailsDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.updateDetails(id, dto, user);
   }
 
-  @Roles(Role.SUPER_ADMIN, Role.HR_ADMIN)
+  @Permissions('employee.hr.terminate')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.employeesService.remove(id, user);

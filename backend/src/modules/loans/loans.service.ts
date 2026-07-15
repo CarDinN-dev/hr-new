@@ -9,6 +9,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
+import { hasAnyPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { AuditService } from '../audit/audit.service';
@@ -52,8 +53,8 @@ export class LoansService {
     });
   }
 
-  async list(query: QueryLoansDto) {
-    const filters: Record<string, unknown>[] = [];
+  async list(query: QueryLoansDto, user: RequestUser) {
+    const filters: Record<string, unknown>[] = [this.accessWhere(user)];
     if (query.employeeId) filters.push({ employeeId: query.employeeId });
     if (query.status) filters.push({ status: query.status });
     const { page, limit, ...args } = listArgs(query, {
@@ -69,8 +70,8 @@ export class LoansService {
     return { data: data.map((loan) => this.withBalance(loan)), meta: paginationMeta(total, page, limit) };
   }
 
-  async find(id: string) {
-    const loan = await this.prisma.employeeLoan.findFirst({ where: { id, deletedAt: null }, include: includeLoan });
+  async find(id: string, user: RequestUser) {
+    const loan = await this.prisma.employeeLoan.findFirst({ where: { AND: [{ id }, { deletedAt: null }, this.accessWhere(user)] }, include: includeLoan });
     if (!loan) throw new NotFoundException('Loan not found');
     return this.withBalance(loan);
   }
@@ -229,6 +230,13 @@ export class LoansService {
     const loan = await tx.employeeLoan.findFirst({ where: { id, deletedAt: null } });
     if (!loan) throw new NotFoundException('Loan not found');
     return loan;
+  }
+
+  private accessWhere(user: RequestUser) {
+    if (hasAnyPermission(user, ['loan.hr.read', 'loan.audit.read'])) return {};
+    return user.employeeId && user.permissions.includes('loan.self.read')
+      ? { employeeId: user.employeeId }
+      : { employeeId: '__no_loan_scope__' };
   }
 
   private async transaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
