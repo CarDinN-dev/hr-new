@@ -4,11 +4,44 @@ import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHmac, randomBytes } from 'crypto';
+import { Request, Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './types/jwt-payload.type';
+
+const productionSessionCookie = '__Host-medtech_hr_session';
+const developmentSessionCookie = 'medtech_hr_session';
+
+export function sessionTokenFromRequest(request?: Request) {
+  const header = request?.headers?.cookie;
+  if (!header) return null;
+  const cookies = new Map(
+    header.split(';').map((part) => {
+      const separator = part.indexOf('=');
+      return separator < 0
+        ? [part.trim(), '']
+        : [part.slice(0, separator).trim(), part.slice(separator + 1).trim()];
+    }),
+  );
+  return cookies.get(productionSessionCookie) || cookies.get(developmentSessionCookie) || null;
+}
+
+type SessionUser = {
+  id: string;
+  email: string;
+  role: Role;
+  permissions: JwtPayload['permissions'];
+  sessionVersion: number;
+  employee?: { id: string; deletedAt?: Date | null } | null;
+};
+
+export type IssuedSession = {
+  user: SessionUser;
+  accessToken: string;
+  csrfToken: string;
+};
 
 @Injectable()
 export class AuthService {
@@ -30,20 +63,7 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     const user = await this.usersService.createUser(dto.email, dto.password, Role.EMPLOYEE);
-    const csrfToken = this.csrfToken();
-    return {
-      user,
-      accessToken: this.signToken({
-        sub: user.id,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions,
-        csrfToken,
-        sessionVersion: user.sessionVersion,
-        employeeId: user.employee?.id ?? null,
-      }),
-      csrfToken,
-    };
+    return this.issueSession(user);
   }
 
   async login(dto: LoginDto, ip = 'unknown') {
@@ -64,20 +84,68 @@ export class AuthService {
       where: { key: { in: [this.accountIpLoginKey(ip, dto.email), this.accountLoginKey(dto.email)] } },
     });
     const safeUser = this.usersService.toSafeUser(activeUser);
+    return this.issueSession(safeUser);
+  }
+
+  issueSession(user: SessionUser): IssuedSession {
     const csrfToken = this.csrfToken();
     return {
-      user: safeUser,
+      user,
       accessToken: this.signToken({
-        sub: activeUser.id,
-        email: activeUser.email,
-        role: activeUser.role,
-        permissions: activeUser.permissions,
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        permissions: user.permissions,
         csrfToken,
-        sessionVersion: activeUser.sessionVersion,
-        employeeId: activeUser.employee?.id ?? null,
+        sessionVersion: user.sessionVersion,
+        employeeId: user.employee?.id ?? null,
       }),
       csrfToken,
     };
+  }
+
+  browserSession(session: IssuedSession) {
+    return {
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+        role: session.user.role,
+        sessionVersion: session.user.sessionVersion,
+      },
+      csrfToken: session.csrfToken,
+    };
+  }
+
+  setSessionCookie(response: Response, accessToken: string) {
+    const production = this.configService.get<string>('NODE_ENV') === 'production';
+    response.cookie(production ? productionSessionCookie : developmentSessionCookie, accessToken, {
+      httpOnly: true,
+      secure: production,
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 8 * 60 * 60 * 1000,
+    });
+  }
+
+  clearSessionCookie(response: Response) {
+    for (const name of [productionSessionCookie, developmentSessionCookie]) {
+      response.clearCookie(name, {
+        httpOnly: true,
+        secure: name === productionSessionCookie,
+        sameSite: 'strict',
+        path: '/',
+      });
+    }
+  }
+
+  async consumeMicrosoftLoginStart(ip = 'unknown') {
+    const key = this.throttleKey('microsoft-start-ip', ip);
+    const now = new Date();
+    const record = await this.prisma.authThrottle.findUnique({ where: { key } });
+    if (record && record.resetAt > now && record.count >= 20) {
+      throw new HttpException('Too many sign-in attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    await this.incrementLoginAttempt(key);
   }
 
   private csrfToken() {

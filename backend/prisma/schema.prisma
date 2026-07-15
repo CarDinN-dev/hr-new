@@ -95,17 +95,18 @@ enum DocumentVisibility {
 }
 
 model User {
-  id             String       @id @default(uuid())
-  email          String       @unique
-  passwordHash   String
-  role           Role         @default(EMPLOYEE)
-  permissions    Permission[] @default([])
-  isActive       Boolean      @default(true)
-  sessionVersion Int          @default(0)
-  employee       Employee?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  deletedAt      DateTime?
+  id                String       @id @default(uuid())
+  email             String       @unique
+  microsoftObjectId String?      @unique
+  passwordHash      String
+  role              Role         @default(EMPLOYEE)
+  permissions       Permission[] @default([])
+  isActive          Boolean      @default(true)
+  sessionVersion    Int          @default(0)
+  employee          Employee?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
 
   @@index([role])
   @@index([deletedAt])

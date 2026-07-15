@@ -2790,6 +2790,40 @@ summary {
   }
 }
 
+.microsoft-login {
+  grid-column: 1;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: #fff;
+  border-color: #1769aa;
+  background: #1769aa;
+}
+
+.microsoft-login:hover {
+  background: #115a94;
+}
+
+.login-divider {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
+
 /* Internal workspace refresh. Login intentionally inherits the earlier theme. */
 .app {
   --navy: #182334;

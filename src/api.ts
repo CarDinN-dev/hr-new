@@ -28,11 +28,17 @@ export class ApiError extends Error {
 }
 
 export type BackendSession = {
+  id: string;
   email: string;
-  token: string;
   csrfToken: string;
   role: string;
+  sessionVersion: number;
   stateUpdatedAt?: string;
+};
+
+type BackendSessionResponse = {
+  csrfToken: string;
+  user: { id: string; email: string; role: string; sessionVersion: number };
 };
 
 type BackendDepartment = {
@@ -105,32 +111,57 @@ export function loadBackendSession(): BackendSession | null {
     const raw = sessionStorage.getItem(backendSessionKey) || localStorage.getItem(backendSessionKey);
     localStorage.removeItem(backendSessionKey);
     const session = raw ? JSON.parse(raw) as Partial<BackendSession> : null;
-    return session?.token && session?.csrfToken && session.email && isHrConsoleRole(session.role) ? session as BackendSession : null;
+    return session?.id && session?.csrfToken && session.email && Number.isInteger(session.sessionVersion) && isHrConsoleRole(session.role)
+      ? session as BackendSession
+      : null;
   } catch {
     return null;
   }
 }
 
 export async function loginBackend(email: string, password: string): Promise<BackendSession> {
-  const result = await apiRequest<{ accessToken: string; csrfToken: string; user: { email: string; role: string } }>("/auth/login", {
+  const result = await apiRequest<BackendSessionResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password })
   });
+  return backendSession(result);
+}
+
+export async function restoreBackendSession(): Promise<BackendSession | null> {
+  try {
+    return backendSession(await apiRequest<BackendSessionResponse>("/auth/me"));
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
+export function startMicrosoftLogin() {
+  window.location.assign(`${apiBaseUrl}/auth/microsoft/start`);
+}
+
+function backendSession(result: BackendSessionResponse): BackendSession {
   if (!isHrConsoleRole(result.user.role)) {
     throw new ApiError("This console is limited to HR administrators.", 403);
   }
-  return { email: result.user.email, role: result.user.role, token: result.accessToken, csrfToken: result.csrfToken };
+  return {
+    id: result.user.id,
+    email: result.user.email,
+    role: result.user.role,
+    sessionVersion: result.user.sessionVersion,
+    csrfToken: result.csrfToken
+  };
 }
 
 export async function loadBackendState(current: HrState, session: BackendSession): Promise<{ state: HrState; updatedAt?: string }> {
-  const consoleState = await loadBackendConsoleState(session.token);
+  const consoleState = await loadBackendConsoleState();
   if (consoleState?.data) return { state: { ...current, ...consoleState.data }, updatedAt: consoleState.updatedAt };
 
   const [employees, departments, leaves, payroll] = await Promise.all([
-    apiList<BackendEmployee>("/employees", session.token),
-    apiList<BackendDepartment>("/departments", session.token),
-    apiList<BackendLeave>("/leave/requests", session.token),
-    apiList<BackendPayroll>("/payroll", session.token)
+    apiList<BackendEmployee>("/employees"),
+    apiList<BackendDepartment>("/departments"),
+    apiList<BackendLeave>("/leave/requests"),
+    apiList<BackendPayroll>("/payroll")
   ]);
 
   const departmentNames = departments.map(item => item.name).filter(Boolean);
@@ -148,27 +179,25 @@ export async function loadBackendState(current: HrState, session: BackendSession
   };
 }
 
-export async function loadBackendConsoleState(token: string) {
-  return apiRequest<BackendConsoleState | null>("/console-state", { token });
+export async function loadBackendConsoleState() {
+  return apiRequest<BackendConsoleState | null>("/console-state");
 }
 
 export async function saveBackendState(state: HrState, session: BackendSession) {
   return apiRequest<BackendConsoleState>("/console-state", {
     method: "PUT",
-    token: session.token,
     csrfToken: session.csrfToken,
     body: JSON.stringify({ data: state, updatedAt: session.stateUpdatedAt })
   });
 }
 
 export function loadBackupStatus(session: BackendSession) {
-  return apiRequest<BackendBackupStatus>("/console-state/backups/status", { token: session.token });
+  return apiRequest<BackendBackupStatus>("/console-state/backups/status");
 }
 
 export function createBackendBackup(session: BackendSession) {
   return apiRequest<{ id: string; kind: string; createdAt: string }>("/console-state/backups", {
     method: "POST",
-    token: session.token,
     csrfToken: session.csrfToken
   });
 }
@@ -176,7 +205,6 @@ export function createBackendBackup(session: BackendSession) {
 export function rollbackLatestBackendBackup(session: BackendSession) {
   return apiRequest<BackendConsoleState>("/console-state/backups/rollback-latest", {
     method: "POST",
-    token: session.token,
     csrfToken: session.csrfToken
   });
 }
@@ -184,7 +212,6 @@ export function rollbackLatestBackendBackup(session: BackendSession) {
 export async function generateBackendPayroll(session: BackendSession, year: number, month: number) {
   return apiRequest<BackendPayroll[]>("/payroll/generate", {
     method: "POST",
-    token: session.token,
     csrfToken: session.csrfToken,
     body: JSON.stringify({ year, month })
   });
@@ -193,16 +220,15 @@ export async function generateBackendPayroll(session: BackendSession, year: numb
 export async function logoutBackend(session: BackendSession) {
   return apiRequest<{ loggedOut: boolean }>("/auth/logout", {
     method: "POST",
-    token: session.token,
     csrfToken: session.csrfToken
   });
 }
 
-async function apiList<T>(path: string, token: string) {
+async function apiList<T>(path: string) {
   const records: T[] = [];
   for (let page = 1; page <= 100; page += 1) {
     const separator = path.includes("?") ? "&" : "?";
-    const envelope = await apiRequestEnvelope<T[]>(`${path}${separator}page=${page}&limit=100`, { token });
+    const envelope = await apiRequestEnvelope<T[]>(`${path}${separator}page=${page}&limit=100`);
     const pageRecords = envelope.data ?? [];
     records.push(...pageRecords);
     const meta = envelope.meta as { totalPages?: number } | undefined;
@@ -211,18 +237,17 @@ async function apiList<T>(path: string, token: string) {
   throw new ApiError("The data set is too large to load safely.", 422);
 }
 
-async function apiRequest<T>(path: string, init: RequestInit & { token?: string; csrfToken?: string } = {}): Promise<T> {
+async function apiRequest<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<T> {
   const envelope = await apiRequestEnvelope<T>(path, init);
   return envelope.data as T;
 }
 
-async function apiRequestEnvelope<T>(path: string, init: RequestInit & { token?: string; csrfToken?: string } = {}): Promise<ApiEnvelope<T>> {
+async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set("Content-Type", "application/json");
-  if (init.token) headers.set("Authorization", `Bearer ${init.token}`);
   if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
 
-  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers });
+  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "same-origin" });
   let payload: Partial<ApiEnvelope<T>> | undefined;
   try {
     payload = await response.json();

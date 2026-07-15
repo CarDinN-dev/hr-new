@@ -27,6 +27,24 @@ export class UsersService {
     });
   }
 
+  async findOrBindMicrosoftUser(objectId: string, email: string) {
+    const boundUser = await this.prisma.user.findUnique({
+      where: { microsoftObjectId: objectId },
+      include: { employee: true },
+    });
+    if (boundUser) return boundUser;
+
+    const emailUser = await this.findByEmail(email);
+    if (!emailUser || (emailUser.microsoftObjectId && emailUser.microsoftObjectId !== objectId)) return null;
+
+    await this.prisma.user.updateMany({
+      where: { id: emailUser.id, microsoftObjectId: null },
+      data: { microsoftObjectId: objectId },
+    });
+    const user = await this.findById(emailUser.id);
+    return user?.microsoftObjectId === objectId ? user : null;
+  }
+
   async createUser(email: string, password: string, role: Role = Role.EMPLOYEE) {
     if (
       password.length < 12

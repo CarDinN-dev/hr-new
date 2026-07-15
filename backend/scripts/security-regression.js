@@ -11,7 +11,8 @@ const { HttpExceptionFilter } = require('../dist/common/filters/http-exception.f
 const { listArgs } = require('../dist/common/utils/crud.util');
 const { AnnouncementsService } = require('../dist/modules/announcements/announcements.service');
 const { AttendanceService } = require('../dist/modules/attendance/attendance.service');
-const { AuthService } = require('../dist/modules/auth/auth.service');
+const { AuthService, sessionTokenFromRequest } = require('../dist/modules/auth/auth.service');
+const { MicrosoftAuthService } = require('../dist/modules/auth/microsoft-auth.service');
 const { JwtStrategy } = require('../dist/modules/auth/strategies/jwt.strategy');
 const { ConsoleStateService } = require('../dist/modules/console-state/console-state.service');
 const { DocumentsService } = require('../dist/modules/documents/documents.service');
@@ -384,7 +385,10 @@ async function main() {
       return 1;
     },
   };
-  const config = { get: (_key, fallback) => fallback, getOrThrow: () => 'x'.repeat(64) };
+  const config = {
+    get: (key, fallback) => key === 'NODE_ENV' ? 'production' : fallback,
+    getOrThrow: () => 'x'.repeat(64),
+  };
   const auth = new AuthService({}, { sign: () => 'token' }, config, throttlePrisma);
   for (let index = 0; index < 20; index += 1) {
     await auth.recordFailedLogin(`ip-${index}`, 'account@example.invalid');
@@ -393,6 +397,66 @@ async function main() {
   await assert.rejects(
     () => restartedAuth.checkLoginLimit('new-ip', 'account@example.invalid'),
     /Too many login attempts/,
+  );
+
+  let sessionCookie;
+  auth.setSessionCookie({ cookie: (...args) => { sessionCookie = args; } }, 'signed-session');
+  assert.equal(sessionCookie[0], '__Host-medtech_hr_session');
+  assert.equal(sessionCookie[1], 'signed-session');
+  assert.deepEqual(
+    { httpOnly: sessionCookie[2].httpOnly, secure: sessionCookie[2].secure, sameSite: sessionCookie[2].sameSite, path: sessionCookie[2].path },
+    { httpOnly: true, secure: true, sameSite: 'strict', path: '/' },
+  );
+  assert.equal(sessionTokenFromRequest({ headers: { cookie: 'other=x; __Host-medtech_hr_session=signed-session' } }), 'signed-session');
+  const issued = auth.issueSession({
+    id: 'user', email: 'hr@med-tech.com', role: Role.HR_ADMIN,
+    permissions: [], sessionVersion: 2, employee: null,
+  });
+  assert.equal('accessToken' in auth.browserSession(issued), false);
+
+  const tenantId = 'e7d3d9af-56a7-4204-b861-9b42c90d06b7';
+  const clientId = '11111111-1111-4111-8111-111111111111';
+  const microsoftConfig = {
+    get: (key) => key === 'NODE_ENV' ? 'production' : undefined,
+    getOrThrow: (key) => ({
+      MICROSOFT_TENANT_ID: tenantId,
+      MICROSOFT_CLIENT_ID: clientId,
+      MICROSOFT_CLIENT_SECRET: 's'.repeat(32),
+      MICROSOFT_REDIRECT_URI: 'https://hr.example.com/api/v1/auth/microsoft/callback',
+      JWT_SECRET: 'j'.repeat(64),
+    })[key],
+  };
+  const microsoft = new MicrosoftAuthService(microsoftConfig, {}, auth);
+  const transaction = {
+    version: 1,
+    state: 'state',
+    nonce: 'nonce',
+    codeVerifier: 'v'.repeat(64),
+    expiresAt: Date.now() + 60_000,
+  };
+  const encryptedTransaction = microsoft.encryptTransaction(transaction);
+  assert.deepEqual(microsoft.decryptTransaction(encryptedTransaction), transaction);
+  const tamperedTransaction = Buffer.from(encryptedTransaction, 'base64url');
+  tamperedTransaction[tamperedTransaction.length - 1] ^= 1;
+  assert.throws(
+    () => microsoft.decryptTransaction(tamperedTransaction.toString('base64url')),
+    /invalid or expired/,
+  );
+  const validClaims = {
+    tid: tenantId,
+    oid: '22222222-2222-4222-8222-222222222222',
+    preferred_username: 'HR@med-tech.com',
+    roles: ['HR.User'],
+    iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+    aud: clientId,
+  };
+  assert.deepEqual(microsoft.validateIdentityClaims(validClaims), {
+    objectId: validClaims.oid,
+    email: 'hr@med-tech.com',
+  });
+  assert.throws(
+    () => microsoft.validateIdentityClaims({ ...validClaims, roles: [] }),
+    /not authorized/,
   );
 
   const strategy = new JwtStrategy(

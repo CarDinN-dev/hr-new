@@ -5,6 +5,7 @@ export type RequestUser = {
   email: string;
   role: Role;
   permissions: Permission[];
+  sessionVersion: number;
   csrfToken?: string;
   employeeId?: string | null;
 };

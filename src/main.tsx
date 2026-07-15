@@ -115,8 +115,10 @@ import {
   loadBackendState,
   loginBackend,
   logoutBackend,
+  restoreBackendSession,
   rollbackLatestBackendBackup,
   saveBackendState,
+  startMicrosoftLogin,
   type BackendSession
 } from "./api";
 import { newId } from "./id";
@@ -159,11 +161,15 @@ const appQueryClient = new QueryClient({
 });
 
 function workspaceQueryKey(session: BackendSession) {
-  return ["workspace", session.email, session.token] as const;
+  return ["workspace", session.id, session.sessionVersion] as const;
 }
 
 function backupStatusQueryKey(session: BackendSession) {
-  return ["backup-status", session.email, session.token] as const;
+  return ["backup-status", session.id, session.sessionVersion] as const;
+}
+
+function backendSessionMarker(session: BackendSession) {
+  return `${session.id}:${session.sessionVersion}`;
 }
 
 const navIcon = {
@@ -227,6 +233,10 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
           <h1>MedTech HR</h1>
           <p className="muted">Sign in to manage employee records, attendance, leave and payroll.</p>
         </div>
+        <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
+          <ShieldCheck size={17} /> Sign in with Microsoft
+        </button>
+        <div className="login-divider" aria-hidden="true"><span>or</span></div>
         <form className="login-form" onSubmit={submit}>
           <label htmlFor="login-email">Email<input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
           <label htmlFor="login-password">Password<input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
@@ -254,12 +264,12 @@ function App() {
   const [toast, setToast] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modal, setModal] = useState<React.ReactNode>(null);
-  const [backendSession, setBackendSession] = useState<BackendSession | null>(() => loadBackendSession());
+  const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(() => loadBackendSession() ?? undefined);
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
   const [syncError, setSyncError] = useState("");
   const backendReady = useRef(false);
-  const hydratedWorkspaceToken = useRef("");
-  const backendSessionRef = useRef<BackendSession | null>(backendSession);
+  const hydratedWorkspaceSession = useRef("");
+  const backendSessionRef = useRef<BackendSession | null | undefined>(backendSession);
   const stateRef = useRef(state);
   const backendSaveQueue = useRef<Promise<void>>(Promise.resolve());
   stateRef.current = state;
@@ -271,7 +281,7 @@ function App() {
   });
   const workspaceLoadError = workspaceQuery.isError ? errorMessage(workspaceQuery.error) : "";
   const workspaceLoading = Boolean(backendSession) && !workspaceLoadError && (
-    workspaceQuery.isPending || hydratedWorkspaceToken.current !== backendSession?.token
+    workspaceQuery.isPending || hydratedWorkspaceSession.current !== backendSessionMarker(backendSession!)
   );
 
   useEffect(() => {
@@ -279,7 +289,30 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (backendSession !== undefined) return;
+    let active = true;
+    const microsoftResult = new URLSearchParams(window.location.search).get("microsoft");
+    void restoreBackendSession()
+      .then(session => {
+        if (!active) return;
+        setBackendSession(session);
+        if (microsoftResult === "success" && session) notify(`Signed in as ${session.email}.`);
+        if (microsoftResult === "denied") notify("Microsoft sign-in was not permitted.");
+      })
+      .catch(error => {
+        if (!active) return;
+        setBackendSession(null);
+        notify(errorMessage(error));
+      })
+      .finally(() => {
+        if (microsoftResult && active) window.history.replaceState(null, "", window.location.pathname);
+      });
+    return () => { active = false; };
+  }, [backendSession]);
+
+  useEffect(() => {
     backendSessionRef.current = backendSession;
+    if (backendSession === undefined) return;
     if (backendSession) sessionStorage.setItem(backendSessionKey, JSON.stringify(backendSession));
     else sessionStorage.removeItem(backendSessionKey);
     localStorage.removeItem(backendSessionKey);
@@ -288,7 +321,7 @@ function App() {
   useEffect(() => {
     if (!backendSession) {
       backendReady.current = false;
-      hydratedWorkspaceToken.current = "";
+      hydratedWorkspaceSession.current = "";
       setSyncError("");
       return;
     }
@@ -298,16 +331,17 @@ function App() {
       notify(errorMessage(workspaceQuery.error));
       return;
     }
-    if (!workspaceQuery.data || hydratedWorkspaceToken.current === backendSession.token) return;
-    hydratedWorkspaceToken.current = backendSession.token;
+    const sessionMarker = backendSessionMarker(backendSession);
+    if (!workspaceQuery.data || hydratedWorkspaceSession.current === sessionMarker) return;
+    hydratedWorkspaceSession.current = sessionMarker;
     setState(hydrateState(workspaceQuery.data.state));
     setBackendSession(prev => prev && workspaceQuery.data.updatedAt ? { ...prev, stateUpdatedAt: workspaceQuery.data.updatedAt } : prev);
     backendReady.current = true;
     setSyncError("");
-  }, [backendSession?.token, workspaceQuery.data, workspaceQuery.error, queryClient]);
+  }, [backendSession?.id, backendSession?.sessionVersion, workspaceQuery.data, workspaceQuery.error, queryClient]);
 
   useEffect(() => {
-    if (!backendSession?.token || !backendReady.current) return;
+    if (!backendSession || !backendReady.current) return;
     const timer = window.setTimeout(() => {
       void saveBackendNow().catch(error => {
         backendReady.current = false;
@@ -315,7 +349,7 @@ function App() {
       });
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [state, backendSession?.token]);
+  }, [state, backendSession?.id, backendSession?.sessionVersion]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -347,9 +381,9 @@ function App() {
       if (!session) throw new Error("Your session has ended. Sign in again.");
       const saved = await saveBackendState(stateRef.current, session);
       const nextSession = { ...session, stateUpdatedAt: saved.updatedAt };
-      if (backendSessionRef.current?.token === session.token) {
+      if (backendSessionRef.current && backendSessionMarker(backendSessionRef.current) === backendSessionMarker(session)) {
         backendSessionRef.current = nextSession;
-        setBackendSession(prev => prev?.token === session.token ? nextSession : prev);
+        setBackendSession(prev => prev && backendSessionMarker(prev) === backendSessionMarker(session) ? nextSession : prev);
       }
       queryClient.setQueryData(workspaceQueryKey(nextSession), { state: stateRef.current, updatedAt: saved.updatedAt });
       setSyncError("");
@@ -418,7 +452,19 @@ function App() {
     void navigate({ to: navPaths[next] });
   }
 
-  if (!backendSession) {
+  if (backendSession === undefined) {
+    return (
+      <main className="workspace-gate">
+        <section className="workspace-gate-card" aria-live="polite">
+          <ShieldCheck size={28} />
+          <h1>Checking secure session</h1>
+          <p>Verifying your access.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (backendSession === null) {
     return (
       <>
         <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} notify={notify} theme={theme} toggleTheme={toggleTheme} />
@@ -2021,7 +2067,7 @@ function SettingsPage({
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   notify: (message: string) => void;
   backendSession: BackendSession | null;
-  setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null>>;
+  setBackendSession: React.Dispatch<React.SetStateAction<BackendSession | null | undefined>>;
   saveBackendNow: () => Promise<BackendSession>;
 }) {
   const [company, setCompany] = useState(state.settings.company);
