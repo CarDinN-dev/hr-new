@@ -1,6 +1,6 @@
-import { ClassSerializerInterceptor, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
@@ -15,7 +15,6 @@ async function bootstrap() {
   app.use(json({ limit: '1mb' }));
   app.use(urlencoded({ extended: true, limit: '1mb' }));
   const configService = app.get(ConfigService);
-  const reflector = app.get(Reflector);
   const isProduction = configService.get<string>('NODE_ENV') === 'production';
   const allowedOrigins = configService
     .get<string>('CORS_ORIGIN', '')
@@ -23,9 +22,13 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
   const jwtSecret = configService.get<string>('JWT_SECRET', '');
+  const auditHmacKey = configService.get<string>('AUDIT_HMAC_KEY', '');
 
   if (isProduction && (jwtSecret.length < 32 || jwtSecret.includes('change-this'))) {
     throw new Error('JWT_SECRET must be a unique 32+ character value in production.');
+  }
+  if (isProduction && (auditHmacKey.length < 32 || auditHmacKey === jwtSecret || auditHmacKey.includes('change-this'))) {
+    throw new Error('AUDIT_HMAC_KEY must be a separate unique 32+ character value in production.');
   }
 
   app.setGlobalPrefix('api/v1');
@@ -63,7 +66,7 @@ async function bootstrap() {
     }),
   );
   app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new ClassSerializerInterceptor(reflector), new ResponseInterceptor());
+  app.useGlobalInterceptors(new ResponseInterceptor());
 
   if (!isProduction || configService.get<string>('ENABLE_SWAGGER') === 'true') {
     const swaggerConfig = new DocumentBuilder()

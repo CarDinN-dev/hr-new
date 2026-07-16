@@ -20,13 +20,13 @@ export class EmploymentContractsController {
     return this.contractsService.create(dto, user);
   }
 
-  @AnyPermission('contract.self.read', 'contract.team.read', 'contract.hr.manage')
+  @AnyPermission('contract.self.read', 'contract.team.read', 'contract.management.read', 'contract.hr.manage', 'contract.read_all')
   @Get()
   list(@Query() query: QueryEmploymentContractsDto, @CurrentUser() user: RequestUser) {
     return this.contractsService.list(query, user);
   }
 
-  @AnyPermission('contract.self.read', 'contract.team.read', 'contract.hr.manage')
+  @AnyPermission('contract.self.read', 'contract.team.read', 'contract.management.read', 'contract.hr.manage', 'contract.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.contractsService.findById(id, user);

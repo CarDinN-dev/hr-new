@@ -18,13 +18,13 @@ export class LoansController {
     return this.loans.create(dto, user);
   }
 
-  @AnyPermission('loan.self.read', 'loan.hr.read', 'loan.audit.read')
+  @AnyPermission('loan.self.read', 'loan.hr.read', 'loan.audit.read', 'loan.read_all')
   @Get()
   list(@Query() query: QueryLoansDto, @CurrentUser() user: RequestUser) {
     return this.loans.list(query, user);
   }
 
-  @AnyPermission('loan.self.read', 'loan.hr.read', 'loan.audit.read')
+  @AnyPermission('loan.self.read', 'loan.hr.read', 'loan.audit.read', 'loan.read_all')
   @Get(':id')
   find(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.loans.find(id, user);

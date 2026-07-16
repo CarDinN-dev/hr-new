@@ -1,9 +1,15 @@
 node_modules
 dist
 .git
+.env
+.env.*
+!.env.example
 backend
 backups
 tmp
 *.log
 test-results
 playwright-report
+AGENTS.md
+HANDOVER.md
+docs

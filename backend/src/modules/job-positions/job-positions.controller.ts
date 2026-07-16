@@ -22,14 +22,14 @@ export class JobPositionsController {
 
   @Permissions('position.read')
   @Get()
-  list(@Query() query: QueryJobPositionsDto) {
-    return this.jobPositionsService.list(query);
+  list(@Query() query: QueryJobPositionsDto, @CurrentUser() user: RequestUser) {
+    return this.jobPositionsService.list(query, user);
   }
 
   @Permissions('position.read')
   @Get(':id')
-  findById(@Param('id') id: string) {
-    return this.jobPositionsService.findById(id);
+  findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.jobPositionsService.findById(id, user);
   }
 
   @Permissions('position.manage')

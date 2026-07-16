@@ -56,14 +56,12 @@ import {
   type EmployeeLoan,
   type HrState,
   type NavItem,
-  type PayrollSlip,
   type PdfTemplate,
   type RecruitmentCandidate,
   type RecruitmentJob
 } from "./data";
 import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
 import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } from "./attendanceSheet";
-import { payrollExportWarnings, payrollLoanDetails, payrollSheetHtml, payrollSlipsForDepartment, sifCsv } from "./payrollExports";
 import {
   activeEmployees,
   attendanceDaySummary,
@@ -73,22 +71,17 @@ import {
   companyLoanDeductionCap,
   decideAttendance,
   createEosRecord,
-  createPayroll,
   deleteEmployee,
-  deleteLeave,
-  decideLeave,
   documentNumber,
   employeeName,
   employeeSalary,
   eosSummary,
   expenseTotals,
-  finalizePayrollSlip,
   formatDate,
   formatMoney,
   hireCandidateAsEmployee,
   inclusiveDays,
   initials,
-  leaveBalanceSummary,
   loanBalance,
   loanEstimatedEndPeriod,
   loanEstimatedMonths,
@@ -96,7 +89,6 @@ import {
   markAllAttendance,
   nextEmployeeCode,
   payrollLoanDeductions,
-  recalcSlip,
   recordManualLoanRepayment,
   setAttendance,
   setLoanDeductionOverride,
@@ -117,7 +109,6 @@ import {
   hasPermission,
   loadBackendSession,
   loadBackendState,
-  generateBackendPayroll,
   loginBackend,
   logoutBackend,
   restoreBackendSession,
@@ -131,6 +122,10 @@ import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
+import { ApprovalInboxPanel, LeaveWorkflowPage, MyPayslipsPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
+import { SystemAccessPage } from "./features/system-access";
+import { AuditHistoryPage } from "./features/audit-page";
+import { NotificationsPanel } from "./features/notifications-panel";
 import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
@@ -575,6 +570,7 @@ function App() {
             <p className="page-hint">{pageHint}</p>
           </div>
           <div className="topbar-actions">
+            <NotificationsPanel session={backendSession} notify={notify} />
             <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
               {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
             </button>
@@ -582,25 +578,25 @@ function App() {
         </header>
 
         <div className="content">
-          {nav === "Dashboard" && <Dashboard state={state} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
+          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} />}
-          {nav === "Team" && <TeamPage state={state} />}
+          {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
           {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
-          {nav === "Leave" && <Leave state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasAnyPermission(backendSession, "leave.self.create", "leave.hr.manage")} canApproveManager={hasAnyPermission(backendSession, "leave.team.approve_manager", "leave.department.approve_manager")} canApproveHr={hasPermission(backendSession, "leave.hr.approve")} canCancelSelf={hasPermission(backendSession, "leave.self.cancel")} canDelete={hasPermission(backendSession, "leave.hr.manage")} canExport={hasPermission(backendSession, "report.export")} currentEmployeeId={backendSession.employeeId} />}
+          {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
           {nav === "Expenses" && <Expenses state={state} setState={setState} notify={notify} />}
           {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canOverrideLimit={canManageLoans} />}
-          {nav === "Payroll" && <Payroll state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} backendSession={backendSession} refreshWorkspace={refreshWorkspace} />}
+          {nav === "Payroll" && <PayrollWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
-          {nav === "Audit" && <AuditPage session={backendSession} />}
-          {nav === "System" && <SystemPage session={backendSession} notify={notify} />}
+          {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
+          {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
           {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
         </div>
       </main>
@@ -720,132 +716,47 @@ function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState
     <section className="panel"><div className="panel-head"><div><h3>Signed-in devices</h3><span>Revoke sessions you no longer use.</span></div></div>
       {sessions.isPending ? <p className="muted">Loading sessions...</p> : sessions.isError ? <p className="muted">{errorMessage(sessions.error)}</p> : <div className="list-stack">{sessions.data?.map(item => <div className="list-row" key={item.id}><div><strong>{item.current ? "This device" : item.provider}</strong><span>{item.userAgent || "Unknown browser"}</span></div>{!item.revokedAt && <button type="button" onClick={() => void revoke(item.id).catch(error => notify(errorMessage(error)))}>Revoke</button>}</div>)}</div>}
     </section>
+    <ServiceRequestsPanel session={session} notify={notify} />
+    <MyPayslipsPanel session={session} notify={notify} />
   </div>;
 }
 
-function TeamPage({ state }: { state: HrState }) {
-  const pending = state.leaves.filter(item => item.status === "Pending");
+function TeamPage({ state, session, notify }: { state: HrState; session: BackendSession; notify: (message: string) => void }) {
   return <div className="dashboard-grid">
     <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
-    <Metric label="LEAVE TO REVIEW" value={pending.length} hint="Requests awaiting action" tone={pending.length ? "warn" : "ok"} />
     <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
       <DataTable columns={["Employee", "Department", "Status", "Joined"]} rows={state.employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
     </section>
+    <ApprovalInboxPanel session={session} notify={notify} />
   </div>;
 }
 
-type AuditRecord = { id: string; action: string; entityType: string; entityId?: string | null; summary: string; createdAt: string; actor?: { email?: string } | null };
+type DashboardAttendanceReport = { data: { summary: { totalRecords: number; byStatus: Record<string, number> } } };
+type DashboardLeave = { id: string; status: string; startDate: string; endDate: string; totalDays: string; employee: { firstName: string; lastName: string }; leaveType: { name: string } };
+type DashboardPayrollRun = { id: string; year: number; month: number; status: string; _count?: { payrolls: number } };
+type DashboardPayslip = { id: string; netPay: string };
 
-function AuditPage({ session }: { session: BackendSession }) {
-  const audit = useQuery({ queryKey: ["audit", session.sessionId, session.authorizationVersion], queryFn: () => apiList<AuditRecord>("/audit-events") });
-  return <section className="panel"><div className="panel-head"><div><h3>Audit history</h3><span>Security and business events recorded by the server.</span></div></div>
-    {audit.isPending ? <p className="muted">Loading audit history...</p> : audit.isError ? <p className="muted">{errorMessage(audit.error)}</p> : <DataTable columns={["Time", "Actor", "Action", "Resource", "Summary"]} rows={(audit.data ?? []).map(item => [formatDate(item.createdAt), item.actor?.email || "System", item.action, item.entityType, item.summary])} />}
-  </section>;
-}
-
-type SystemRoleRecord = { id: string; code: string; displayName: string; version: number; isBuiltIn: boolean; isActive: boolean; permissions?: Array<{ permission: { code: string } }> };
-type SystemUserRecord = { id: string; email: string; isActive: boolean; authorizationVersion: number; employee?: { firstName: string; lastName: string } | null; roles: Array<{ role: { id: string; code: string; displayName: string } }> };
-type SystemSessionRecord = AuthSessionRecord & { user: { id: string; email: string; isActive: boolean } };
-type SystemPermissionRecord = { id: string; code: string; displayName?: string; category: string };
-
-function SystemPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
-  const users = useQuery({ queryKey: ["system-users", session.sessionId, session.authorizationVersion], queryFn: () => apiList<SystemUserRecord>("/system/users"), enabled: hasPermission(session, "user.read") });
-  const roles = useQuery({ queryKey: ["system-roles", session.sessionId, session.authorizationVersion], queryFn: () => apiList<SystemRoleRecord>("/system/roles"), enabled: hasPermission(session, "role.read") });
-  const permissions = useQuery({ queryKey: ["system-permissions", session.sessionId, session.authorizationVersion], queryFn: () => apiList<SystemPermissionRecord>("/system/permissions"), enabled: hasPermission(session, "permission.read") });
-  const sessions = useQuery({ queryKey: ["system-sessions", session.sessionId, session.authorizationVersion], queryFn: () => apiList<SystemSessionRecord>("/system/sessions?active=true"), enabled: hasPermission(session, "session.manage") });
-
-  async function changeStatus(user: SystemUserRecord) {
-    const reason = window.prompt(`Reason for ${user.isActive ? "disabling" : "enabling"} ${user.email}:`)?.trim();
-    if (!reason) return;
-    await apiRequest(`/system/users/${user.id}/status`, { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify({ isActive: !user.isActive, expectedAuthorizationVersion: user.authorizationVersion, reason }) });
-    await users.refetch();
-    notify(`Account ${user.isActive ? "disabled" : "enabled"}.`);
-  }
-
-  async function revoke(item: SystemSessionRecord) {
-    const reason = window.prompt(`Reason for revoking ${item.user.email}'s session:`)?.trim();
-    if (!reason) return;
-    await apiRequest(`/system/sessions/${item.id}/revoke`, { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ reason }) });
-    await sessions.refetch();
-    notify("Session revoked.");
-  }
-
-  async function assignRoles(user: SystemUserRecord) {
-    const available = roles.data ?? [];
-    const entered = window.prompt(`Role codes for ${user.email} (comma separated):`, user.roles.map(item => item.role.code).join(", "));
-    if (entered === null) return;
-    const codes = [...new Set(entered.split(",").map(value => value.trim().toUpperCase()).filter(Boolean))];
-    const selected = codes.map(code => available.find(role => role.code === code));
-    if (selected.some(role => !role)) throw new Error("One or more role codes are not valid.");
-    const reason = window.prompt("Reason for replacing these role assignments:")?.trim();
-    if (!reason) return;
-    await apiRequest(`/system/users/${user.id}/roles`, { method: "PUT", csrfToken: session.csrfToken, body: JSON.stringify({ roleIds: selected.map(role => role!.id), expectedAuthorizationVersion: user.authorizationVersion, reason }) });
-    await users.refetch();
-    notify("Role assignments updated. Existing sessions were revoked.");
-  }
-
-  async function createRole() {
-    const code = window.prompt("Custom role code (uppercase letters, numbers and underscores):")?.trim().toUpperCase();
-    if (!code) return;
-    const displayName = window.prompt("Custom role display name:")?.trim();
-    if (!displayName) return;
-    const reason = window.prompt("Reason for creating this role:")?.trim();
-    if (!reason) return;
-    await apiRequest("/system/roles", { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ code, displayName, permissionIds: [], reason }) });
-    await roles.refetch();
-    notify("Custom role created. Add permissions before assigning it.");
-  }
-
-  async function configureRolePermissions(role: SystemRoleRecord) {
-    const available = permissions.data ?? [];
-    const current = role.permissions?.map(link => link.permission.code).join(", ") ?? "";
-    const entered = window.prompt(`Permission codes for ${role.displayName} (comma separated):`, current);
-    if (entered === null) return;
-    const codes = [...new Set(entered.split(",").map(value => value.trim()).filter(Boolean))];
-    const selected = codes.map(code => available.find(permission => permission.code === code));
-    if (selected.some(permission => !permission)) throw new Error("One or more permission codes are not valid.");
-    const reason = window.prompt("Reason for replacing these permissions:")?.trim();
-    if (!reason) return;
-    await apiRequest(`/system/roles/${role.id}/permissions`, { method: "PUT", csrfToken: session.csrfToken, body: JSON.stringify({ permissionIds: selected.map(permission => permission!.id), expectedVersion: role.version, reason }) });
-    await Promise.all([roles.refetch(), users.refetch()]);
-    notify("Role permissions updated. Affected sessions were revoked.");
-  }
-
-  async function toggleRole(role: SystemRoleRecord) {
-    const reason = window.prompt(`Reason for ${role.isActive ? "deactivating" : "activating"} ${role.displayName}:`)?.trim();
-    if (!reason) return;
-    await apiRequest(`/system/roles/${role.id}`, { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify({ isActive: !role.isActive, expectedVersion: role.version, reason }) });
-    await Promise.all([roles.refetch(), users.refetch()]);
-    notify(`Role ${role.isActive ? "deactivated" : "activated"}.`);
-  }
-
-  async function deleteRole(role: SystemRoleRecord) {
-    if (!window.confirm(`Delete custom role ${role.displayName}?`)) return;
-    const reason = window.prompt("Reason for deleting this role:")?.trim();
-    if (!reason) return;
-    await apiRequest(`/system/roles/${role.id}`, { method: "DELETE", csrfToken: session.csrfToken, body: JSON.stringify({ expectedVersion: role.version, reason }) });
-    await roles.refetch();
-    notify("Custom role deleted.");
-  }
-
-  return <div className="dashboard-grid">
-    {hasPermission(session, "user.read") && <section className="panel span-2"><div className="panel-head"><div><h3>Users</h3><span>Account status and active role assignments.</span></div></div>{users.isPending ? <p className="muted">Loading users...</p> : <DataTable columns={["User", "Roles", "Status", "Action"]} rows={(users.data ?? []).map(user => [user.email, user.roles.map(item => item.role.displayName).join(", ") || "No role", user.isActive ? "Active" : "Disabled", user.id !== session.id ? <div className="row-actions">{hasPermission(session, "role.assign_any") && <button type="button" onClick={() => void assignRoles(user).catch(error => notify(errorMessage(error)))}>Roles</button>}{hasPermission(session, "user.manage") && <button type="button" onClick={() => void changeStatus(user).catch(error => notify(errorMessage(error)))}>{user.isActive ? "Disable" : "Enable"}</button>}</div> : "Current user"])} />}</section>}
-    {hasPermission(session, "role.read") && <section className="panel"><div className="panel-head"><div><h3>Roles</h3><span>{roles.data?.length ?? 0} configured roles</span></div>{hasPermission(session, "role.manage") && <button type="button" onClick={() => void createRole().catch(error => notify(errorMessage(error)))}>Add custom role</button>}</div><div className="list-stack">{roles.data?.map(role => <div className="list-row" key={role.id}><div><strong>{role.displayName}</strong><span>{role.code} · {role.isActive ? "Active" : "Inactive"} · {role.permissions?.length ?? 0} permissions</span></div>{hasPermission(session, "role.manage") && !role.isBuiltIn && <div className="row-actions"><button type="button" onClick={() => void configureRolePermissions(role).catch(error => notify(errorMessage(error)))}>Permissions</button><button type="button" onClick={() => void toggleRole(role).catch(error => notify(errorMessage(error)))}>{role.isActive ? "Deactivate" : "Activate"}</button><button className="danger-outline" type="button" onClick={() => void deleteRole(role).catch(error => notify(errorMessage(error)))}>Delete</button></div>}</div>)}</div></section>}
-    {hasPermission(session, "permission.read") && <section className="panel"><div className="panel-head"><div><h3>Permission catalogue</h3><span>{permissions.data?.length ?? 0} permissions</span></div></div><p className="muted">Permissions are grouped by resource and enforced by the API.</p></section>}
-    {hasPermission(session, "session.manage") && <section className="panel span-2"><div className="panel-head"><div><h3>Active sessions</h3><span>Revoke access without changing a password.</span></div></div><DataTable columns={["User", "Provider", "Last seen", "Action"]} rows={(sessions.data ?? []).map(item => [item.user.email, item.provider, formatDate(item.lastSeenAt), <button type="button" onClick={() => void revoke(item).catch(error => notify(errorMessage(error)))}>Revoke</button>])} /></section>}
-  </div>;
-}
-
-function Dashboard({ state, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
+function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
   const active = activeEmployees(state.employees);
   const today = state.attendance[todayISO()] || {};
-  const todaySummary = attendanceDaySummary(state.employees, today);
-  const pendingLeave = state.leaves.filter(item => item.status === "Pending");
-  const currentPayroll = state.payroll.filter(item => item.year === new Date().getFullYear() && item.month === new Date().getMonth() + 1);
+  const fallbackAttendance = attendanceDaySummary(state.employees, today);
+  const todayValue = todayISO();
+  const canReadAttendanceSummary = hasAnyPermission(session, "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.audit.read", "attendance.read_all");
+  const attendance = useQuery({ queryKey: ["dashboard-attendance", session.sessionId, session.authorizationVersion, todayValue], queryFn: () => apiRequest<DashboardAttendanceReport>(`/attendance/reports/summary?dateFrom=${todayValue}&dateTo=${todayValue}&limit=100`), enabled: canReadAttendanceSummary });
+  const canReadLeave = hasAnyPermission(session, "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
+  const broadLeave = hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
+  const leaveRecords = useQuery({ queryKey: ["dashboard-leave", session.sessionId, session.authorizationVersion, broadLeave], queryFn: () => apiList<DashboardLeave>(broadLeave ? "/leave/requests?limit=100" : "/leave/mine?limit=100"), enabled: canReadLeave });
+  const currentYear = new Date().getFullYear(); const currentMonth = new Date().getMonth() + 1;
+  const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}&limit=100`), enabled: hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
+  const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}&limit=100`), enabled: hasPermission(session, "payroll.payslip.read_all") });
+  const byStatus = attendance.data?.data.summary.byStatus;
+  const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendance.data!.data.summary.totalRecords) } : fallbackAttendance;
+  const pendingLeave = (leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
+  const currentPayroll = payrollRuns.data ?? [];
   const expiringDocs = state.employees.filter(employee => daysUntil(employee.fields["QID Expiry Date"]) <= 60 || daysUntil(employee.fields["Passport Expiry Date"]) <= 60);
   const openJobs = state.jobs.filter(job => job.status === "Open");
   const pipelineCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" && candidate.stage !== "Rejected");
-  const payrollTotal = currentPayroll.reduce((sum, slip) => sum + slip.net, 0);
+  const payrollTotal = (payrollSlips.data ?? []).reduce((sum, slip) => sum + Number(slip.netPay), 0);
   const headcount = state.settings.departments.map(department => ({
     department,
     count: active.filter(employee => employee.fields.Department === department).length
@@ -885,7 +796,7 @@ function Dashboard({ state, setNav, onAddEmployee, canAddEmployee, canRunPayroll
         <Metric label="Present today" value={todaySummary.P} hint={`${todaySummary.A} absent · ${todaySummary.H} half-day · ${todaySummary.L} leave · ${todaySummary.unmarked} unmarked`} tone={todaySummary.A ? "warn" : "ok"} />
         <Metric label="Pending leave" value={pendingLeave.length} hint="awaiting approval" tone={pendingLeave.length ? "warn" : "ok"} />
         <Metric label="Open positions" value={openJobs.length} hint={`${pipelineCandidates.length} candidates in pipeline`} />
-        <Metric label="Payroll this month" value={formatMoney(payrollTotal, state.settings.company.currency)} hint={`${currentPayroll.length} payslips`} />
+        <Metric label="Payroll this month" value={payrollSlips.isSuccess ? formatMoney(payrollTotal, state.settings.company.currency) : `${currentPayroll.length} run(s)`} hint={`${payrollSlips.data?.length ?? currentPayroll.reduce((sum, run) => sum + (run._count?.payrolls ?? 0), 0)} payslips`} />
         <Metric label="Docs expiring" value={expiringDocs.length} hint="next 60 days" tone={expiringDocs.length ? "warn" : "ok"} />
       </section>
 
@@ -907,10 +818,7 @@ function Dashboard({ state, setNav, onAddEmployee, canAddEmployee, canRunPayroll
           <DataTable
             empty="No pending leave requests."
             columns={["Employee", "Type", "Dates", "Days", "Status"]}
-            rows={pendingLeave.slice(0, 6).map(leave => {
-              const employee = state.employees.find(item => item.id === leave.employeeId);
-              return [employeeName(employee), leave.type, `${formatDate(leave.from)} - ${formatDate(leave.to)}`, leave.days, leave.status];
-            })}
+            rows={pendingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} - ${formatDate(leave.endDate)}`, leave.totalDays, leave.status.replaceAll("_", " ")])}
           />
         </div>
       </section>
@@ -1383,94 +1291,6 @@ function attendancePunch(employee: EmployeeRecord, code: AttendanceCode | undefi
 
 function AttendanceMetric({ label, value, tone }: { label: string; value: React.ReactNode; tone: "present" | "half" | "leave" | "absent" | "payroll" }) {
   return <div className={`attendance-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Leave({ state, setState, setModal, notify, close, savePdf, canCreate, canApproveManager, canApproveHr, canCancelSelf, canDelete, canExport, currentEmployeeId }: CommonProps & { canCreate: boolean; canApproveManager: boolean; canApproveHr: boolean; canCancelSelf: boolean; canDelete: boolean; canExport: boolean; currentEmployeeId?: string | null }) {
-  const [status, setStatus] = useState("");
-  const rows = state.leaves.filter(item => !status || item.status === status);
-
-  function openLeaveForm() {
-    setModal(<LeaveForm state={state} close={close} notify={notify} currentEmployeeId={currentEmployeeId} save={leave => setState(prev => ({ ...prev, leaves: [...prev.leaves, leave] }))} />);
-  }
-
-  return (
-    <section className="stack">
-      <div className="panel">
-        <div className="panel-head">
-          <div><h3>Leave Requests</h3><span>{state.leaves.filter(item => item.status === "Pending").length} pending</span></div>
-          <div className="inline-controls">
-            <select value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option><option>Pending</option><option>Approved</option><option>Rejected</option></select>
-            {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("leave_report", state, new Date().getFullYear(), new Date().getMonth() + 1), "leave_report"))}>Leave PDF</button>}
-            {canCreate && <button className="primary" onClick={openLeaveForm}>Apply leave</button>}
-          </div>
-        </div>
-        <DataTable
-          empty="No leave requests yet."
-          columns={["Employee", "Type", "From", "To", "Days", "Reason", "Status", "Actions"]}
-          rows={rows.map(leave => {
-            const employee = state.employees.find(item => item.id === leave.employeeId);
-            const canApproveStage = leave.employeeId !== currentEmployeeId && ((leave.reviewStage === "Manager" && canApproveManager) || (leave.reviewStage === "HR" && canApproveHr));
-            const canCancel = canDelete || (canCancelSelf && leave.employeeId === currentEmployeeId && (leave.status === "Pending" || leave.status === "Approved"));
-            return [
-              employeeName(employee),
-              leave.type,
-              formatDate(leave.from),
-              formatDate(leave.to),
-              leave.days,
-              leave.reason,
-              <Badge key="status" value={leave.status} />,
-              <div className="row-actions" key="actions">
-                {canApproveStage && leave.status === "Pending" && <><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Approved"))}>Approve</button><button onClick={() => setState(prev => decideLeave(prev, leave.id, "Rejected"))}>Reject</button></>}
-                {canCancel && <button onClick={() => confirmDelete(`${leave.type} request`) && setState(prev => deleteLeave(prev, leave.id))}>{canDelete ? "Delete" : "Cancel"}</button>}
-              </div>
-            ];
-          })}
-        />
-      </div>
-      <LeaveBalances state={state} />
-    </section>
-  );
-}
-
-function LeaveForm({ state, save, close, notify, currentEmployeeId }: { state: HrState; save: (leave: HrState["leaves"][number]) => void; close: () => void; notify: (message: string) => void; currentEmployeeId?: string | null }) {
-  const [employeeId, setEmployeeId] = useState(currentEmployeeId || activeEmployees(state.employees)[0]?.id || "");
-  const [type, setType] = useState(state.settings.leaveTypes[0]?.name || "Annual leave");
-  const [from, setFrom] = useState(todayISO());
-  const [to, setTo] = useState(todayISO());
-  const [reason, setReason] = useState("");
-  const days = from && to && to >= from ? inclusiveDays(from, to) : 0;
-
-  function submit() {
-    if (!employeeId || !days) return notify("Select employee and valid leave dates.");
-    const balance = leaveBalanceSummary(state, employeeId, type, new Date(`${from}T00:00:00`).getFullYear());
-    if (balance.total > 0 && balance.remaining < days) return notify(`Only ${balance.remaining} day(s) available for ${type}.`);
-    save({ id: newId(), employeeId, type, from, to, days, reason, status: "Pending", appliedOn: todayISO() });
-    notify("Leave request submitted.");
-    close();
-  }
-
-  return <div><h2>Apply for leave</h2><div className="form-grid compact">
-    <label>Employee<select value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{activeEmployees(state.employees).map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
-    <label>Leave type<select value={type} onChange={event => setType(event.target.value)}>{state.settings.leaveTypes.map(item => <option key={item.id}>{item.name}</option>)}</select></label>
-    <label>From<input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
-    <label>To<input type="date" value={to} onChange={event => setTo(event.target.value)} /></label>
-    <label className="wide">Reason<textarea value={reason} onChange={event => setReason(event.target.value)} /></label>
-  </div><p className="muted">Duration: {days || "-"} calendar day(s), inclusive.</p><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Submit leave</button></div></div>;
-}
-
-function LeaveBalances({ state }: { state: HrState }) {
-  const year = new Date().getFullYear();
-  const employees = activeEmployees(state.employees);
-  const quotaTypes = state.settings.leaveTypes.filter(item => item.days > 0);
-  return <div className="panel"><div className="panel-head"><h3>Leave Balances</h3><span>{year}</span></div>
-    <DataTable columns={["Employee", ...quotaTypes.map(item => item.name)]} rows={employees.map(employee => [
-      employeeName(employee),
-      ...quotaTypes.map(type => {
-        const balance = leaveBalanceSummary(state, employee.id, type.name, year);
-        return `${balance.remaining} / ${balance.total} (${balance.used} used, ${balance.pending} pending)`;
-      })
-    ])} />
-  </div>;
 }
 
 function BusinessTrips({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
@@ -2032,125 +1852,6 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       </div>
     </div>
   </section>;
-}
-
-function Payroll({ state, setState, setModal, notify, close, savePdf, backendSession, refreshWorkspace }: CommonProps & { backendSession: BackendSession; refreshWorkspace: () => Promise<void> }) {
-  const now = new Date();
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
-  const [department, setDepartment] = useState("");
-  const slips = state.payroll.filter(item => item.month === month && item.year === year);
-  const payrollDepartments = [...new Set(slips.flatMap(slip => {
-    const department = state.employees.find(employee => employee.id === slip.employeeId)?.fields.Department;
-    return department ? [department] : [];
-  }))].sort();
-  const departmentSlips = department ? payrollSlipsForDepartment(state, slips, department) : [];
-  const payrollNet = slips.reduce((sum, slip) => sum + slip.net, 0);
-  const payrollLop = slips.reduce((sum, slip) => sum + slip.lopAmount, 0);
-  const payrollLoans = slips.reduce((sum, slip) => sum + (slip.loanDeduction ?? 0), 0);
-  const finalized = slips.filter(slip => slip.status === "Finalized").length;
-  const warnings = payrollExportWarnings(state, slips);
-  const canGenerate = hasPermission(backendSession, "payroll.generate");
-  const canApprove = hasPermission(backendSession, "payroll.approve");
-  const canExport = hasPermission(backendSession, "payroll.export");
-
-  async function runPayroll() {
-    try {
-      const result = await generateBackendPayroll(backendSession, year, month);
-      await refreshWorkspace();
-      notify(`${result.length} payroll record(s) processed.`);
-    } catch (error) {
-      notify(errorMessage(error));
-    }
-  }
-
-  function exportPayrollSheet() {
-    downloadBlob(new Blob([payrollSheetHtml(state, slips)], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Payroll-${year}-${String(month).padStart(2, "0")}.xls`);
-  }
-
-  function exportDepartmentPayrollSheet() {
-    const filenameDepartment = department.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "Department";
-    downloadBlob(new Blob([payrollSheetHtml(state, departmentSlips)], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Payroll-${filenameDepartment}-${year}-${String(month).padStart(2, "0")}.xls`);
-  }
-
-  function exportSifSheet() {
-    downloadBlob(new Blob([sifCsv(state, slips, year, month)], { type: "text/csv;charset=utf-8" }), `SIF_${state.settings.company.name}_${year}${String(month).padStart(2, "0")}.csv`);
-  }
-
-  return (
-    <section className="stack payroll-workspace">
-      <div className="payroll-hero panel">
-        <div>
-          <p className="section-label">Payroll</p>
-          <h3>{months[month - 1]} {year}</h3>
-          <span>Rerun payroll after changing attendance, unpaid leave or loan deductions.</span>
-        </div>
-        <div className="inline-controls">
-          <select value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
-          <input type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
-          {canGenerate && <button className="primary" onClick={() => void runPayroll()}>Run payroll</button>}
-        </div>
-      </div>
-      <div className="payroll-grid">
-        <div className="payroll-tile"><span>Net payable</span><strong>{formatMoney(payrollNet, state.settings.company.currency)}</strong><p>{slips.length} payslips</p></div>
-        <div className="payroll-tile"><span>LOP impact</span><strong>{formatMoney(payrollLop, state.settings.company.currency)}</strong><p>From attendance and unpaid leave</p></div>
-        <div className="payroll-tile"><span>Loan deductions</span><strong>{formatMoney(payrollLoans, state.settings.company.currency)}</strong><p>Posted when payslips are finalized</p></div>
-        <div className="payroll-tile"><span>Finalized</span><strong>{finalized}/{slips.length}</strong><p>Protected from refresh</p></div>
-        <div className={`payroll-tile ${warnings.length ? "warn" : "ok"}`}><span>WPS readiness</span><strong>{warnings.length ? `${warnings.length} issue(s)` : "Ready"}</strong><p>{warnings[0] || "Bank sheet can be exported"}</p></div>
-      </div>
-      <div className="panel payroll-register">
-        <div className="panel-head">
-          <div><h3>Payroll Register</h3><span>Draft slips update from attendance and loans; finalized slips stay locked.</span></div>
-          {canExport && <div className="inline-controls">
-            <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("payroll_register", state, year, month), "payroll_register"))}>Register PDF</button>
-            <button disabled={!slips.length} onClick={exportPayrollSheet}>WPS sheet</button>
-            <button disabled={!slips.length} onClick={exportSifSheet}>SIF file</button>
-            <select id="payroll-export-department" name="payroll-export-department" aria-label="Payroll export department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">Select department</option>{payrollDepartments.map(item => <option key={item}>{item}</option>)}</select>
-            <button disabled={!departmentSlips.length} onClick={exportDepartmentPayrollSheet}>Department XLS</button>
-          </div>}
-        </div>
-      <DataTable
-        empty="No payslips for this period. Run payroll to create drafts."
-        columns={["Code", "Employee", "Gross", "LOP", "Loan deductions", "Net Pay", "Status", "Actions"]}
-        rows={slips.map(slip => {
-          const employee = state.employees.find(item => item.id === slip.employeeId);
-          return [
-            employee?.fields["Employee Code"] || "-",
-            employeeName(employee),
-            formatMoney(slip.gross, state.settings.company.currency),
-            `${slip.lopDays}d / ${formatMoney(slip.lopAmount, state.settings.company.currency)}`,
-            <PayrollLoanDeduction key="loan-deduction" state={state} slip={slip} />,
-            formatMoney(slip.net, state.settings.company.currency),
-            <Badge key="status" value={slip.status} />,
-            employee && <div className="row-actions" key="actions">
-              {slip.status === "Draft" && canGenerate && <button onClick={() => setModal(<PayslipEditor slip={slip} loanDetails={payrollLoanDetails(state, slip)} close={close} save={next => setState(prev => ({ ...prev, payroll: prev.payroll.map(item => item.id === next.id ? next : item) }))} />)}>Adjust</button>}
-              {slip.status === "Draft" && canApprove && <button onClick={() => setState(prev => finalizePayrollSlip(prev, slip.id))}>Finalize</button>}
-              <button onClick={() => void withPdf(pdf => savePdf(pdf.savePayslipPdf(slip, employee, state.settings), "payslip", employee.id))}>PDF</button>
-            </div>
-          ];
-        })}
-      />
-      </div>
-    </section>
-  );
-}
-
-function PayrollLoanDeduction({ state, slip }: { state: HrState; slip: PayrollSlip }) {
-  const details = payrollLoanDetails(state, slip);
-  return <span><strong>{formatMoney(slip.loanDeduction ?? 0, state.settings.company.currency)}</strong>{details && <><br /><small>{details}</small></>}</span>;
-}
-
-function PayslipEditor({ slip, loanDetails, save, close }: { slip: PayrollSlip; loanDetails: string; save: (slip: PayrollSlip) => void; close: () => void }) {
-  const [draft, setDraft] = useState(slip);
-  const setNumber = (key: keyof PayrollSlip, value: string) => setDraft(prev => recalcSlip({ ...prev, [key]: Number(value) || 0 }));
-  return <div><h2>Adjust payslip</h2><div className="form-grid compact">
-    <label>Bonus<input type="number" value={draft.bonus} onChange={event => setNumber("bonus", event.target.value)} /></label>
-    <label>Overtime<input type="number" value={draft.overtime} onChange={event => setNumber("overtime", event.target.value)} /></label>
-    <label>Deductions<input type="number" value={draft.deductions} onChange={event => setNumber("deductions", event.target.value)} /></label>
-    <label>Loan deductions<input type="number" value={draft.loanDeduction ?? 0} readOnly /><small>{loanDetails || "Set loan amounts from the Loans tab."}</small></label>
-    <label>LOP amount<input type="number" value={draft.lopAmount} onChange={event => setNumber("lopAmount", event.target.value)} /></label>
-    <label className="wide">Note<input value={draft.note} onChange={event => setDraft(prev => ({ ...prev, note: event.target.value }))} /></label>
-  </div><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={() => { save(draft); close(); }}>Save payslip</button></div></div>;
 }
 
 function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {

@@ -33,19 +33,19 @@ export class AttendanceController {
     return this.attendanceService.checkOut(dto, user);
   }
 
-  @AnyPermission('attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read')
+  @AnyPermission('attendance.team.read', 'attendance.management.read', 'attendance.hr.read', 'attendance.audit.read', 'attendance.read_all')
   @Get('reports/summary')
   report(@Query() query: QueryAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.report(query, user);
   }
 
-  @AnyPermission('attendance.self.read', 'attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read')
+  @AnyPermission('attendance.self.read', 'attendance.team.read', 'attendance.management.read', 'attendance.hr.read', 'attendance.audit.read', 'attendance.read_all')
   @Get()
   list(@Query() query: QueryAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.list(query, user);
   }
 
-  @AnyPermission('attendance.self.read', 'attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read')
+  @AnyPermission('attendance.self.read', 'attendance.team.read', 'attendance.management.read', 'attendance.hr.read', 'attendance.audit.read', 'attendance.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.attendanceService.findById(id, user);

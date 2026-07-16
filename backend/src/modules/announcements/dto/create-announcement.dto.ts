@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { LegacyRole } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ArrayUnique, IsArray, IsBoolean, IsDate, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 
 export class CreateAnnouncementDto {
   @ApiProperty({ example: 'Company Holiday' })
@@ -14,12 +13,14 @@ export class CreateAnnouncementDto {
   @MaxLength(10_000)
   content: string;
 
-  @ApiPropertyOptional({ enum: LegacyRole, isArray: true })
+  @ApiPropertyOptional({ type: [String], example: ['EMPLOYEE', 'LINE_MANAGER'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
   @ArrayUnique()
-  @IsEnum(LegacyRole, { each: true })
-  audienceRoles?: LegacyRole[];
+  @IsString({ each: true })
+  @Matches(/^[A-Z][A-Z0-9_]{1,99}$/, { each: true })
+  audienceRoles?: string[];
 
   @ApiPropertyOptional()
   @IsOptional()

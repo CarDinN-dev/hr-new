@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { PayrollStatus } from '@prisma/client';
+import { PayrollRunStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
@@ -26,8 +26,13 @@ export class QueryPayrollDto extends PaginationQueryDto {
   @Max(12)
   month?: number;
 
-  @ApiPropertyOptional({ enum: PayrollStatus })
+  @ApiPropertyOptional({ enum: PayrollRunStatus })
   @IsOptional()
-  @IsEnum(PayrollStatus)
-  status?: PayrollStatus;
+  @IsEnum(PayrollRunStatus)
+  status?: PayrollRunStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  departmentId?: string;
 }

@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AttendanceStatus, AuditAction, PayrollStatus, Prisma } from '@prisma/client';
-import { hasAnyPermission, hasPermission } from '../../common/authorization';
+import { AccessScopeType, AttendanceStatus, AuditAction, PayrollRunStatus, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -9,6 +8,7 @@ import { CreateAttendanceDto } from './dto/create-attendance.dto';
 import { QueryAttendanceDto } from './dto/query-attendance.dto';
 import { UpdateAttendanceDto } from './dto/update-attendance.dto';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
 
 const attendanceInclude = {
   employee: {
@@ -31,9 +31,11 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly authorization: AuthorizationService,
   ) {}
 
   async create(dto: CreateAttendanceDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'attendance.hr.manage' });
     await this.ensureEmployee(dto.employeeId);
     const attendanceDate = this.dayStart(dto.attendanceDate);
     return this.attendanceTransaction(async (tx) => {
@@ -55,7 +57,7 @@ export class AttendanceService {
   }
 
   async list(query: QueryAttendanceDto, user: RequestUser) {
-    const filters = this.buildFilters(query, user);
+    const filters = await this.buildFilters(query, user);
     const { page, limit, ...args } = listArgs(query, {
       allowedSortFields: ['createdAt', 'attendanceDate', 'checkIn', 'checkOut', 'workingHours', 'status'],
       defaultSortBy: 'attendanceDate',
@@ -73,7 +75,7 @@ export class AttendanceService {
 
   async findById(id: string, user: RequestUser) {
     const record = await this.prisma.attendance.findFirst({
-      where: { AND: [{ id }, { deletedAt: null }, this.accessWhere(user)] },
+      where: { AND: [{ id }, { deletedAt: null }, await this.accessWhere(user)] },
       include: attendanceInclude,
     });
     if (!record) throw new NotFoundException('Attendance record not found');
@@ -85,6 +87,8 @@ export class AttendanceService {
     return this.attendanceTransaction(async (tx) => {
       const record = await this.ensureExists(id, tx);
       const employeeId = dto.employeeId ?? record.employeeId;
+      await this.authorization.assertEmployeeScope(user, record.employeeId, { all: 'attendance.hr.manage' });
+      await this.authorization.assertEmployeeScope(user, employeeId, { all: 'attendance.hr.manage' });
       const attendanceDate = this.dayStart(dto.attendanceDate ?? record.attendanceDate);
       await this.assertPayrollIsOpen(record.employeeId, record.attendanceDate, tx);
       await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
@@ -137,6 +141,7 @@ export class AttendanceService {
   async remove(id: string, user: RequestUser) {
     return this.attendanceTransaction(async (tx) => {
       const record = await this.ensureExists(id, tx);
+      await this.authorization.assertEmployeeScope(user, record.employeeId, { all: 'attendance.hr.manage' });
       await this.assertPayrollIsOpen(record.employeeId, record.attendanceDate, tx);
       const removed = await tx.attendance.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } } });
       await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Attendance', entityId: id, summary: 'Attendance archived' });
@@ -208,14 +213,14 @@ export class AttendanceService {
   }
 
   async report(query: QueryAttendanceDto, user: RequestUser) {
-    if (!hasAnyPermission(user, ['attendance.team.read', 'attendance.department.read', 'attendance.hr.read', 'attendance.audit.read'])) {
+    if (!this.authorization.hasAny(user, ['attendance.team.read', 'attendance.management.read', 'attendance.hr.read', 'attendance.audit.read', 'attendance.read_all'])) {
       throw new ForbiddenException('Only managers and HR can access attendance reports');
     }
 
     const { page, limit, ...args } = listArgs(query, {
       allowedSortFields: ['createdAt', 'attendanceDate', 'checkIn', 'checkOut', 'workingHours', 'status'],
       defaultSortBy: 'attendanceDate',
-      where: { AND: this.buildFilters(query, user) },
+      where: { AND: await this.buildFilters(query, user) },
       include: attendanceInclude,
     });
     const [records, totals, lateRecords, statuses] = await Promise.all([
@@ -248,8 +253,8 @@ export class AttendanceService {
     };
   }
 
-  private buildFilters(query: QueryAttendanceDto, user: RequestUser) {
-    const filters: Record<string, unknown>[] = [this.accessWhere(user)];
+  private async buildFilters(query: QueryAttendanceDto, user: RequestUser) {
+    const filters: Prisma.AttendanceWhereInput[] = [await this.accessWhere(user)];
     if (query.employeeId) filters.push({ employeeId: query.employeeId });
     if (query.departmentId) filters.push({ employee: { departmentId: query.departmentId } });
     if (query.status) filters.push({ status: query.status });
@@ -264,13 +269,26 @@ export class AttendanceService {
     return filters;
   }
 
-  private accessWhere(user: RequestUser) {
-    if (hasAnyPermission(user, ['attendance.hr.read', 'attendance.audit.read'])) return {};
+  private async accessWhere(user: RequestUser): Promise<Prisma.AttendanceWhereInput> {
     const scopes: Prisma.AttendanceWhereInput[] = [];
-    if (user.employeeId && hasPermission(user, 'attendance.self.read')) scopes.push({ employeeId: user.employeeId });
-    if (user.employeeId && hasPermission(user, 'attendance.team.read')) scopes.push({ employee: { managerId: user.employeeId } });
-    if (hasPermission(user, 'attendance.department.read') && user.departmentScopeIds.length) {
-      scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
+    for (const permission of ['attendance.hr.read', 'attendance.audit.read', 'attendance.read_all'] as const) {
+      const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
+      if (rule.unrestricted) {
+        if (!rule.excludeIds.length) return {};
+        scopes.push({ employeeId: { notIn: rule.excludeIds } });
+      }
+      else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
+    }
+    if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'attendance.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
+    if (user.employeeId && this.authorization.has(user, 'attendance.team.read')) {
+      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } }))
+        .map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'attendance.team.read', AccessScopeType.DIRECT_REPORTS, id));
+      if (ids.length) scopes.push({ employeeId: { in: ids } });
+    }
+    if (user.employeeId && this.authorization.has(user, 'attendance.management.read')) {
+      const ids = (await this.authorization.managementTreeEmployeeIds(user.employeeId))
+        .filter((id) => this.authorization.permissionAllowedForScope(user, 'attendance.management.read', AccessScopeType.MANAGEMENT_TREE, id));
+      if (ids.length) scopes.push({ employeeId: { in: ids } });
     }
     return scopes.length ? { OR: scopes } : { employeeId: '__no_employee_scope__' };
   }
@@ -278,9 +296,9 @@ export class AttendanceService {
   private async resolveSelfOrHrEmployee(employeeId: string | undefined, user: RequestUser) {
     const targetEmployeeId = employeeId ?? user.employeeId;
     if (!targetEmployeeId) throw new NotFoundException('No employee profile is linked to this user');
-    if (employeeId && employeeId !== user.employeeId && !hasPermission(user, 'attendance.hr.manage')) {
-      throw new ForbiddenException('Only HR can check attendance for another employee');
-    }
+    if (targetEmployeeId === user.employeeId) {
+      if (!this.authorization.permissionAllowedForScope(user, 'attendance.self.create', AccessScopeType.SELF, targetEmployeeId)) throw new NotFoundException('Employee not found');
+    } else await this.authorization.assertEmployeeScope(user, targetEmployeeId, { all: 'attendance.hr.manage' });
     await this.ensureEmployee(targetEmployeeId);
     return targetEmployeeId;
   }
@@ -358,8 +376,7 @@ export class AttendanceService {
         employeeId,
         year: attendanceDate.getUTCFullYear(),
         month: attendanceDate.getUTCMonth() + 1,
-        deletedAt: null,
-        status: { in: [PayrollStatus.APPROVED, PayrollStatus.PAID] },
+        payrollRun: { status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.PUBLISHED, PayrollRunStatus.PAID] } },
       },
       select: { id: true },
     });

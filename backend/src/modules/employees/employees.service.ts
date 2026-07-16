@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
+import { AccessScopeType, AuditAction, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -9,6 +9,7 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { AuditService } from '../audit/audit.service';
 import { nonNegativeMoney, ZERO_MONEY } from '../../common/money';
 import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
+import { AuthorizationService } from '../authorization/authorization.service';
 
 const managerSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
@@ -27,7 +28,7 @@ const employeeSummarySelect = {
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly authorization: AuthorizationService) {}
 
   async create(dto: CreateEmployeeDto, user: RequestUser) {
     await this.validateRelations(dto);
@@ -42,7 +43,7 @@ export class EmployeesService {
   }
 
   async list(query: QueryEmployeesDto, user: RequestUser) {
-    const filters: Record<string, unknown>[] = [this.accessWhere(user)];
+    const filters: Record<string, unknown>[] = [await this.accessWhere(user)];
 
     if (query.departmentId) filters.push({ departmentId: query.departmentId });
     if (query.positionId) filters.push({ positionId: query.positionId });
@@ -74,8 +75,8 @@ export class EmployeesService {
 
   async findById(id: string, user: RequestUser) {
     const employee = await this.prisma.employee.findFirst({
-      where: { AND: [{ id }, { deletedAt: null }, this.accessWhere(user)] },
-      select: this.projection(user, id === user.employeeId),
+      where: { AND: [{ id }, { deletedAt: null }, await this.accessWhere(user)] },
+      select: this.projection(user, id === user.employeeId, id),
     });
 
     if (!employee) {
@@ -103,7 +104,7 @@ export class EmployeesService {
       const updated = await tx.employee.update({
         where: { id: user.employeeId! },
         data: { ...dto, version: { increment: 1 } },
-        select: this.projection(user, true),
+        select: this.projection(user, true, user.employeeId ?? undefined),
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: user.employeeId!, summary: 'Self-service profile updated' });
       return updated;
@@ -145,7 +146,7 @@ export class EmployeesService {
       const updated = await tx.employee.update({
         where: { id },
         data: { ...dto, version: { increment: 1 } },
-        select: this.projection(user, id === user.employeeId),
+        select: this.projection(user, id === user.employeeId, id),
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: id, summary: 'Employee updated' });
       return updated;
@@ -243,7 +244,7 @@ export class EmployeesService {
         if (!existing) await tx.employeeEducation.create({ data: { employeeId: id, qualification, yearOfPassing: this.integer(raw.yearOfPassing) } });
       }
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeDetails', entityId: id, summary: 'Employee profile details updated' });
-      return tx.employee.findUniqueOrThrow({ where: { id }, select: this.projection(user, id === user.employeeId) });
+      return tx.employee.findUniqueOrThrow({ where: { id }, select: this.projection(user, id === user.employeeId, id) });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -255,35 +256,50 @@ export class EmployeesService {
     return employee;
   }
 
-  private accessWhere(user: RequestUser) {
-    if (user.permissions.includes('employee.hr.read') || user.permissions.includes('employee.audit.read')) return {};
+  private async accessWhere(user: RequestUser): Promise<Prisma.EmployeeWhereInput> {
     const scopes: Prisma.EmployeeWhereInput[] = [];
-    if (user.employeeId && user.permissions.includes('employee.self.read')) scopes.push({ id: user.employeeId });
-    if (user.employeeId && user.permissions.includes('employee.team.read')) scopes.push({ managerId: user.employeeId });
-    if (user.permissions.includes('employee.department.read') && user.departmentScopeIds.length) {
-      scopes.push({ departmentId: { in: user.departmentScopeIds } });
+    for (const permission of ['employee.read_all', 'employee.hr.read'] as const) {
+      const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
+      if (rule.unrestricted) {
+        if (!rule.excludeIds.length) return {};
+        scopes.push({ id: { notIn: rule.excludeIds } });
+      }
+      else if (rule.includeIds.length) scopes.push({ id: { in: rule.includeIds } });
+    }
+    if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ id: user.employeeId });
+    if (user.employeeId && this.authorization.has(user, 'employee.team.read')) {
+      const directReports = await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } });
+      const ids = directReports.map((employee) => employee.id).filter((id) => this.authorization.permissionAllowedForScope(user, 'employee.team.read', AccessScopeType.DIRECT_REPORTS, id));
+      if (ids.length) scopes.push({ id: { in: ids } });
+    }
+    if (user.employeeId && this.authorization.has(user, 'employee.management.read')) {
+      const ids = (await this.authorization.managementTreeEmployeeIds(user.employeeId)).filter((id) => this.authorization.permissionAllowedForScope(user, 'employee.management.read', AccessScopeType.MANAGEMENT_TREE, id));
+      if (ids.length) scopes.push({ id: { in: ids } });
     }
     return scopes.length ? { OR: scopes } : { id: '__no_employee_scope__' };
   }
 
-  private projection(user: RequestUser, self: boolean): Prisma.EmployeeSelect {
+  private projection(user: RequestUser, self: boolean, employeeId?: string): Prisma.EmployeeSelect {
     const select: Prisma.EmployeeSelect = { ...employeeSummarySelect };
     if (self && user.permissions.includes('employee.self.read')) {
       Object.assign(select, {
         dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,
       });
     }
-    if (user.permissions.includes('employee.hr.read_sensitive')) {
+    const sensitiveRule = this.authorization.scopeRule(user, 'employee.hr.read_sensitive', AccessScopeType.ALL_EMPLOYEES);
+    if (employeeId ? this.authorization.permissionAllowedForScope(user, 'employee.hr.read_sensitive', AccessScopeType.ALL_EMPLOYEES, employeeId) : sensitiveRule.unrestricted && sensitiveRule.excludeIds.length === 0) {
       Object.assign(select, {
         dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,
         profile: true, benefits: true,
         credentials: { where: { deletedAt: null } }, education: { where: { deletedAt: null } },
       });
     }
-    if (user.permissions.includes('payroll.read_compensation') || (self && user.permissions.includes('employee.self.read_compensation'))) {
+    const compensationRule = this.authorization.scopeRule(user, 'payroll.read_compensation', AccessScopeType.ALL_EMPLOYEES);
+    if ((employeeId ? this.authorization.permissionAllowedForScope(user, 'payroll.read_compensation', AccessScopeType.ALL_EMPLOYEES, employeeId) : compensationRule.unrestricted && compensationRule.excludeIds.length === 0) || (self && employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read_compensation', AccessScopeType.SELF, employeeId))) {
       Object.assign(select, { salary: true, salaryRecords: { where: { deletedAt: null }, orderBy: { effectiveFrom: 'desc' } } });
     }
-    if (user.permissions.includes('payroll.read_bank') || (self && user.permissions.includes('employee.self.read_bank'))) {
+    const bankRule = this.authorization.scopeRule(user, 'payroll.read_bank', AccessScopeType.ALL_EMPLOYEES);
+    if ((employeeId ? this.authorization.permissionAllowedForScope(user, 'payroll.read_bank', AccessScopeType.ALL_EMPLOYEES, employeeId) : bankRule.unrestricted && bankRule.excludeIds.length === 0) || (self && employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read_bank', AccessScopeType.SELF, employeeId))) {
       Object.assign(select, { bankAccount: true });
     }
     return select;
@@ -323,7 +339,7 @@ export class EmployeesService {
 
     if (dto.managerId) {
       let managerId: string | null = dto.managerId;
-      for (let depth = 0; managerId && depth < 100; depth += 1) {
+      for (let depth = 0; managerId && depth < 32; depth += 1) {
         if (managerId === currentEmployeeId) {
           throw new ForbiddenException('Reporting lines cannot contain a cycle');
         }

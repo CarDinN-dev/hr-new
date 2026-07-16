@@ -33,6 +33,7 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/hr_erp?schema=public
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?set AUDIT_HMAC_KEY in .env}
       JWT_EXPIRES_IN: 8h
       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:?set MICROSOFT_TENANT_ID in .env}
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:?set MICROSOFT_CLIENT_ID in .env}

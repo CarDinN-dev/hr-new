@@ -37,6 +37,7 @@ export type BackendSession = {
   permissions: string[];
   departmentScopeIds: string[];
   sessionId: string;
+  authProvider: string;
   authorizationVersion: number;
   employeeId?: string | null;
 };
@@ -51,6 +52,7 @@ type BackendSessionResponse = {
     permissions: string[];
     departmentScopeIds: string[];
     sessionId: string;
+    authProvider: string;
     authorizationVersion: number;
     employeeId?: string | null;
   };
@@ -123,7 +125,7 @@ export function loadBackendSession(): BackendSession | null {
     const raw = sessionStorage.getItem(backendSessionKey) || localStorage.getItem(backendSessionKey);
     localStorage.removeItem(backendSessionKey);
     const session = raw ? JSON.parse(raw) as Partial<BackendSession> : null;
-    return session?.id && session?.csrfToken && session.email && session.sessionId
+    return session?.id && session?.csrfToken && session.email && session.sessionId && typeof session.authProvider === "string"
       && Number.isInteger(session.authorizationVersion) && Array.isArray(session.roles)
       && Array.isArray(session.permissions) && Array.isArray(session.departmentScopeIds)
       ? session as BackendSession
@@ -154,6 +156,10 @@ export function startMicrosoftLogin() {
   window.location.assign(`${apiBaseUrl}/auth/microsoft/start`);
 }
 
+export function startMicrosoftStepUp() {
+  window.location.assign(`${apiBaseUrl}/auth/microsoft/step-up`);
+}
+
 function backendSession(result: BackendSessionResponse): BackendSession {
   return {
     id: result.user.id,
@@ -163,6 +169,7 @@ function backendSession(result: BackendSessionResponse): BackendSession {
     permissions: result.user.permissions,
     departmentScopeIds: result.user.departmentScopeIds,
     sessionId: result.user.sessionId,
+    authProvider: result.user.authProvider,
     authorizationVersion: result.user.authorizationVersion,
     employeeId: result.user.employeeId,
     csrfToken: result.csrfToken
@@ -184,7 +191,7 @@ export function hasAllPermissions(session: BackendSession, ...permissions: strin
 export async function loadBackendState(current: HrState, session: BackendSession): Promise<{ state: HrState; updatedAt?: string }> {
   const listWhen = <T>(allowed: boolean, path: string) => allowed ? apiList<T>(path) : Promise.resolve([] as T[]);
   const getWhen = <T>(allowed: boolean, path: string) => allowed ? apiRequest<T>(path) : Promise.resolve(null as T);
-  const broadEmployeeRead = hasAnyPermission(session, "employee.team.read", "employee.department.read", "employee.hr.read", "employee.audit.read");
+  const broadEmployeeRead = hasAnyPermission(session, "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
   const employeesRequest = broadEmployeeRead
     ? apiList<BackendEmployee>("/employees")
     : hasPermission(session, "employee.self.read")
@@ -194,12 +201,12 @@ export async function loadBackendState(current: HrState, session: BackendSession
     employeesRequest,
     listWhen<BackendDepartment>(hasPermission(session, "department.read"), "/departments"),
     listWhen<Record<string, unknown>>(hasAnyPermission(session, "leave.self.read", "leave.configure"), "/leave/types"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.self.read", "attendance.team.read", "attendance.department.read", "attendance.hr.read", "attendance.audit.read"), "/attendance"),
-    listWhen<BackendLeave>(hasAnyPermission(session, "leave.self.read", "leave.team.read", "leave.department.read", "leave.hr.read", "leave.audit.read"), "/leave/requests"),
-    listWhen<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>(hasAnyPermission(session, "payroll.self.read_payslip", "payroll.read", "payroll.audit.read"), "/payroll"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "trip.self.read", "trip.team.read", "trip.department.read", "trip.hr.read", "trip.audit.read"), "/business-trips"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "expense.self.read", "expense.team.read", "expense.department.read", "expense.hr.read", "expense.audit.read"), "/expenses"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "loan.self.read", "loan.hr.read", "loan.audit.read"), "/loans"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"), "/attendance"),
+    Promise.resolve([] as BackendLeave[]),
+    Promise.resolve([] as Array<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "trip.self.read", "trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all"), "/business-trips"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "expense.self.read", "expense.team.read", "expense.management.read", "expense.hr.read", "expense.read_all"), "/expenses"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "loan.self.read", "loan.hr.read", "loan.audit.read", "loan.read_all"), "/loans"),
     listWhen<Record<string, unknown>>(hasPermission(session, "recruitment.read"), "/recruitment/jobs"),
     listWhen<Record<string, unknown>>(hasPermission(session, "recruitment.read"), "/recruitment/candidates"),
     listWhen<Record<string, unknown>>(hasPermission(session, "eos.read"), "/eos"),
@@ -293,9 +300,10 @@ export async function loadBackendState(current: HrState, session: BackendSession
 }
 
 export async function generateBackendPayroll(session: BackendSession, year: number, month: number) {
-  return apiRequest<BackendPayroll[]>("/payroll/generate", {
+  return apiRequest<{ id: string; payrolls: BackendPayroll[] }>("/payroll/generate", {
     method: "POST",
     csrfToken: session.csrfToken,
+    headers: { "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify({ year, month })
   });
 }
@@ -323,6 +331,21 @@ export async function apiList<T>(path: string) {
 export async function apiRequest<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<T> {
   const envelope = await apiRequestEnvelope<T>(path, init);
   return envelope.data as T;
+}
+
+export async function apiDownload(path: string, init: RequestInit & { csrfToken?: string } = {}) {
+  const headers = new Headers(init.headers);
+  if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
+  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "same-origin" });
+  if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event(authorizationExpiredEvent));
+    let message = `Download failed (${response.status})`;
+    try { message = (await response.json() as { message?: string }).message || message; } catch { /* empty */ }
+    throw new ApiError(message, response.status);
+  }
+  const disposition = response.headers.get("content-disposition") || "";
+  const fileName = disposition.match(/filename="?([^";]+)"?/i)?.[1] || "download";
+  return { blob: await response.blob(), fileName };
 }
 
 async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<ApiEnvelope<T>> {
@@ -396,7 +419,7 @@ function mapLeave(leave: BackendLeave): HrState["leaves"][number] {
     days: Number(leave.totalDays || 0),
     reason: leave.reason || "",
     status: mapLeaveStatus(leave.status),
-    reviewStage: leave.status === "PENDING_MANAGER" ? "Manager" : leave.status === "PENDING_HR" ? "HR" : undefined,
+    reviewStage: leave.status === "PENDING_LINE_MANAGER" ? "Manager" : leave.status === "PENDING_MANAGER" ? "Manager" : leave.status === "PENDING_HR" ? "HR" : undefined,
     appliedOn: dateOnly(leave.createdAt),
     decidedOn: dateOnly(leave.approvedAt)
   };

@@ -5,22 +5,22 @@ import type { NavItem } from "./data";
 
 const routePermissions: Record<NavItem, string[]> = {
   Dashboard: ["session.self.read"],
-  "My HR": ["employee.self.read"],
-  Team: ["employee.team.read", "employee.department.read"],
-  Employees: ["employee.self.read", "employee.team.read", "employee.department.read", "employee.hr.read", "employee.audit.read"],
-  Attendance: ["attendance.self.read", "attendance.team.read", "attendance.department.read", "attendance.hr.read", "attendance.audit.read"],
-  Leave: ["leave.self.read", "leave.team.read", "leave.department.read", "leave.hr.read", "leave.audit.read"],
-  "Business Trips": ["trip.self.read", "trip.team.read", "trip.department.read", "trip.hr.read", "trip.audit.read"],
-  Expenses: ["expense.self.read", "expense.team.read", "expense.department.read", "expense.hr.read", "expense.audit.read"],
-  Loans: ["loan.self.read", "loan.hr.read", "loan.audit.read"],
+  "My HR": ["employee.self.read", "leave.self.read", "service_request.self.read", "payroll.self.read_payslip", "session.self.read"],
+  Team: ["employee.team.read", "employee.management.read", "leave.team.read", "leave.management.read"],
+  Employees: ["employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all"],
+  Attendance: ["attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"],
+  Leave: ["leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.audit.read", "leave.read_all"],
+  "Business Trips": ["trip.self.read", "trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all"],
+  Expenses: ["expense.self.read", "expense.team.read", "expense.management.read", "expense.hr.read", "expense.read_all"],
+  Loans: ["loan.self.read", "loan.hr.read", "loan.audit.read", "loan.read_all"],
   Payroll: ["payroll.self.read_payslip", "payroll.read", "payroll.audit.read"],
   Recruitment: ["recruitment.read"],
   EOS: ["eos.read"],
-  Documents: ["document.self.read", "document.hr.read"],
+  Documents: ["document.self.read", "document.hr.read", "document.read_all"],
   Reports: ["report.read"],
   Audit: ["audit.read"],
   System: ["user.read", "role.read", "permission.read", "session.manage", "system.configure"],
-  Settings: ["department.manage", "position.manage", "leave.configure", "system.configure"]
+  Settings: ["settings.read", "settings.manage", "department.manage", "position.manage", "leave.configure"]
 };
 
 export type AuthorizationContextValue = {

@@ -1,14 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { LegacyRole } from '@prisma/client';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class QueryAnnouncementsDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ enum: LegacyRole })
+  @ApiPropertyOptional({ example: 'EMPLOYEE' })
   @IsOptional()
-  @IsEnum(LegacyRole)
-  audienceRole?: LegacyRole;
+  @IsString()
+  @Matches(/^[A-Z][A-Z0-9_]{1,99}$/)
+  audienceRole?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

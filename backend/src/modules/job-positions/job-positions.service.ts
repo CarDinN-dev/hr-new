@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction } from '@prisma/client';
+import { AccessScopeType, AuditAction } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listRecords } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { CreateJobPositionDto } from './dto/create-job-position.dto';
 import { QueryJobPositionsDto } from './dto/query-job-positions.dto';
 import { UpdateJobPositionDto } from './dto/update-job-position.dto';
@@ -15,9 +16,14 @@ const positionInclude = {
 
 @Injectable()
 export class JobPositionsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly authorization: AuthorizationService,
+  ) {}
 
   async create(dto: CreateJobPositionDto, user: RequestUser) {
+    this.assertSystemScope(user, 'position.manage');
     await this.validateDepartment(dto.departmentId);
     return this.prisma.$transaction(async (tx) => {
       const position = await tx.jobPosition.create({ data: dto, include: positionInclude });
@@ -26,19 +32,19 @@ export class JobPositionsService {
     });
   }
 
-  list(query: QueryJobPositionsDto) {
+  list(query: QueryJobPositionsDto, user: RequestUser) {
     return listRecords(this.prisma.jobPosition, query, {
       searchFields: ['title', 'code', 'description', 'level'],
       allowedSortFields: ['createdAt', 'title', 'code', 'level'],
       defaultSortBy: 'createdAt',
-      where: query.departmentId ? { departmentId: query.departmentId } : undefined,
+      where: { AND: [this.systemWhere(user, 'position.read'), ...(query.departmentId ? [{ departmentId: query.departmentId }] : [])] },
       include: positionInclude,
     });
   }
 
-  async findById(id: string) {
+  async findById(id: string, user: RequestUser) {
     const position = await this.prisma.jobPosition.findFirst({
-      where: { id, deletedAt: null },
+      where: { AND: [{ id }, { deletedAt: null }, this.systemWhere(user, 'position.read')] },
       include: positionInclude,
     });
     if (!position) throw new NotFoundException('Job position not found');
@@ -46,7 +52,8 @@ export class JobPositionsService {
   }
 
   async update(id: string, dto: UpdateJobPositionDto, user: RequestUser) {
-    await this.findById(id);
+    await this.ensureExists(id);
+    this.assertSystemScope(user, 'position.manage', id);
     await this.validateDepartment(dto.departmentId);
     return this.prisma.$transaction(async (tx) => {
       const position = await tx.jobPosition.update({ where: { id }, data: dto, include: positionInclude });
@@ -56,7 +63,8 @@ export class JobPositionsService {
   }
 
   async remove(id: string, user: RequestUser) {
-    await this.findById(id);
+    await this.ensureExists(id);
+    this.assertSystemScope(user, 'position.manage', id);
     const employee = await this.prisma.employee.findFirst({
       where: { positionId: id, deletedAt: null },
       select: { id: true },
@@ -75,5 +83,23 @@ export class JobPositionsService {
       where: { id: departmentId, deletedAt: null },
     });
     if (!department) throw new NotFoundException('Department not found');
+  }
+
+  private systemWhere(user: RequestUser, permission: string) {
+    const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_SYSTEM);
+    return rule.unrestricted
+      ? (rule.excludeIds.length ? { id: { notIn: rule.excludeIds } } : {})
+      : { id: { in: rule.includeIds, notIn: rule.excludeIds } };
+  }
+
+  private assertSystemScope(user: RequestUser, permission: string, resourceId?: string) {
+    if (this.authorization.permissionAllowedForScope(user, permission, AccessScopeType.ALL_SYSTEM, resourceId)) return;
+    throw new NotFoundException(resourceId ? 'Job position not found' : 'Resource not found');
+  }
+
+  private async ensureExists(id: string) {
+    const position = await this.prisma.jobPosition.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+    if (!position) throw new NotFoundException('Job position not found');
+    return position;
   }
 }

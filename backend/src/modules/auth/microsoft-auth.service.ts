@@ -5,6 +5,7 @@ import { Request, Response } from 'express';
 import * as oidc from 'openid-client';
 import { UsersService } from '../users/users.service';
 import { AuthService, IssuedSession } from './auth.service';
+import { RequestUser } from '../../common/types/request-user.type';
 
 const requiredAppRole = 'HR.User';
 const callbackPath = '/api/v1/auth/microsoft/callback';
@@ -18,6 +19,9 @@ type Transaction = {
   nonce: string;
   codeVerifier: string;
   expiresAt: number;
+  mode: 'login' | 'step-up';
+  expectedUserId?: string;
+  previousSessionId?: string;
 };
 
 @Injectable()
@@ -58,6 +62,14 @@ export class MicrosoftAuthService {
   }
 
   async begin(request: Request, response: Response) {
+    return this.beginTransaction(request, response, 'login');
+  }
+
+  async beginStepUp(request: Request, response: Response, user: RequestUser) {
+    return this.beginTransaction(request, response, 'step-up', user);
+  }
+
+  private async beginTransaction(request: Request, response: Response, mode: 'login' | 'step-up', user?: RequestUser) {
     await this.authService.consumeMicrosoftLoginStart(request.ip);
     const configuration = await this.configuration();
     const transaction: Transaction = {
@@ -66,6 +78,9 @@ export class MicrosoftAuthService {
       nonce: oidc.randomNonce(),
       codeVerifier: oidc.randomPKCECodeVerifier(),
       expiresAt: Date.now() + transactionLifetimeMs,
+      mode,
+      expectedUserId: user?.id,
+      previousSessionId: user?.sessionId,
     };
     const codeChallenge = await oidc.calculatePKCECodeChallenge(transaction.codeVerifier);
     const authorizationUrl = oidc.buildAuthorizationUrl(configuration, {
@@ -76,7 +91,7 @@ export class MicrosoftAuthService {
       code_challenge_method: 'S256',
       state: transaction.state,
       nonce: transaction.nonce,
-      prompt: 'select_account',
+      prompt: mode === 'step-up' ? 'login' : 'select_account',
     });
 
     response.cookie(this.transactionCookieName(), this.encryptTransaction(transaction), {
@@ -121,8 +136,17 @@ export class MicrosoftAuthService {
       || !user.isActive
       || user.deletedAt
       || user.employee?.deletedAt
+      || !user.microsoftLoginEnabled
     ) {
       throw new UnauthorizedException('Microsoft account is not authorized for this application.');
+    }
+    if (transaction.mode === 'step-up') {
+      if (!transaction.expectedUserId || !transaction.previousSessionId || user.id !== transaction.expectedUserId) {
+        throw new UnauthorizedException('Microsoft step-up identity did not match the active session.');
+      }
+      const session = await this.authService.issueSession(user, request, 'microsoft');
+      await this.authService.replaceMicrosoftSession(transaction.previousSessionId, user.id);
+      return session;
     }
     return this.authService.issueSession(user, request, 'microsoft');
   }
@@ -205,6 +229,7 @@ export class MicrosoftAuthService {
         || typeof transaction.nonce !== 'string'
         || typeof transaction.codeVerifier !== 'string'
         || typeof transaction.expiresAt !== 'number'
+        || !['login', 'step-up'].includes(transaction.mode ?? '')
         || transaction.expiresAt < Date.now()
       ) {
         throw new Error('Expired transaction');

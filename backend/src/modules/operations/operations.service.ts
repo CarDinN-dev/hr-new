@@ -1,14 +1,14 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  AttendanceStatus, AuditAction, CandidateStage, EosStatus, ExpenseStatus, Prisma,
+  AccessScopeType, AttendanceStatus, AuditAction, CandidateStage, EosStatus, ExpenseStatus, Prisma,
   RecruitmentJobStatus, TripStatus,
 } from '@prisma/client';
-import { hasAnyPermission, hasPermission } from '../../common/authorization';
 import { money, nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
 import { paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
 import {
   CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
   EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
@@ -19,7 +19,7 @@ const employeeSummary = { id: true, employeeCode: true, firstName: true, lastNam
 
 @Injectable()
 export class OperationsService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly authorization: AuthorizationService) {}
 
   async createTrip(dto: CreateTripDto, user: RequestUser) {
     const employeeId = await this.resolveEmployee(dto.employeeId, user, 'trip.hr.manage');
@@ -107,6 +107,7 @@ export class OperationsService {
   }
 
   async createJob(dto: CreateRecruitmentJobDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage');
     if (dto.departmentId) await this.ensureDepartment(dto.departmentId);
     return this.transaction(async (tx) => {
       const job = await tx.recruitmentJob.create({ data: { ...dto, status: RecruitmentJobStatus.OPEN } });
@@ -115,12 +116,13 @@ export class OperationsService {
     });
   }
 
-  listJobs(query: QueryRecruitmentDto) {
-    const where = { deletedAt: null, status: query.status, OR: query.search ? [{ title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined };
+  listJobs(query: QueryRecruitmentDto, user: RequestUser) {
+    const where = { deletedAt: null, ...this.systemRecordWhere(user, 'recruitment.read'), status: query.status, OR: query.search ? [{ title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined };
     return this.paginated(this.prisma.recruitmentJob, query, where, { department: true, candidates: true });
   }
 
   async updateJob(id: string, dto: UpdateRecruitmentJobDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
     if (dto.departmentId) await this.ensureDepartment(dto.departmentId);
     return this.transaction(async (tx) => {
       const existing = await tx.recruitmentJob.findFirst({ where: { id, deletedAt: null } });
@@ -132,6 +134,7 @@ export class OperationsService {
   }
 
   removeJob(id: string, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
     return this.transaction(async (tx) => {
       const existing = await tx.recruitmentJob.findFirst({ where: { id, deletedAt: null } });
       if (!existing) throw new NotFoundException('Recruitment job not found');
@@ -144,6 +147,7 @@ export class OperationsService {
   }
 
   async createCandidate(dto: CreateCandidateDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage');
     const job = await this.prisma.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null } });
     if (!job) throw new NotFoundException('Open recruitment job not found');
     return this.transaction(async (tx) => {
@@ -155,15 +159,16 @@ export class OperationsService {
     });
   }
 
-  listCandidates(query: QueryRecruitmentDto) {
+  listCandidates(query: QueryRecruitmentDto, user: RequestUser) {
     const where = {
-      deletedAt: null, jobId: query.jobId, stage: query.stage,
+      deletedAt: null, ...this.systemRecordWhere(user, 'recruitment.read'), jobId: query.jobId, stage: query.stage,
       OR: query.search ? [{ name: { contains: query.search, mode: Prisma.QueryMode.insensitive } }, { email: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined,
     };
     return this.paginated(this.prisma.recruitmentCandidate, query, where, { job: { include: { department: true } }, employee: { select: employeeSummary } });
   }
 
   async updateCandidate(id: string, dto: UpdateCandidateDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
     return this.transaction(async (tx) => {
       const existing = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
       if (!existing) throw new NotFoundException('Candidate not found');
@@ -186,6 +191,7 @@ export class OperationsService {
   }
 
   async transitionCandidate(id: string, dto: TransitionCandidateDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
     return this.transaction(async (tx) => {
       const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
       if (!candidate) throw new NotFoundException('Candidate not found');
@@ -212,9 +218,10 @@ export class OperationsService {
     });
   }
 
-  removeCandidate(id: string, user: RequestUser) { return this.softRemove('recruitmentCandidate', 'RecruitmentCandidate', id, user); }
+  removeCandidate(id: string, user: RequestUser) { this.assertSystemScope(user, 'recruitment.manage', id); return this.softRemove('recruitmentCandidate', 'RecruitmentCandidate', id, user); }
 
   async createEos(dto: CreateEosDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'eos.manage' });
     return this.transaction(async (tx) => {
       const employee = await tx.employee.findFirst({ where: { id: dto.employeeId, deletedAt: null } });
       if (!employee) throw new NotFoundException('Employee not found');
@@ -254,8 +261,8 @@ export class OperationsService {
     });
   }
 
-  listEos(query: EmployeeScopedQueryDto) {
-    const where = { deletedAt: null, employeeId: query.employeeId, status: query.status as EosStatus | undefined };
+  listEos(query: EmployeeScopedQueryDto, user: RequestUser) {
+    const where = { deletedAt: null, AND: [this.employeeRecordWhere(user, 'eos.read'), ...(query.employeeId ? [{ employeeId: query.employeeId }] : [])], status: query.status as EosStatus | undefined };
     return this.paginated(this.prisma.eosRecord, query, where, { employee: { select: employeeSummary } });
   }
 
@@ -263,6 +270,7 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const eos = await tx.eosRecord.findFirst({ where: { id, deletedAt: null } });
       if (!eos) throw new NotFoundException('End-of-service record not found');
+      await this.authorization.assertEmployeeScope(user, eos.employeeId, { all: 'eos.manage' });
       const allowed = eos.status === EosStatus.DRAFT ? EosStatus.APPROVED : eos.status === EosStatus.APPROVED ? EosStatus.PAID : null;
       if (dto.status !== allowed) throw new BadRequestException('Invalid end-of-service status transition');
       const updated = await tx.eosRecord.update({ where: { id }, data: { status: dto.status, version: { increment: 1 } } });
@@ -271,13 +279,24 @@ export class OperationsService {
     });
   }
 
-  removeEos(id: string, user: RequestUser) { return this.softRemove('eosRecord', 'EosRecord', id, user); }
+  removeEos(id: string, user: RequestUser) {
+    return this.transaction(async (tx) => {
+      const record = await tx.eosRecord.findFirst({ where: { id, deletedAt: null } });
+      if (!record) throw new NotFoundException('End-of-service record not found');
+      await this.authorization.assertEmployeeScope(user, record.employeeId, { all: 'eos.manage' });
+      const removed = await tx.eosRecord.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } } });
+      await this.record(tx, user, AuditAction.DELETE, 'EosRecord', id, 'End-of-service record archived');
+      return removed;
+    });
+  }
 
-  async getSettings() {
+  async getSettings(user: RequestUser) {
+    this.assertSystemScope(user, 'organization.read', 'default');
     return this.prisma.organizationSettings.findUnique({ where: { id: 'default' } });
   }
 
   async updateSettings(dto: UpdateOrganizationSettingsDto, user: RequestUser) {
+    this.assertSystemScope(user, 'system.configure', 'default');
     return this.transaction(async (tx) => {
       const previous = await tx.organizationSettings.findUnique({ where: { id: 'default' } });
       const data = {
@@ -308,33 +327,71 @@ export class OperationsService {
   private async resolveEmployee(requested: string | undefined, user: RequestUser, allPermission: string) {
     const id = requested ?? user.employeeId;
     if (!id) throw new NotFoundException('No employee profile is linked to this user');
-    if (requested && requested !== user.employeeId && !hasPermission(user, allPermission)) throw new ForbiddenException('Cannot submit for another employee');
+    const resource = allPermission.split('.')[0];
+    if (id === user.employeeId) {
+      if (!this.authorization.permissionAllowedForScope(user, `${resource}.self.create`, AccessScopeType.SELF, id)) throw new NotFoundException('Employee not found');
+    } else if (!this.authorization.permissionAllowedForScope(user, allPermission, AccessScopeType.ALL_EMPLOYEES, id)) throw new NotFoundException('Employee not found');
     const employee = await this.prisma.employee.findFirst({ where: { id, deletedAt: null } });
     if (!employee) throw new NotFoundException('Employee not found');
     return id;
   }
 
   private async employeeFilters(requested: string | undefined, user: RequestUser, resource: 'trip' | 'expense'): Promise<Record<string, unknown>[]> {
-    if (hasAnyPermission(user, [`${resource}.hr.read`, `${resource}.audit.read`])) return requested ? [{ employeeId: requested }] : [];
-    const scopes: Record<string, unknown>[] = [];
-    if (user.employeeId && hasPermission(user, `${resource}.self.read`)) scopes.push({ employeeId: user.employeeId });
-    if (user.employeeId && hasPermission(user, `${resource}.team.read`)) scopes.push({ employee: { managerId: user.employeeId } });
-    if (hasPermission(user, `${resource}.department.read`) && user.departmentScopeIds.length) scopes.push({ employee: { departmentId: { in: user.departmentScopeIds } } });
-    return [{ OR: scopes.length ? scopes : [{ employeeId: '__no_employee_scope__' }] }, ...(requested ? [{ employeeId: requested }] : [])];
+    const scopes: Prisma.BusinessTripWhereInput[] = [];
+    let unrestricted = false;
+    for (const permission of [`${resource}.hr.read`, `${resource}.read_all`] as const) {
+      const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
+      if (rule.unrestricted) {
+        if (!rule.excludeIds.length) { unrestricted = true; break; }
+        scopes.push({ employeeId: { notIn: rule.excludeIds } });
+      }
+      else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
+    }
+    if (!unrestricted && user.employeeId && this.authorization.permissionAllowedForScope(user, `${resource}.self.read`, AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
+    if (!unrestricted && user.employeeId && this.authorization.has(user, `${resource}.team.read`)) {
+      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id)
+        .filter((id) => this.authorization.permissionAllowedForScope(user, `${resource}.team.read`, AccessScopeType.DIRECT_REPORTS, id));
+      if (ids.length) scopes.push({ employeeId: { in: ids } });
+    }
+    if (!unrestricted && user.employeeId && this.authorization.has(user, `${resource}.management.read`)) {
+      const ids = (await this.authorization.managementTreeEmployeeIds(user.employeeId))
+        .filter((id) => this.authorization.permissionAllowedForScope(user, `${resource}.management.read`, AccessScopeType.MANAGEMENT_TREE, id));
+      if (ids.length) scopes.push({ employeeId: { in: ids } });
+    }
+    return [
+      ...(unrestricted ? [] : [{ OR: scopes.length ? scopes : [{ employeeId: '__no_employee_scope__' }] }]),
+      ...(requested ? [{ employeeId: requested }] : []),
+    ];
   }
 
   private async assertManagerOrHr(employeeId: string, user: RequestUser, tx: Prisma.TransactionClient, resource: 'trip' | 'expense') {
     const hrPermission = resource === 'trip' ? 'trip.hr.manage' : 'expense.hr.approve';
-    if (hasPermission(user, hrPermission)) return;
-    const report = await tx.employee.findFirst({ where: {
-      id: employeeId,
-      deletedAt: null,
-      OR: [
-        ...(user.employeeId && hasPermission(user, `${resource}.team.approve_manager`) ? [{ managerId: user.employeeId }] : []),
-        ...(hasPermission(user, `${resource}.department.approve_manager`) ? [{ departmentId: { in: user.departmentScopeIds } }] : []),
-      ],
-    }, select: { id: true } });
-    if (!report) throw new ForbiddenException('Employee is outside the managed scope');
+    if (this.authorization.permissionAllowedForScope(user, hrPermission, AccessScopeType.ALL_EMPLOYEES, employeeId)) return;
+    const report = await tx.employee.findFirst({ where: { id: employeeId, deletedAt: null }, select: { managerId: true } });
+    if (!report) throw new NotFoundException('Record not found');
+    if (user.employeeId && report.managerId === user.employeeId && this.authorization.permissionAllowedForScope(user, `${resource}.team.approve_manager`, AccessScopeType.DIRECT_REPORTS, employeeId)) return;
+    if (user.employeeId && await this.authorization.isInManagementTree(user.employeeId, employeeId) && this.authorization.permissionAllowedForScope(user, `${resource}.management.approve_manager`, AccessScopeType.MANAGEMENT_TREE, employeeId)) return;
+    throw new NotFoundException('Record not found');
+  }
+
+  private employeeRecordWhere(user: RequestUser, permission: string) {
+    const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
+    return rule.unrestricted
+      ? (rule.excludeIds.length ? { employeeId: { notIn: rule.excludeIds } } : {})
+      : { employeeId: { in: rule.includeIds, notIn: rule.excludeIds } };
+  }
+
+  private systemRecordWhere(user: RequestUser, permission: string) {
+    const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_SYSTEM);
+    return rule.unrestricted
+      ? (rule.excludeIds.length ? { id: { notIn: rule.excludeIds } } : {})
+      : { id: { in: rule.includeIds, notIn: rule.excludeIds } };
+  }
+
+  private assertSystemScope(user: RequestUser, permission: string, resourceId?: string) {
+    if (this.authorization.permissionAllowedForScope(user, permission, AccessScopeType.ALL_SYSTEM, resourceId)) return;
+    if (resourceId) throw new NotFoundException('Record not found');
+    throw new ForbiddenException('Insufficient permission');
   }
 
   private async ensureDepartment(id: string) {
@@ -387,8 +444,9 @@ export class OperationsService {
       };
       const record = await delegate.findFirst({ where: { id, deletedAt: null } });
       if (!record) throw new NotFoundException(`${entityType} not found`);
-      if (!hasPermission(user, allPermission)) {
-        if (!user.employeeId || record.employeeId !== user.employeeId) throw new ForbiddenException(`Cannot delete this ${entityType.toLowerCase()}`);
+      if (!this.authorization.permissionAllowedForScope(user, allPermission, AccessScopeType.ALL_EMPLOYEES, record.employeeId)) {
+        const selfPermission = `${allPermission.split('.')[0]}.self.create`;
+        if (!user.employeeId || record.employeeId !== user.employeeId || !this.authorization.permissionAllowedForScope(user, selfPermission, AccessScopeType.SELF, record.employeeId)) throw new NotFoundException(`${entityType} not found`);
         if (record.status !== editableStatus) throw new BadRequestException(`Only an unprocessed ${entityType.toLowerCase()} can be deleted`);
       }
       const removed = await delegate.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } } });

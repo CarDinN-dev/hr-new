@@ -2790,6 +2790,218 @@ summary {
   }
 }
 
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.55rem;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.checkbox-grid label,
+.inline-checks label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.checkbox-grid input,
+.inline-checks input {
+  min-height: auto !important;
+  width: auto;
+}
+
+.inline-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  min-height: 42px;
+  align-items: center;
+}
+
+.permission-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  max-height: 46vh;
+  overflow: auto;
+  margin: 0.8rem 0;
+}
+
+.permission-picker fieldset {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+}
+
+.permission-picker legend {
+  padding: 0 0.35rem;
+  font-weight: 850;
+}
+
+.permission-source {
+  display: grid;
+  gap: 0.15rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.permission-source span,
+.compact-control {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.audit-filters {
+  margin-bottom: 1rem;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.switch-row input {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+
+.metric-row > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+
+.metric-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.workflow-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.workflow-card > .list-row {
+  border: 0;
+  border-radius: 0;
+}
+
+.workflow-history {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.workflow-history > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.workflow-history span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.notifications-menu {
+  position: relative;
+}
+
+.notification-trigger {
+  position: relative;
+}
+
+.notification-trigger > span {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.35rem;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.notifications-popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  width: min(25rem, calc(100vw - 2rem));
+  max-height: min(36rem, calc(100vh - 7rem));
+  overflow: auto;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.notification-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.notification-list > button {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.75rem;
+  text-align: left;
+  border-color: var(--line);
+  background: var(--panel-2);
+}
+
+.notification-list > button.unread {
+  border-left: 3px solid var(--red);
+}
+
+.notification-list span,
+.notification-list small {
+  color: var(--muted);
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .notifications-popover {
+    position: fixed;
+    top: 4.75rem;
+    right: 1rem;
+    left: 1rem;
+    width: auto;
+  }
+}
+
+.compact-control {
+  display: grid;
+  gap: 0.25rem;
+}
+
 .microsoft-login {
   grid-column: 1;
   min-height: 46px;

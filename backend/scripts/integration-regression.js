@@ -1,243 +1,471 @@
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
+const { mkdir, rm } = require('node:fs/promises');
+const path = require('node:path');
 const test = require('node:test');
 const bcrypt = require('bcrypt');
 const { PrismaClient } = require('@prisma/client');
-const { migrateRbac } = require('../prisma/migrate-rbac');
-const { createTestPersonas } = require('../prisma/seed');
+const { syncRbac } = require('../prisma/sync-rbac');
+const { createTestPersonas, seedReferenceData } = require('../prisma/seed');
 
+const backendDirectory = path.resolve(__dirname, '..');
 const port = Number(process.env.INTEGRATION_PORT || 3901);
 const baseUrl = `http://127.0.0.1:${port}/api/v1`;
-const password = process.env.TEST_PERSONA_PASSWORD;
+const password = process.env.TEST_PERSONA_PASSWORD || 'IntegrationPass123!';
+const checkerPassword = 'CheckerPass123!';
+const blockedPassword = 'BlockedPass123!';
+const roles = ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER', 'HR', 'CPO', 'COO', 'ADMIN', 'SUPER_ADMIN'];
 
-function email(role) {
+function personaEmail(role) {
   return `rbac.${role.toLowerCase()}@example.invalid`;
 }
 
-async function request(path, options = {}, session) {
-  const headers = new Headers(options.headers);
-  if (options.body && !(options.body instanceof FormData)) headers.set('content-type', 'application/json');
-  if (session?.cookie) headers.set('cookie', session.cookie);
-  if (session?.csrf && options.csrf !== false) headers.set('x-csrf-token', session.csrf);
-  const response = await fetch(`${baseUrl}${path}`, { ...options, headers });
-  let payload;
-  try { payload = await response.json(); } catch { payload = undefined; }
-  return { status: response.status, payload, data: payload?.data, cookie: response.headers.get('set-cookie')?.split(';')[0] };
+function idempotency(prefix) {
+  return `${prefix}:${randomUUID()}`;
 }
 
-async function login(role) {
-  const result = await request('/auth/login', { method: 'POST', body: JSON.stringify({ email: email(role), password }) });
-  assert.equal(result.status, 201, `${role} login failed: ${JSON.stringify(result.payload)}`);
+function databaseUrls() {
+  const source = process.env.INTEGRATION_DATABASE_URL;
+  assert.ok(source, 'INTEGRATION_DATABASE_URL is required and must point to a disposable PostgreSQL database');
+  const parsed = new URL(source);
+  if (!['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname) && process.env.ALLOW_REMOTE_INTEGRATION_DB !== 'true') {
+    throw new Error('Remote integration databases require ALLOW_REMOTE_INTEGRATION_DB=true');
+  }
+  const schema = `rbac_it_${process.pid}_${Date.now()}`.toLowerCase();
+  const admin = new URL(parsed);
+  admin.searchParams.set('schema', 'public');
+  const isolated = new URL(parsed);
+  isolated.searchParams.set('schema', schema);
+  return { schema, adminUrl: admin.toString(), databaseUrl: isolated.toString() };
+}
+
+async function api(pathname, options = {}, session) {
+  const headers = new Headers(options.headers);
+  let body = options.body;
+  if (body !== undefined && !(body instanceof FormData) && typeof body !== 'string') {
+    headers.set('content-type', 'application/json');
+    body = JSON.stringify(body);
+  }
+  if (session?.cookie) headers.set('cookie', session.cookie);
+  if (session?.csrf && options.csrf !== false) headers.set('x-csrf-token', session.csrf);
+  const response = await fetch(`${baseUrl}${pathname}`, { ...options, body, headers });
+  const contentType = response.headers.get('content-type') || '';
+  let payload;
+  let buffer;
+  if (contentType.includes('application/json')) payload = await response.json();
+  else buffer = Buffer.from(await response.arrayBuffer());
+  return {
+    status: response.status,
+    payload,
+    data: payload?.data,
+    meta: payload?.meta,
+    buffer,
+    contentType,
+    cookie: response.headers.get('set-cookie')?.split(';')[0],
+  };
+}
+
+async function login(email, loginPassword = password) {
+  const result = await api('/auth/login', { method: 'POST', body: { email, password: loginPassword } });
+  assert.equal(result.status, 201, `Login failed for ${email}: ${JSON.stringify(result.payload)}`);
   return { cookie: result.cookie, csrf: result.data.csrfToken, user: result.data.user };
 }
 
-async function waitForServer(child) {
-  const errors = [];
-  child.stderr.on('data', (chunk) => errors.push(String(chunk)));
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Integration server exited early: ${errors.join('')}`);
+async function loginRole(role) {
+  return login(personaEmail(role));
+}
+
+async function mutate(pathname, session, body, key = idempotency('mutation'), method = 'POST') {
+  return api(pathname, { method, body, headers: { 'idempotency-key': key } }, session);
+}
+
+async function waitForServer(child, output) {
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    if (child.exitCode !== null) throw new Error(`Integration server exited early:\n${output.join('').slice(-20_000)}`);
     try {
       const response = await fetch(`${baseUrl}/health`);
       if (response.ok) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`Integration server did not become ready: ${errors.join('')}`);
+  throw new Error(`Integration server did not become ready:\n${output.join('').slice(-20_000)}`);
 }
 
-function assertNoSensitiveManagerFields(employee) {
-  for (const field of ['salary', 'salaryRecords', 'bankAccount', 'dateOfBirth', 'gender', 'address', 'profile', 'benefits', 'credentials', 'education', 'emergencyContactName', 'emergencyContactPhone', 'user']) {
-    assert.equal(Object.hasOwn(employee, field), false, `manager projection exposed ${field}`);
-  }
+async function stopServer(child) {
+  if (!child || child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  ]);
+  if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-test('real Nest application enforces the production RBAC matrix', { timeout: 180_000 }, async (t) => {
-  assert.equal(process.env.SEED_TEST_PERSONAS, 'true', 'SEED_TEST_PERSONAS=true is required');
-  assert.ok(password, 'TEST_PERSONA_PASSWORD is required');
-  const prisma = new PrismaClient();
-  try {
-    const first = await migrateRbac(prisma, { apply: true });
-    const second = await migrateRbac(prisma, { apply: true });
-    assert.equal(first.invalid.length, 0);
-    assert.equal(first.conflicting.length, 0);
-    assert.equal(second.created.permissions + second.created.roles + second.created.rolePermissions + second.created.assignments + second.created.users, 0, 'RBAC import must be idempotent');
-    await createTestPersonas(prisma, await bcrypt.hash(password, 10));
-  } finally {
-    await prisma.$disconnect();
-  }
+function assertManagerProjection(employee) {
+  for (const field of [
+    'salary', 'salaryRecords', 'bankAccount', 'dateOfBirth', 'gender', 'address', 'profile', 'benefits',
+    'credentials', 'education', 'emergencyContactName', 'emergencyContactPhone', 'user', 'documents', 'sessions',
+  ]) assert.equal(Object.hasOwn(employee, field), false, `manager projection exposed ${field}`);
+}
 
-  const child = spawn(process.execPath, ['dist/main'], {
-    cwd: require('node:path').resolve(__dirname, '..'),
-    env: { ...process.env, PORT: String(port), NODE_ENV: 'test', CORS_ORIGIN: '' },
-    stdio: ['ignore', 'pipe', 'pipe'],
+test('real Nest application enforces production RBAC and workflow invariants', { timeout: 360_000 }, async (t) => {
+  const { schema, adminUrl, databaseUrl } = databaseUrls();
+  const storageDirectory = path.resolve(backendDirectory, `.integration-storage-${schema}`);
+  const adminPrisma = new PrismaClient({ datasources: { db: { url: adminUrl } } });
+  let prisma;
+  let child;
+  const serverOutput = [];
+
+  t.after(async () => {
+    await stopServer(child);
+    await prisma?.$disconnect();
+    await adminPrisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => undefined);
+    await adminPrisma.$disconnect();
+    await rm(storageDirectory, { recursive: true, force: true });
   });
-  t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
-  await waitForServer(child);
+
+  await adminPrisma.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
+  const prismaCli = path.resolve(backendDirectory, 'node_modules/prisma/build/index.js');
+  const migrationEnvironment = { ...process.env, DATABASE_URL: databaseUrl };
+  execFileSync(process.execPath, [prismaCli, 'migrate', 'deploy'], { cwd: backendDirectory, env: migrationEnvironment, stdio: 'pipe' });
+  execFileSync(process.execPath, [prismaCli, 'migrate', 'deploy'], { cwd: backendDirectory, env: migrationEnvironment, stdio: 'pipe' });
+
+  prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const firstSync = await syncRbac(prisma);
+  const secondSync = await syncRbac(prisma);
+  assert.ok(firstSync.permissionsCreated > 0 && firstSync.rolesCreated === 8);
+  assert.deepEqual(secondSync, { permissionsCreated: 0, rolesCreated: 0, rolePermissionsCreated: 0, rolePermissionsRemoved: 0 });
+  await seedReferenceData(prisma);
+  const previousSeedFlag = process.env.SEED_TEST_PERSONAS;
+  process.env.SEED_TEST_PERSONAS = 'true';
+  await createTestPersonas(prisma, await bcrypt.hash(password, 10));
+  process.env.SEED_TEST_PERSONAS = previousSeedFlag;
+
+  const employeeRole = await prisma.role.findUniqueOrThrow({ where: { code: 'EMPLOYEE' } });
+  const testDepartment = await prisma.department.findUniqueOrThrow({ where: { code: 'RBAC_TEST' } });
+  const blockedUser = await prisma.user.create({
+    data: {
+      email: 'rbac.blocked@example.invalid', passwordHash: await bcrypt.hash(blockedPassword, 10),
+      isActive: true, localLoginEnabled: true,
+      roles: { create: { roleId: employeeRole.id, reason: 'Missing-approver integration persona' } },
+      employee: {
+        create: {
+          employeeCode: 'RBAC-BLOCKED', firstName: 'Blocked', lastName: 'Persona', email: 'rbac.blocked@example.invalid',
+          hireDate: new Date('2026-01-01T00:00:00.000Z'), salary: '10000.00', departmentId: testDepartment.id,
+        },
+      },
+    },
+    include: { employee: true },
+  });
+
+  await mkdir(storageDirectory, { recursive: true });
+  const serverEnvironment = {
+    ...process.env,
+    DATABASE_URL: databaseUrl,
+    PORT: String(port),
+    NODE_ENV: 'test',
+    CORS_ORIGIN: '',
+    JWT_SECRET: 'integration-jwt-secret-'.padEnd(64, 'x'),
+    AUDIT_HMAC_KEY: 'integration-audit-secret-'.padEnd(64, 'y'),
+    JWT_EXPIRES_IN: '2h',
+    BCRYPT_SALT_ROUNDS: '10',
+    DOCUMENT_STORAGE_ADAPTER: 'filesystem-test',
+    TEST_STORAGE_DIRECTORY: storageDirectory,
+    GCS_DOCUMENTS_BUCKET: '',
+    MICROSOFT_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+    MICROSOFT_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+    MICROSOFT_CLIENT_SECRET: 'integration-client-secret-value',
+    MICROSOFT_REDIRECT_URI: `http://127.0.0.1:${port}/api/v1/auth/microsoft/callback`,
+  };
+  child = spawn(process.execPath, ['dist/main'], { cwd: backendDirectory, env: serverEnvironment, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.on('data', (chunk) => serverOutput.push(String(chunk)));
+  child.stderr.on('data', (chunk) => serverOutput.push(String(chunk)));
+  await waitForServer(child, serverOutput);
 
   const sessions = {};
-  for (const role of ['EMPLOYEE', 'LINE_MANAGER', 'DEPARTMENT_HEAD', 'HR_OFFICER', 'HR_MANAGER', 'PAYROLL_OFFICER', 'AUDITOR', 'SYSTEM_ADMIN']) {
-    sessions[role] = await login(role);
-    const me = await request('/auth/me', {}, sessions[role]);
-    assert.equal(me.status, 200, `${role} must be able to restore its own session`);
-    assert.ok(me.data.user.roles.includes(role));
+  for (const role of roles) {
+    sessions[role] = await loginRole(role);
+    const restored = await api('/auth/me', {}, sessions[role]);
+    assert.equal(restored.status, 200);
+    assert.equal(restored.data.user.roles.includes(role), true);
+    assert.equal(Object.hasOwn(restored.data.user, 'passwordHash'), false);
+  }
+  const blocked = await login('rbac.blocked@example.invalid', blockedPassword);
+
+  assert.equal((await api('/employees/me', {}, sessions.EMPLOYEE)).status, 200);
+  assert.equal((await api('/system/users', {}, sessions.EMPLOYEE)).status, 403);
+  assert.equal((await api('/system/users', {}, sessions.HR)).status, 403);
+  assert.equal((await api('/system/users?limit=100', {}, sessions.ADMIN)).status, 200);
+  for (const role of ['CPO', 'COO', 'ADMIN']) {
+    assert.equal((await api('/payroll/runs', {}, sessions[role])).status, 200);
+    assert.equal((await mutate('/payroll/runs', sessions[role], { year: 2098, month: 6 })).status, 403);
   }
 
-  assert.equal((await request('/employees/me', {}, sessions.EMPLOYEE)).status, 200);
-  assert.equal((await request('/system/users', {}, sessions.EMPLOYEE)).status, 403);
-  assert.equal((await request('/payroll', {}, sessions.HR_MANAGER)).status, 403, 'HR_MANAGER must not receive payroll access');
-  assert.equal((await request('/employees', {}, sessions.PAYROLL_OFFICER)).status, 403, 'PAYROLL_OFFICER must not receive HR employee access');
-  assert.equal((await request('/system/users', {}, sessions.PAYROLL_OFFICER)).status, 403);
-  assert.equal((await request('/payroll', {}, sessions.PAYROLL_OFFICER)).status, 200);
-  assert.equal((await request('/audit-events', {}, sessions.AUDITOR)).status, 200);
-  assert.equal((await request('/system/users', {}, sessions.AUDITOR)).status, 403);
-  assert.equal((await request('/system/users', {}, sessions.SYSTEM_ADMIN)).status, 200);
-  assert.equal((await request('/payroll', {}, sessions.SYSTEM_ADMIN)).status, 403, 'SYSTEM_ADMIN must not bypass payroll permissions');
-  assert.equal((await request('/employees', {}, sessions.SYSTEM_ADMIN)).status, 403, 'SYSTEM_ADMIN must not bypass HR permissions');
-
-  const registeredEmail = `rbac.registered.${Date.now()}@example.invalid`;
-  const registeredPassword = 'RegisteredTest123!';
-  const registered = await request('/auth/register', {
-    method: 'POST', body: JSON.stringify({ email: registeredEmail, password: registeredPassword }),
-  }, sessions.SYSTEM_ADMIN);
-  assert.equal(registered.status, 201, JSON.stringify(registered.payload));
-  assert.equal(Object.hasOwn(registered.data, 'passwordHash'), false);
-  const registeredLogin = await request('/auth/login', {
-    method: 'POST', body: JSON.stringify({ email: registeredEmail, password: registeredPassword }),
-  });
-  assert.equal(registeredLogin.status, 201);
-  const registeredSession = { cookie: registeredLogin.cookie, csrf: registeredLogin.data.csrfToken };
-  const registeredMe = await request('/auth/me', {}, registeredSession);
-  assert.equal(registeredMe.status, 200);
-  assert.deepEqual(registeredMe.data.user.roles, ['EMPLOYEE']);
-
-  const managerEmployees = await request('/employees?limit=100', {}, sessions.LINE_MANAGER);
+  const managerEmployees = await api('/employees?limit=100', {}, sessions.LINE_MANAGER);
   assert.equal(managerEmployees.status, 200);
-  for (const employee of managerEmployees.data) assertNoSensitiveManagerFields(employee);
-  const departmentEmployees = await request('/employees?limit=100', {}, sessions.DEPARTMENT_HEAD);
-  for (const employee of departmentEmployees.data) assertNoSensitiveManagerFields(employee);
+  managerEmployees.data.forEach(assertManagerProjection);
+  const managementEmployees = await api('/employees?limit=100', {}, sessions.MANAGER);
+  assert.equal(managementEmployees.status, 200);
+  managementEmployees.data.forEach(assertManagerProjection);
+  assert.equal((await api(`/employees/${sessions.HR.user.employeeId}`, {}, sessions.EMPLOYEE)).status, 404);
+  assert.equal((await api(`/employees/${sessions.EMPLOYEE.user.employeeId}`, { method: 'PUT', body: {} }, sessions.HR)).status, 404);
+  assert.equal((await api('/employees', {
+    method: 'POST', body: {
+      employeeCode: 'MASS-ASSIGN', firstName: 'Mass', lastName: 'Assign', email: 'mass@example.invalid',
+      hireDate: '2026-01-01', roles: ['SUPER_ADMIN'],
+    },
+  }, sessions.HR)).status, 400);
 
-  const hrEmployees = await request('/employees?limit=100', {}, sessions.HR_MANAGER);
-  assert.equal(hrEmployees.status, 200);
-  for (const employee of hrEmployees.data) {
-    assert.equal(Object.hasOwn(employee, 'salary'), false, 'HR_MANAGER must not load salary');
-    assert.equal(Object.hasOwn(employee, 'bankAccount'), false, 'HR_MANAGER must not load bank details');
-  }
-  const hrOfficerEmployees = await request('/employees?limit=100', {}, sessions.HR_OFFICER);
-  assert.equal(hrOfficerEmployees.status, 200);
-  const operationallySensitiveFields = ['dateOfBirth', 'gender', 'address', 'emergencyContactName', 'emergencyContactPhone', 'profile', 'benefits', 'credentials', 'education', 'user'];
-  for (const employee of hrOfficerEmployees.data) {
-    for (const field of operationallySensitiveFields) assert.equal(Object.hasOwn(employee, field), false, `HR_OFFICER projection exposed ${field}`);
-  }
-  const auditorEmployees = await request('/employees?limit=100', {}, sessions.AUDITOR);
-  assert.equal(auditorEmployees.status, 200);
-  for (const employee of auditorEmployees.data) assertNoSensitiveManagerFields(employee);
-  const employeeId = sessions.EMPLOYEE.user.employeeId;
-  const hrManagerId = sessions.HR_MANAGER.user.employeeId;
-  assert.equal((await request(`/employees/${hrManagerId}`, {}, sessions.EMPLOYEE)).status, 404, 'employee ID substitution must not cross scope');
-  const substitutedLoans = await request(`/loans?employeeId=${hrManagerId}`, {}, sessions.EMPLOYEE);
-  assert.equal(substitutedLoans.status, 200);
-  assert.deepEqual(substitutedLoans.data, []);
+  const missingCsrf = await api('/auth/logout', { method: 'POST', csrf: false }, sessions.EMPLOYEE);
+  assert.equal(missingCsrf.status, 403);
+  assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 200);
 
-  const noCsrf = await request('/auth/logout', { method: 'POST', csrf: false }, sessions.EMPLOYEE);
-  assert.equal(noCsrf.status, 403, 'unsafe request without CSRF must fail');
-  assert.equal((await request('/auth/me', {}, sessions.EMPLOYEE)).status, 200);
+  const systemRoles = (await api('/system/roles', {}, sessions.ADMIN)).data;
+  const hrRole = systemRoles.find((role) => role.code === 'HR');
+  const lineManagerRole = systemRoles.find((role) => role.code === 'LINE_MANAGER');
+  const checkerCreated = await api('/system/users', {
+    method: 'POST',
+    body: {
+      email: 'rbac.checker@example.invalid', password: checkerPassword, localLoginEnabled: true, microsoftLoginEnabled: false,
+      roleIds: [hrRole.id, lineManagerRole.id], reason: 'Maker-checker integration account',
+    },
+  }, sessions.ADMIN);
+  assert.equal(checkerCreated.status, 201, JSON.stringify(checkerCreated.payload));
+  assert.equal(Object.hasOwn(checkerCreated.data, 'passwordHash'), false);
+  const checker = await login('rbac.checker@example.invalid', checkerPassword);
+  assert.deepEqual(checker.user.roles.sort(), ['HR', 'LINE_MANAGER']);
 
-  const leaveTypes = await request('/leave/types?limit=100', {}, sessions.HR_OFFICER);
+  const leaveTypes = await api('/leave/types?limit=100', {}, sessions.HR);
   assert.equal(leaveTypes.status, 200);
-  assert.ok(leaveTypes.data.length, 'at least one leave type is required for the integration workflow');
-  const leaveTypeId = leaveTypes.data[0].id;
-  for (const targetEmployeeId of [employeeId, hrManagerId]) {
-    const balance = await request('/leave/balances', {
-      method: 'POST', body: JSON.stringify({ employeeId: targetEmployeeId, leaveTypeId, year: 2099, totalDays: 20 }),
-    }, sessions.HR_OFFICER);
-    assert.ok([200, 201].includes(balance.status), JSON.stringify(balance.payload));
+  const annualLeave = leaveTypes.data.find((type) => type.code === 'ANNUAL');
+  for (const employeeId of [sessions.EMPLOYEE.user.employeeId, sessions.COO.user.employeeId, blockedUser.employee.id]) {
+    const balance = await api('/leave/balances', {
+      method: 'POST', body: { employeeId, leaveTypeId: annualLeave.id, year: 2099, totalDays: 30 },
+    }, sessions.HR);
+    assert.equal(balance.status, 201, JSON.stringify(balance.payload));
   }
-  const createdLeave = await request('/leave/requests', {
-    method: 'POST', body: JSON.stringify({ leaveTypeId, startDate: '2099-04-10', endDate: '2099-04-11', reason: 'RBAC integration test' }),
-  }, sessions.EMPLOYEE);
-  assert.equal(createdLeave.status, 201);
-  assert.equal(createdLeave.data.status, 'PENDING_MANAGER');
-  const managerDecision = await request(`/leave/requests/${createdLeave.data.id}/decision`, {
-    method: 'POST', body: JSON.stringify({ status: 'APPROVED' }),
-  }, sessions.LINE_MANAGER);
-  assert.equal(managerDecision.status, 201);
-  assert.equal(managerDecision.data.status, 'PENDING_HR');
-  const hrDecision = await request(`/leave/requests/${createdLeave.data.id}/decision`, {
-    method: 'POST', body: JSON.stringify({ status: 'APPROVED' }),
-  }, sessions.HR_MANAGER);
-  assert.equal(hrDecision.status, 201);
-  assert.equal(hrDecision.data.status, 'APPROVED');
 
-  const ownHrLeave = await request('/leave/requests', {
-    method: 'POST', body: JSON.stringify({ employeeId: hrManagerId, leaveTypeId, startDate: '2099-05-10', endDate: '2099-05-10', reason: 'Self approval test' }),
-  }, sessions.HR_MANAGER);
-  assert.equal(ownHrLeave.status, 201);
-  assert.equal(ownHrLeave.data.status, 'PENDING_HR');
-  assert.equal((await request(`/leave/requests/${ownHrLeave.data.id}/decision`, {
-    method: 'POST', body: JSON.stringify({ status: 'APPROVED' }),
-  }, sessions.HR_MANAGER)).status, 403, 'self approval must fail regardless of role union');
+  const submitKey = idempotency('leave-submit');
+  const leaveBody = { leaveTypeId: annualLeave.id, startDate: '2099-04-10', endDate: '2099-04-11', reason: 'Integration workflow' };
+  const submitted = await mutate('/leave/submit', sessions.EMPLOYEE, leaveBody, submitKey);
+  assert.equal(submitted.status, 201);
+  assert.equal(submitted.data.status, 'PENDING_LINE_MANAGER');
+  const duplicateSubmit = await mutate('/leave/submit', sessions.EMPLOYEE, leaveBody, submitKey);
+  assert.equal(duplicateSubmit.status, 201);
+  assert.equal(duplicateSubmit.data.id, submitted.data.id);
+  assert.equal((await mutate(`/leave/${submitted.data.id}/approve`, sessions.EMPLOYEE, { expectedVersion: submitted.data.version })).status, 403);
 
-  const systemUsers = await request('/system/users?limit=100', {}, sessions.SYSTEM_ADMIN);
-  const auditor = systemUsers.data.find((item) => item.email === email('AUDITOR'));
-  const hrOfficer = systemUsers.data.find((item) => item.email === email('HR_OFFICER'));
-  const systemAdmin = systemUsers.data.find((item) => item.email === email('SYSTEM_ADMIN'));
-  const systemRoles = await request('/system/roles?limit=100', {}, sessions.SYSTEM_ADMIN);
-  const auditorRole = systemRoles.data.find((item) => item.code === 'AUDITOR');
-  assert.equal((await request(`/system/users/${systemAdmin.id}/roles`, {
-    method: 'PUT', body: JSON.stringify({ roleIds: systemAdmin.roles.map((item) => item.role.id), expectedAuthorizationVersion: systemAdmin.authorizationVersion, reason: 'Direct self-role bypass test' }),
-  }, sessions.SYSTEM_ADMIN)).status, 403, 'self-role assignment must fail through the real API');
-  assert.equal((await request(`/system/users/${systemAdmin.id}/status`, {
-    method: 'PATCH', body: JSON.stringify({ isActive: false, expectedAuthorizationVersion: systemAdmin.authorizationVersion, reason: 'Direct final-admin bypass test' }),
-  }, sessions.SYSTEM_ADMIN)).status, 403, 'self-disable must not bypass final-administrator protection');
-  const catalogue = await request('/system/permissions?limit=100', {}, sessions.SYSTEM_ADMIN);
-  const announcementRead = catalogue.data.find((item) => item.code === 'announcement.read');
-  const departmentRead = catalogue.data.find((item) => item.code === 'department.read');
-  const roleCode = `RBAC_TEST_${Date.now()}`;
-  const customRole = await request('/system/roles', {
-    method: 'POST', body: JSON.stringify({ code: roleCode, displayName: 'RBAC integration role', permissionIds: [announcementRead.id], reason: 'Integration role test' }),
-  }, sessions.SYSTEM_ADMIN);
-  assert.equal(customRole.status, 201);
-  const assignment = await request(`/system/users/${auditor.id}/roles`, {
-    method: 'PUT', body: JSON.stringify({ roleIds: [auditorRole.id, customRole.data.id], expectedAuthorizationVersion: auditor.authorizationVersion, reason: 'Integration assignment test' }),
-  }, sessions.SYSTEM_ADMIN);
-  assert.equal(assignment.status, 200);
-  assert.equal((await request('/auth/me', {}, sessions.AUDITOR)).status, 401, 'role assignment must revoke existing sessions');
-  const auditorAfterAssignment = await login('AUDITOR');
-  const permissionChange = await request(`/system/roles/${customRole.data.id}/permissions`, {
-    method: 'PUT', body: JSON.stringify({ permissionIds: [announcementRead.id, departmentRead.id], expectedVersion: customRole.data.version, reason: 'Integration permission invalidation test' }),
-  }, sessions.SYSTEM_ADMIN);
-  assert.equal(permissionChange.status, 200);
-  assert.equal((await request('/auth/me', {}, auditorAfterAssignment)).status, 401, 'role permission changes must revoke affected sessions');
-
-  const disable = await request(`/system/users/${hrOfficer.id}/status`, {
-    method: 'PATCH', body: JSON.stringify({ isActive: false, expectedAuthorizationVersion: hrOfficer.authorizationVersion, reason: 'Integration disable test' }),
-  }, sessions.SYSTEM_ADMIN);
-  assert.equal(disable.status, 200);
-  assert.equal((await request('/auth/me', {}, sessions.HR_OFFICER)).status, 401, 'disabled account session must fail');
-  const enable = await request(`/system/users/${hrOfficer.id}/status`, {
-    method: 'PATCH', body: JSON.stringify({ isActive: true, expectedAuthorizationVersion: disable.data.authorizationVersion, reason: 'Integration restore test' }),
-  }, sessions.SYSTEM_ADMIN);
-  assert.equal(enable.status, 200);
-
-  const administrativelyRevoked = await login('EMPLOYEE');
-  assert.equal((await request(`/system/sessions/${administrativelyRevoked.user.sessionId}/revoke`, {
-    method: 'POST', body: JSON.stringify({ reason: 'Integration administrative revocation test' }),
-  }, sessions.SYSTEM_ADMIN)).status, 201);
-  assert.equal((await request('/auth/me', {}, administrativelyRevoked)).status, 401, 'administratively revoked session must fail');
-
-  const expired = await login('EMPLOYEE');
-  const expiryPrisma = new PrismaClient();
-  try {
-    await expiryPrisma.authSession.update({ where: { id: expired.user.sessionId }, data: { expiresAt: new Date(0) } });
-  } finally {
-    await expiryPrisma.$disconnect();
+  const managerInbox = await api('/approvals/inbox', {}, sessions.LINE_MANAGER);
+  assert.equal(managerInbox.status, 200);
+  assert.equal(managerInbox.data.leave.some((request) => request.id === submitted.data.id), true);
+  const competing = await Promise.all([
+    mutate(`/leave/${submitted.data.id}/approve`, sessions.LINE_MANAGER, { expectedVersion: submitted.data.version, reason: 'Approved' }, idempotency('line-a')),
+    mutate(`/leave/${submitted.data.id}/approve`, sessions.LINE_MANAGER, { expectedVersion: submitted.data.version, reason: 'Approved' }, idempotency('line-b')),
+  ]);
+  assert.equal(competing.filter((result) => result.status === 201).length, 1);
+  assert.equal(competing.some((result) => [400, 409].includes(result.status)), true);
+  let leave = competing.find((result) => result.status === 201).data;
+  assert.equal(leave.status, 'PENDING_MANAGER');
+  for (const [role, expected] of [['MANAGER', 'PENDING_HR'], ['HR', 'PENDING_CPO'], ['CPO', 'PENDING_COO'], ['COO', 'APPROVED']]) {
+    const result = await mutate(`/leave/${leave.id}/approve`, sessions[role], { expectedVersion: leave.version, reason: `${role} approval` });
+    assert.equal(result.status, 201, JSON.stringify(result.payload));
+    leave = result.data;
+    assert.equal(leave.status, expected);
   }
-  assert.equal((await request('/auth/me', {}, expired)).status, 401, 'expired database session must fail');
+  const hrIdentity = await api('/auth/me', {}, sessions.HR);
+  assert.equal(hrIdentity.data.user.permissions.includes('leave.hr.read'), true, JSON.stringify(hrIdentity.data.user.permissions));
+  const balanceAfterApproval = await api(`/leave/balances?employeeId=${sessions.EMPLOYEE.user.employeeId}&year=2099`, {}, sessions.HR);
+  assert.equal(balanceAfterApproval.status, 200, JSON.stringify(balanceAfterApproval.payload));
+  const balanceRecord = balanceAfterApproval.data.find((record) => record.leaveTypeId === annualLeave.id);
+  assert.ok(balanceRecord, `Approved balance missing from API response: ${JSON.stringify(balanceAfterApproval.payload)}`);
+  assert.equal(String(balanceRecord.usedDays), '2');
+  assert.equal(String(balanceRecord.pendingDays), '0');
 
-  const employeeSecond = await login('EMPLOYEE');
-  assert.equal((await request('/auth/logout', { method: 'POST' }, sessions.EMPLOYEE)).status, 200);
-  assert.equal((await request('/auth/me', {}, sessions.EMPLOYEE)).status, 401);
-  assert.equal((await request('/auth/me', {}, employeeSecond)).status, 200, 'current logout must not revoke another session');
-  assert.equal((await request('/auth/logout-all', { method: 'POST' }, employeeSecond)).status, 200);
-  assert.equal((await request('/auth/me', {}, employeeSecond)).status, 401);
+  const cooLeave = await mutate('/leave/submit', sessions.COO, {
+    leaveTypeId: annualLeave.id, startDate: '2099-05-10', endDate: '2099-05-10', reason: 'Protected self approval',
+  });
+  assert.equal(cooLeave.status, 201);
+  assert.equal(cooLeave.data.status, 'PENDING_COO');
+  assert.equal((await mutate(`/leave/${cooLeave.data.id}/approve`, sessions.COO, { expectedVersion: cooLeave.data.version })).status, 403);
+  await prisma.authSession.update({ where: { id: sessions.COO.user.sessionId }, data: { reauthenticatedAt: new Date(0) } });
+  assert.equal((await mutate(`/leave/${cooLeave.data.id}/self-approve`, sessions.COO, { expectedVersion: cooLeave.data.version }, idempotency('stale-step-up'))).status, 403);
+  assert.equal((await api('/auth/step-up/local', { method: 'POST', body: { password } }, sessions.COO)).status, 200);
+  const selfApproved = await mutate(`/leave/${cooLeave.data.id}/self-approve`, sessions.COO, { expectedVersion: cooLeave.data.version, reason: 'COO protected self approval' });
+  assert.equal(selfApproved.status, 201);
+  assert.equal(selfApproved.data.status, 'APPROVED');
+
+  const blockedLeave = await mutate('/leave/submit', blocked, {
+    leaveTypeId: annualLeave.id, startDate: '2099-06-10', endDate: '2099-06-10', reason: 'Missing approver test',
+  });
+  assert.equal(blockedLeave.status, 201);
+  assert.equal(blockedLeave.data.status, 'BLOCKED_APPROVER_MISSING');
+
+  const certificate = await mutate('/service-requests', sessions.EMPLOYEE, {
+    requestType: 'SALARY_CERTIFICATE', requesterComment: 'Employment confirmation',
+  });
+  assert.equal(certificate.status, 201);
+  assert.equal((await api(`/service-requests/${certificate.data.id}/download`, {}, sessions.EMPLOYEE)).status, 404);
+  let serviceRequest = certificate.data;
+  for (const [action, expected] of [['review', 'IN_HR_REVIEW'], ['generate', 'GENERATED'], ['submit-approval', 'PENDING_HR_APPROVAL']]) {
+    const result = await mutate(`/service-requests/${serviceRequest.id}/${action}`, sessions.HR, { expectedVersion: serviceRequest.version, reason: `${action} integration` });
+    assert.equal(result.status, 201, JSON.stringify(result.payload));
+    serviceRequest = result.data;
+    assert.equal(serviceRequest.status, expected);
+    assert.doesNotMatch(JSON.stringify(serviceRequest), /objectName|objectGeneration/);
+  }
+  assert.equal((await mutate(`/service-requests/${serviceRequest.id}/approve`, sessions.HR, { expectedVersion: serviceRequest.version })).status, 403);
+  const certificateApproved = await mutate(`/service-requests/${serviceRequest.id}/approve`, checker, { expectedVersion: serviceRequest.version, reason: 'Independent HR approval' });
+  assert.equal(certificateApproved.status, 201);
+  serviceRequest = certificateApproved.data;
+  const certificatePublished = await mutate(`/service-requests/${serviceRequest.id}/publish`, sessions.HR, { expectedVersion: serviceRequest.version, reason: 'Publish approved certificate' });
+  assert.equal(certificatePublished.status, 201);
+  const certificateDownload = await api(`/service-requests/${serviceRequest.id}/download`, {}, sessions.EMPLOYEE);
+  assert.equal(certificateDownload.status, 200);
+  assert.equal(certificateDownload.contentType.includes('application/pdf'), true);
+  assert.equal(certificateDownload.buffer.subarray(0, 4).toString(), '%PDF');
+  assert.equal((await mutate(`/service-requests/${serviceRequest.id}/generate`, sessions.HR, { expectedVersion: certificatePublished.data.version })).status, 400);
+  assert.equal(await prisma.generatedDocumentVersion.count({ where: { requestId: serviceRequest.id } }), 1);
+  assert.equal((await mutate(`/service-requests/${serviceRequest.id}/approve`, sessions.ADMIN, { expectedVersion: certificatePublished.data.version })).status, 403);
+
+  const documentBody = new FormData();
+  documentBody.set('employeeId', sessions.EMPLOYEE.user.employeeId);
+  documentBody.set('documentType', 'Identity document');
+  documentBody.set('visibility', 'EMPLOYEE_ONLY');
+  documentBody.set('file', new Blob([Buffer.from('%PDF-1.4\n%%EOF')], { type: 'application/pdf' }), 'identity.pdf');
+  const uploadedDocument = await api('/documents/upload', { method: 'POST', body: documentBody }, sessions.EMPLOYEE);
+  assert.equal(uploadedDocument.status, 201, JSON.stringify(uploadedDocument.payload));
+  assert.doesNotMatch(JSON.stringify(uploadedDocument.data), /objectName|objectGeneration/);
+  assert.equal((await api(`/documents/${uploadedDocument.data.id}/content`, {}, sessions.EMPLOYEE)).status, 200);
+
+  const absent = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-02', status: 'ABSENT' } }, sessions.HR);
+  const halfDay = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-03', status: 'HALF_DAY' } }, sessions.HR);
+  assert.equal(absent.status, 201); assert.equal(halfDay.status, 201);
+  const loan = await api('/loans', {
+    method: 'POST', body: {
+      employeeId: sessions.EMPLOYEE.user.employeeId, type: 'Salary advance', principal: '1200.00', disbursementDate: '2098-05-01',
+      startYear: 2098, startMonth: 6, repaymentMode: 'DURATION', termMonths: 12, monthlyLimit: '0',
+    },
+  }, sessions.HR);
+  assert.equal(loan.status, 201);
+  assert.equal((await api(`/loans/${loan.data.id}/activate`, { method: 'PATCH' }, sessions.HR)).status, 200);
+
+  let payroll = await mutate('/payroll/runs', sessions.HR, { year: 2098, month: 6, employeeId: sessions.EMPLOYEE.user.employeeId });
+  assert.equal(payroll.status, 201, JSON.stringify(payroll.payload));
+  assert.equal(String(payroll.data.payrolls[0].grossPay), '10000');
+  assert.equal(String(payroll.data.payrolls[0].deductions), '600');
+  assert.equal(String(payroll.data.payrolls[0].netPay), '9400');
+  const unpublishedPayslips = await api('/payroll/payslips/me?year=2098&month=6', {}, sessions.EMPLOYEE);
+  assert.equal(unpublishedPayslips.status, 200, JSON.stringify(unpublishedPayslips.payload));
+  assert.equal(unpublishedPayslips.data.length, 0);
+  payroll = await mutate(`/payroll/runs/${payroll.data.id}/submit`, sessions.HR, { expectedVersion: payroll.data.version, reason: 'Submit payroll' });
+  assert.equal(payroll.status, 201);
+  assert.equal((await mutate(`/payroll/runs/${payroll.data.id}/approve`, sessions.HR, { expectedVersion: payroll.data.version })).status, 403);
+  payroll = await mutate(`/payroll/runs/${payroll.data.id}/approve`, checker, { expectedVersion: payroll.data.version, reason: 'Independent payroll approval' });
+  assert.equal(payroll.status, 201);
+  payroll = await mutate(`/payroll/runs/${payroll.data.id}/publish`, sessions.HR, { expectedVersion: payroll.data.version, reason: 'Publish payroll' });
+  assert.equal(payroll.status, 201);
+  assert.equal(payroll.data.status, 'PUBLISHED');
+  assert.doesNotMatch(JSON.stringify(payroll.data), /objectName|objectGeneration|sha256/);
+  const myPayslips = await api('/payroll/payslips/me?year=2098&month=6', {}, sessions.EMPLOYEE);
+  assert.equal(myPayslips.status, 200);
+  assert.equal(myPayslips.data.length, 1);
+  const payslipDownload = await api(`/payroll/payslips/${myPayslips.data[0].id}/download`, {}, sessions.EMPLOYEE);
+  assert.equal(payslipDownload.status, 200);
+  assert.equal(payslipDownload.buffer.subarray(0, 4).toString(), '%PDF');
+  assert.equal((await api('/attendance/reports/summary?dateFrom=2098-06-01&dateTo=2098-06-30', {}, sessions.CPO)).status, 200);
+  assert.ok([400, 409].includes((await api(`/attendance/${absent.data.id}`, { method: 'PATCH', body: { status: 'PRESENT', correctionReason: 'Historical mutation attempt' } }, sessions.HR)).status));
+  const departments = await api('/payroll/departments', {}, sessions.HR);
+  const exportDepartment = departments.data.find((department) => department.id === testDepartment.id);
+  const departmentExport = await api(`/payroll/runs/${payroll.data.id}/export?departmentId=${exportDepartment.id}`, {}, sessions.HR);
+  assert.equal(departmentExport.status, 200);
+  assert.match(departmentExport.buffer.toString('utf8'), /RBAC-EMPLOYEE/);
+
+  const departmentA = await api('/departments', { method: 'POST', body: { name: 'Scoped A', code: `SCA${Date.now()}`.slice(0, 20) } }, sessions.ADMIN);
+  const departmentB = await api('/departments', { method: 'POST', body: { name: 'Scoped B', code: `SCB${Date.now()}`.slice(0, 20) } }, sessions.ADMIN);
+  assert.equal(departmentA.status, 201); assert.equal(departmentB.status, 201);
+  const permissionCatalogue = (await api('/system/permissions', {}, sessions.ADMIN)).data;
+  const departmentRead = permissionCatalogue.find((permission) => permission.code === 'department.read');
+  const announcementRead = permissionCatalogue.find((permission) => permission.code === 'announcement.read');
+  let systemUsers = (await api('/system/users?limit=100', {}, sessions.ADMIN)).data;
+  let employeeUser = systemUsers.find((entry) => entry.email === personaEmail('EMPLOYEE'));
+  const scopedGrant = await api(`/system/users/${employeeUser.id}/overrides`, {
+    method: 'POST', body: {
+      permissionId: departmentRead.id, effect: 'GRANT', scopeType: 'ALL_SYSTEM', scopeIds: [departmentA.data.id],
+      expectedAuthorizationVersion: employeeUser.authorizationVersion, reason: 'Scoped department integration grant',
+    },
+  }, sessions.ADMIN);
+  assert.equal(scopedGrant.status, 201);
+  assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 401);
+  sessions.EMPLOYEE = await loginRole('EMPLOYEE');
+  const scopedDepartments = await api('/departments?limit=100', {}, sessions.EMPLOYEE);
+  assert.deepEqual(scopedDepartments.data.map((department) => department.id), [departmentA.data.id]);
+  assert.equal((await api(`/departments/${departmentB.data.id}`, {}, sessions.EMPLOYEE)).status, 404);
+
+  systemUsers = (await api('/system/users?limit=100', {}, sessions.ADMIN)).data;
+  employeeUser = systemUsers.find((entry) => entry.email === personaEmail('EMPLOYEE'));
+  const directDeny = await api(`/system/users/${employeeUser.id}/overrides`, {
+    method: 'POST', body: {
+      permissionId: announcementRead.id, effect: 'DENY', scopeType: 'ALL_SYSTEM', scopeIds: [],
+      expectedAuthorizationVersion: employeeUser.authorizationVersion, reason: 'Direct deny precedence integration test',
+    },
+  }, sessions.ADMIN);
+  assert.equal(directDeny.status, 201);
+  sessions.EMPLOYEE = await loginRole('EMPLOYEE');
+  assert.equal((await api('/announcements', {}, sessions.EMPLOYEE)).status, 403);
+
+  const superAdminUser = systemUsers.find((entry) => entry.email === personaEmail('SUPER_ADMIN'));
+  const finalAdminAttempt = await api(`/system/users/${superAdminUser.id}/status`, {
+    method: 'PATCH', body: { isActive: false, expectedAuthorizationVersion: superAdminUser.authorizationVersion, reason: 'Final administrator protection test' },
+  }, sessions.ADMIN);
+  assert.equal(finalAdminAttempt.status, 400);
+
+  const secondEmployeeSession = await loginRole('EMPLOYEE');
+  const currentLogout = await api('/auth/logout', { method: 'POST' }, sessions.EMPLOYEE);
+  assert.equal(currentLogout.status, 200);
+  assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 401);
+  assert.equal((await api('/auth/me', {}, secondEmployeeSession)).status, 200);
+  assert.equal((await api('/auth/logout-all', { method: 'POST' }, secondEmployeeSession)).status, 200);
+  assert.equal((await api('/auth/me', {}, secondEmployeeSession)).status, 401);
+
+  const expiringSession = await loginRole('EMPLOYEE');
+  await prisma.authSession.update({ where: { id: expiringSession.user.sessionId }, data: { expiresAt: new Date(0) } });
+  assert.equal((await api('/auth/me', {}, expiringSession)).status, 401);
+  const revokableSession = await loginRole('EMPLOYEE');
+  assert.equal((await api(`/system/sessions/${revokableSession.user.sessionId}/revoke`, { method: 'POST', body: { reason: 'Administrative session revocation test' } }, sessions.ADMIN)).status, 201);
+  assert.equal((await api('/auth/me', {}, revokableSession)).status, 401);
+
+  const notifications = await api('/notifications?limit=100', {}, sessions.HR);
+  assert.equal(notifications.status, 200);
+  assert.ok(notifications.data.length > 0);
+  const auditList = await api('/audit/events?limit=100', {}, sessions.ADMIN);
+  assert.equal(auditList.status, 200);
+  assert.doesNotMatch(JSON.stringify(auditList.data), /CheckerPass123|BlockedPass123|IntegrationPass123/);
+  const chain = await api('/audit/events/verify-chain', {}, sessions.ADMIN);
+  assert.equal(chain.status, 200);
+  assert.equal(chain.data.valid, true, JSON.stringify(chain.data));
+  const auditEvent = await prisma.auditEvent.findFirstOrThrow({ orderBy: { sequence: 'asc' } });
+  await assert.rejects(prisma.auditEvent.update({ where: { id: auditEvent.id }, data: { reason: 'tamper' } }));
+  const auditExport = await api('/audit/events/exports', { method: 'POST', body: { format: 'CSV', exportReason: 'Integration audit export' } }, sessions.ADMIN);
+  assert.equal(auditExport.status, 201);
+  const auditDownload = await api(`/audit/events/exports/${auditExport.data.id}/download`, {}, sessions.ADMIN);
+  assert.equal(auditDownload.status, 200);
+  assert.match(auditDownload.buffer.toString('utf8'), /Resource Type/);
+  const policy = await api('/audit/events/policy', {}, sessions.ADMIN);
+  assert.equal(policy.status, 200);
+  const policyUpdate = await api('/audit/events/policy', {
+    method: 'POST', body: { enabled: false, retentionDays: 365, expectedVersion: policy.data.version, reason: 'Keep retention disabled in integration test' },
+  }, sessions.ADMIN);
+  assert.equal(policyUpdate.status, 201);
+  const hold = await api('/audit/events/legal-holds', { method: 'POST', body: { name: 'Integration hold', reason: 'Audit legal hold integration test', resourceType: 'PayrollRun', resourceId: payroll.data.id } }, sessions.ADMIN);
+  assert.equal(hold.status, 201);
+  assert.equal((await api(`/audit/events/legal-holds/${hold.data.id}/release`, { method: 'POST', body: { reason: 'Integration hold released' } }, sessions.ADMIN)).status, 201);
+
+  const databaseCounts = await Promise.all([
+    prisma.role.count({ where: { isBuiltIn: true } }),
+    prisma.permission.count({ where: { isDeprecated: false } }),
+    prisma.auditEvent.count(),
+  ]);
+  assert.deepEqual(databaseCounts.slice(0, 2), [8, require('../prisma/rbac-catalog.json').permissions.length]);
+  assert.ok(databaseCounts[2] > 30);
 });

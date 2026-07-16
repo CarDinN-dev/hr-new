@@ -23,6 +23,9 @@ import { AuditModule } from './modules/audit/audit.module';
 import { LoansModule } from './modules/loans/loans.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { SystemModule } from './modules/system/system.module';
+import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ApprovalsModule } from './modules/approvals/approvals.module';
 
 @Module({
   imports: [
@@ -40,6 +43,9 @@ import { SystemModule } from './modules/system/system.module';
     LoansModule,
     OperationsModule,
     SystemModule,
+    ServiceRequestsModule,
+    NotificationsModule,
+    ApprovalsModule,
     PayrollModule,
     PerformanceReviewsModule,
     DocumentsModule,

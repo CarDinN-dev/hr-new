@@ -1,13 +1,14 @@
 # HR ERP Backend
 
-NestJS API for the MedTech HR ERP using PostgreSQL, Prisma, JWT authentication, role-based access control, validation, centralized errors, and Docker.
+NestJS API for the MedTech HR ERP using PostgreSQL, Prisma, database-backed RBAC, auditable workflows, exact financial arithmetic, validation, centralized errors, and Docker.
 
 ## Stack
 
 - NestJS + TypeScript
 - PostgreSQL + Prisma ORM
-- JWT authentication with bcrypt password hashing
-- Role-based access control: `SUPER_ADMIN`, `HR_ADMIN`, `MANAGER`, `EMPLOYEE`
+- JWT authentication with bcrypt password hashing and revocable database sessions
+- Database-backed RBAC with `EMPLOYEE`, `LINE_MANAGER`, `MANAGER`, `HR`, `CPO`, `COO`, `ADMIN`, and `SUPER_ADMIN`
+- Scoped grants and direct permission overrides for self, reporting-tree, assigned-workflow, employee-wide, and system-wide access
 - DTO validation with `class-validator`
 - Swagger/OpenAPI at `/api/docs`
 - Helmet, CORS, global validation, response envelope, exception filter
@@ -17,7 +18,8 @@ NestJS API for the MedTech HR ERP using PostgreSQL, Prisma, JWT authentication, 
 ```powershell
 npm.cmd install
 Copy-Item .env.example .env
-# Set DATABASE_URL, JWT_SECRET, bootstrap passwords and CORS_ORIGIN.
+# Set DATABASE_URL, JWT_SECRET, AUDIT_HMAC_KEY, the initial administrator,
+# private document storage, and CORS_ORIGIN.
 npx.cmd prisma migrate dev
 npm.cmd run seed
 npm.cmd run start:dev
@@ -27,14 +29,7 @@ API base URL: `http://localhost:3000/api/v1`
 
 Swagger docs: `http://localhost:3000/api/docs` in development, or production only with `ENABLE_SWAGGER=true`.
 
-The manual bootstrap command creates these accounts only when they do not already exist:
-
-- `hr@med-tech.com`
-- `zahira@med-tech.com`
-- `kashif@med-tech.com`
-- `athul@med-tech.com`
-
-It does not reset passwords, roles, permissions, status, or employee records. Passwords must be supplied through the environment and must be 12-72 bytes with uppercase, lowercase, and number characters.
+The seed command synchronizes the permission catalogue and eight built-in roles. It creates one initial Super Administrator only when `INITIAL_SUPER_ADMIN_EMAIL` and `INITIAL_SUPER_ADMIN_PASSWORD` are supplied and no active Super Administrator exists. Test personas are created only when `SEED_TEST_PERSONAS=true`; production should leave it disabled. Passwords must be 12-72 bytes with uppercase, lowercase, and number characters.
 
 ## Environment
 
@@ -43,13 +38,14 @@ Create `.env` from `.env.example` and set:
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/hr_erp?schema=public
 JWT_SECRET=replace-with-a-long-random-secret
+AUDIT_HMAC_KEY=replace-with-a-separate-long-random-secret
 JWT_EXPIRES_IN=1d
 BCRYPT_SALT_ROUNDS=12
 CORS_ORIGIN=http://localhost:3000,http://localhost:5173
-HR_ADMIN_PASSWORD=replace-with-a-strong-password
-ZAHIRA_ADMIN_PASSWORD=replace-with-a-strong-password
-KASHIF_ADMIN_PASSWORD=replace-with-a-strong-password
-ATHUL_ADMIN_PASSWORD=replace-with-a-strong-password
+GCS_DOCUMENTS_BUCKET=replace-with-private-documents-bucket
+INITIAL_SUPER_ADMIN_EMAIL=admin@example.com
+INITIAL_SUPER_ADMIN_PASSWORD=replace-with-a-strong-bootstrap-password
+SEED_TEST_PERSONAS=false
 ```
 
 ## Docker
@@ -64,18 +60,30 @@ docker compose run --rm --env-from-file .env api npm run seed # first installati
 
 ## Core Routes
 
-- `POST /api/v1/auth/register` (HR administrator only)
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/sessions`
+- `POST /api/v1/auth/step-up/local`
+- `POST /api/v1/auth/logout-all`
 - `GET /api/v1/employees`
 - `GET /api/v1/employees/me`
 - `POST /api/v1/attendance/check-in`
 - `POST /api/v1/attendance/check-out`
 - `GET /api/v1/attendance/reports/summary`
-- `POST /api/v1/leave/requests`
-- `POST /api/v1/leave/requests/:id/decision`
-- `POST /api/v1/payroll/generate`
-- `GET /api/v1/payroll/payslip/:employeeId?year=2026&month=7`
+- `POST /api/v1/leave/submit`
+- `GET /api/v1/leave/mine`
+- `GET /api/v1/leave/inbox`
+- `POST /api/v1/leave/:id/approve`
+- `POST /api/v1/service-requests`
+- `GET /api/v1/service-requests/:id/download`
+- `POST /api/v1/payroll/runs`
+- `POST /api/v1/payroll/runs/:id/submit`
+- `POST /api/v1/payroll/runs/:id/publish`
+- `GET /api/v1/payroll/payslips/me`
+- `GET /api/v1/approvals/inbox`
+- `GET /api/v1/notifications`
+- `GET /api/v1/audit/events`
+- `GET /api/v1/system/roles`
 - `GET /api/v1/documents`
 - `GET /api/v1/announcements`
 
@@ -85,12 +93,13 @@ Every list endpoint supports pagination with `page`, `limit`, `search`, `sortBy`
 
 - Password hashes are never returned.
 - Failed-login throttles are persisted in PostgreSQL and enforced by account and client IP.
-- JWT sessions are revoked when a user logs out or a linked employee is removed.
-- JWT guard is global; only `@Public()` auth endpoints bypass it.
-- Role guard is global and uses `@Roles()` and `@Permissions()`.
-- Employee-scoped modules restrict regular employees to their own records.
-- Managers can access direct-report records only where the module allows it.
-- HR/admin roles can override employee scoping for operational workflows.
+- JWT sessions are individually revocable and invalidated when authorization or account state changes.
+- Authentication and permission guards are global and default-deny; only explicit `@Public()` health and authentication entry points bypass them.
+- Controllers declare exact permissions, while services independently enforce self, direct-report, management-tree, assigned-approval, employee-wide, and system-wide resource scopes.
+- Direct permission denies take precedence over grants except for the protected built-in Super Administrator.
+- Protected role assignment and workflow overrides require recent step-up authentication.
+- Sensitive transitions require optimistic versions and idempotency keys and commit with their audit events transactionally.
+- Audit records are redacted, HMAC hash-chained, and protected from database updates and deletion.
 - Document visibility supports `EMPLOYEE_ONLY`, `MANAGER_AND_HR`, `HR_ONLY`, and `PUBLIC`.
 
 ## Prisma

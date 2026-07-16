@@ -22,14 +22,14 @@ export class DepartmentsController {
 
   @Permissions('department.read')
   @Get()
-  list(@Query() query: QueryDepartmentsDto) {
-    return this.departmentsService.list(query);
+  list(@Query() query: QueryDepartmentsDto, @CurrentUser() user: RequestUser) {
+    return this.departmentsService.list(query, user);
   }
 
   @Permissions('department.read')
   @Get(':id')
-  findById(@Param('id') id: string) {
-    return this.departmentsService.findById(id);
+  findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.departmentsService.findById(id, user);
   }
 
   @Permissions('department.manage')

@@ -4,12 +4,17 @@ import { Request } from 'express';
 import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } from '../../common/decorators/permissions.decorator';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
+import { AuditAction, AuditOutcome } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuditAction } from '@prisma/client';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector, private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()]);
@@ -38,15 +43,21 @@ export class PermissionsGuard implements CanActivate {
   private async recordDenial(context: ExecutionContext, summary: string) {
     const request = context.switchToHttp().getRequest<Request & { user?: RequestUser; requestId?: string }>();
     if (!request.user) return;
-    await this.prisma.auditEvent.create({
-      data: {
-        actorUserId: request.user.id,
-        requestId: request.requestId,
-        action: AuditAction.ACCESS,
-        entityType: 'AuthorizationDenial',
-        entityId: request.path.slice(0, 500),
-        summary,
-      },
+    const actor = {
+      ...request.user,
+      requestId: request.requestId,
+      userAgent: request.get('user-agent')?.slice(0, 512) ?? null,
+      route: request.path.slice(0, 500),
+      httpMethod: request.method.slice(0, 16),
+    };
+    await this.audit.record(this.prisma, actor, {
+      action: AuditAction.ACCESS,
+      outcome: AuditOutcome.DENIED,
+      resourceType: 'AuthorizationDenial',
+      resourceId: request.path.slice(0, 500),
+      summary,
+      reason: summary,
     }).catch(() => undefined);
   }
+
 }

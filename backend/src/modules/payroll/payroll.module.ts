@@ -3,9 +3,10 @@ import { PayrollController } from './payroll.controller';
 import { PayrollService } from './payroll.service';
 import { SalaryRecordsController } from './salary-records.controller';
 import { LoansModule } from '../loans/loans.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [LoansModule],
+  imports: [LoansModule, DocumentsModule],
   controllers: [PayrollController, SalaryRecordsController],
   providers: [PayrollService],
 })

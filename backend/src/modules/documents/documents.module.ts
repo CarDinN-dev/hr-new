@@ -6,5 +6,6 @@ import { DocumentStorageService } from './document-storage.service';
 @Module({
   controllers: [DocumentsController],
   providers: [DocumentsService, DocumentStorageService],
+  exports: [DocumentStorageService],
 })
 export class DocumentsModule {}

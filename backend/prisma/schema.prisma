@@ -7,28 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum LegacyRole {
+enum RoleProtection {
+  STANDARD
+  PROTECTED
   SUPER_ADMIN
-  HR_ADMIN
-  MANAGER
-  EMPLOYEE
-
-  @@map("Role")
 }
 
-enum LegacyPermission {
-  EMPLOYEE_READ_ALL
-  EMPLOYEE_WRITE
-  ATTENDANCE_READ_ALL
-  ATTENDANCE_WRITE_ALL
-  LEAVE_APPROVE
-  PAYROLL_READ
-  PAYROLL_WRITE
-  DOCUMENT_READ_ALL
-  DOCUMENT_WRITE_ALL
-  ANNOUNCEMENT_WRITE
+enum PermissionOverrideEffect {
+  GRANT
+  DENY
+}
 
-  @@map("Permission")
+enum AccessScopeType {
+  SELF
+  DIRECT_REPORTS
+  MANAGEMENT_TREE
+  ASSIGNED_APPROVALS
+  ALL_EMPLOYEES
+  ALL_SYSTEM
 }
 
 enum Gender {
@@ -75,30 +71,100 @@ enum AttendanceApprovalStatus {
 }
 
 enum LeaveRequestStatus {
-  PENDING
+  PENDING_LINE_MANAGER
   PENDING_MANAGER
   PENDING_HR
+  PENDING_CPO
+  PENDING_COO
+  RETURNED_FOR_CORRECTION
+  BLOCKED_APPROVER_MISSING
   APPROVED
   REJECTED
   CANCELLED
 }
 
-enum LeaveDecisionStage {
+enum LeaveApprovalStage {
+  LINE_MANAGER
   MANAGER
   HR
+  CPO
+  COO
 }
 
-enum LeaveDecisionOutcome {
+enum LeaveRouteType {
+  STANDARD
+  CPO_TO_COO
+  COO_SELF
+}
+
+enum LeaveStepStatus {
+  PENDING
   APPROVED
   REJECTED
+  RETURNED
+  SKIPPED
+  REASSIGNED
 }
 
-enum PayrollStatus {
-  DRAFT
+enum LeaveDecisionType {
+  APPROVE
+  REJECT
+  RETURN
+  SELF_APPROVE
+  OVERRIDE
+  CANCEL
+  REASSIGN
+}
+
+enum WorkflowType {
+  LEAVE
+}
+
+enum ApproverMode {
+  PRIMARY_APPROVER
+  ANY_ONE
+  NAMED_POOL
+}
+
+enum PayrollRunStatus {
   GENERATED
+  PENDING_APPROVAL
   APPROVED
+  PUBLISHED
   PAID
   CANCELLED
+}
+
+enum ServiceRequestType {
+  SALARY_CERTIFICATE
+  EXPERIENCE_CERTIFICATE
+  CLEARANCE_CERTIFICATE
+}
+
+enum ServiceRequestStatus {
+  SUBMITTED
+  IN_HR_REVIEW
+  GENERATED
+  PENDING_HR_APPROVAL
+  APPROVED
+  PUBLISHED
+  REJECTED
+  CANCELLED
+  REVOKED
+}
+
+enum ServiceRequestEventType {
+  SUBMITTED
+  REVIEW_STARTED
+  GENERATED
+  SENT_FOR_APPROVAL
+  APPROVED
+  PUBLISHED
+  REJECTED
+  CANCELLED
+  REVOKED
+  REGENERATED
+  OVERRIDDEN
 }
 
 enum ReviewStatus {
@@ -194,6 +260,21 @@ enum AuditAction {
   ACCESS
   LOGIN
   LOGOUT
+  DOWNLOAD
+  EXPORT
+  OVERRIDE
+  REVOKE
+}
+
+enum AuditOutcome {
+  SUCCESS
+  DENIED
+  FAILED
+}
+
+enum AuditExportFormat {
+  CSV
+  PDF
 }
 
 enum ImportRunStatus {
@@ -210,44 +291,69 @@ enum ImportItemStatus {
 }
 
 model User {
-  id                   String             @id @default(uuid())
-  email                String             @unique
-  microsoftObjectId    String?            @unique
-  passwordHash         String
-  role                 LegacyRole         @default(EMPLOYEE) @map("role")
-  permissions          LegacyPermission[] @default([]) @map("permissions")
-  isActive             Boolean            @default(true)
-  sessionVersion       Int                @default(0)
-  authorizationVersion Int                @default(1)
-  rbacMigratedAt       DateTime?
-  employee             Employee?
-  auditEvents          AuditEvent[]
-  roles                UserRole[]         @relation("AssignedUserRoles")
-  rolesAssigned        UserRole[]         @relation("UserRoleAssigner")
-  rolesCreated         Role[]             @relation("RoleCreator")
-  permissionsAssigned  RolePermission[]   @relation("RolePermissionAssigner")
-  sessions             AuthSession[]
-  leaveDecisions       LeaveDecision[]
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  deletedAt            DateTime?
+  id                       String                      @id @default(uuid())
+  email                    String                      @unique
+  microsoftObjectId        String?                     @unique
+  passwordHash             String?
+  localLoginEnabled        Boolean                     @default(true)
+  microsoftLoginEnabled    Boolean                     @default(true)
+  isActive                 Boolean                     @default(true)
+  authorizationVersion     Int                         @default(1)
+  employee                 Employee?
+  auditEvents              AuditEvent[]
+  roles                    UserRole[]                  @relation("AssignedUserRoles")
+  rolesAssigned            UserRole[]                  @relation("UserRoleAssigner")
+  rolesCreated             Role[]                      @relation("RoleCreator")
+  permissionsAssigned      RolePermission[]            @relation("RolePermissionAssigner")
+  permissionOverrides      UserPermissionOverride[]    @relation("PermissionOverrideTarget")
+  permissionOverridesMade  UserPermissionOverride[]    @relation("PermissionOverrideAssigner")
+  sessions                 AuthSession[]
+  leaveRequests            LeaveRequest[]              @relation("LeaveRequester")
+  leaveDecisions           LeaveDecision[]
+  leaveStepAssignments     LeaveApprovalStepAssignee[] @relation("LeaveStepAssignee")
+  leaveStepDelegations     LeaveApprovalStepAssignee[] @relation("LeaveStepDelegatedFrom")
+  leaveStepsDecided        LeaveApprovalStep[]         @relation("LeaveStepDecider")
+  leaveDelegationsFrom     WorkflowDelegation[]        @relation("WorkflowDelegator")
+  leaveDelegationsTo       WorkflowDelegation[]        @relation("WorkflowDelegate")
+  leaveDelegationsCreated  WorkflowDelegation[]        @relation("WorkflowDelegationCreator")
+  workflowPolicies         WorkflowStagePolicy[]       @relation("WorkflowPrimaryApprover")
+  workflowPolicyMembership WorkflowStagePolicyMember[]
+  serviceRequests          ServiceRequest[]            @relation("ServiceRequester")
+  serviceRequestEvents     ServiceRequestEvent[]
+  generatedDocuments       GeneratedDocumentVersion[]  @relation("DocumentGenerator")
+  approvedDocuments        GeneratedDocumentVersion[]  @relation("DocumentApprover")
+  publishedDocuments       GeneratedDocumentVersion[]  @relation("DocumentPublisher")
+  revokedDocuments         GeneratedDocumentVersion[]  @relation("DocumentRevoker")
+  payrollRunsGenerated     PayrollRun[]                @relation("PayrollRunGenerator")
+  payrollRunsApproved      PayrollRun[]                @relation("PayrollRunApprover")
+  payrollRunsPublished     PayrollRun[]                @relation("PayrollRunPublisher")
+  payrollRunsPaid          PayrollRun[]                @relation("PayrollRunPayer")
+  payrollRunsCancelled     PayrollRun[]                @relation("PayrollRunCanceller")
+  payrollsRevoked          Payroll[]                   @relation("PayrollRevoker")
+  notifications            Notification[]
+  idempotencyRecords       IdempotencyRecord[]
+  auditExports             AuditExport[]
+  auditLegalHolds          AuditLegalHold[]
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  deletedAt                DateTime?
 
-  @@index([role])
   @@index([authorizationVersion])
   @@index([deletedAt])
 }
 
 model Role {
-  id          String   @id @default(uuid())
-  code        String   @unique @db.VarChar(100)
-  displayName String   @db.VarChar(160)
+  id          String         @id @default(uuid())
+  code        String         @unique @db.VarChar(100)
+  displayName String         @db.VarChar(160)
   description String?
-  isBuiltIn   Boolean  @default(false)
-  isActive    Boolean  @default(true)
-  version     Int      @default(1)
+  isBuiltIn   Boolean        @default(false)
+  protection  RoleProtection @default(STANDARD)
+  isActive    Boolean        @default(true)
+  version     Int            @default(1)
   createdById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   createdBy   User?            @relation("RoleCreator", fields: [createdById], references: [id], onDelete: SetNull)
   permissions RolePermission[]
@@ -259,15 +365,18 @@ model Role {
 }
 
 model Permission {
-  id          String   @id @default(uuid())
-  code        String   @unique @db.VarChar(160)
-  displayName String   @db.VarChar(200)
-  description String?
-  category    String   @db.VarChar(80)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  code         String   @unique @db.VarChar(160)
+  displayName  String   @db.VarChar(200)
+  description  String?
+  category     String   @db.VarChar(80)
+  isProtected  Boolean  @default(false)
+  isDeprecated Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  roles RolePermission[]
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
 
   @@index([category])
   @@map("RbacPermission")
@@ -280,9 +389,9 @@ model RolePermission {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  assignedBy   User?      @relation("RolePermissionAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  assignedBy User?      @relation("RolePermissionAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
 
   @@id([roleId, permissionId])
   @@index([permissionId])
@@ -310,6 +419,32 @@ model UserRole {
   @@index([assignedById])
 }
 
+model UserPermissionOverride {
+  id            String                   @id @default(uuid())
+  userId        String
+  permissionId  String
+  effect        PermissionOverrideEffect
+  scopeType     AccessScopeType
+  scopeIds      String[]                 @default([])
+  reason        String
+  startsAt      DateTime                 @default(now())
+  expiresAt     DateTime?
+  assignedById  String
+  revokedAt     DateTime?
+  revokedReason String?
+  version       Int                      @default(1)
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  user       User       @relation("PermissionOverrideTarget", fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  assignedBy User       @relation("PermissionOverrideAssigner", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt, startsAt, expiresAt])
+  @@index([permissionId, effect])
+  @@index([assignedById])
+}
+
 model AuthSession {
   id                   String    @id @default(uuid())
   userId               String
@@ -319,6 +454,7 @@ model AuthSession {
   ipHash               String?   @db.VarChar(64)
   userAgent            String?   @db.VarChar(512)
   createdAt            DateTime  @default(now())
+  reauthenticatedAt    DateTime  @default(now())
   lastSeenAt           DateTime  @default(now())
   expiresAt            DateTime
   revokedAt            DateTime?
@@ -373,11 +509,9 @@ model Employee {
   attendanceRecords     Attendance[]
   leaveBalances         LeaveBalance[]
   leaveRequests         LeaveRequest[]          @relation("EmployeeLeaveRequests")
-  managedLeaveRequests  LeaveRequest[]          @relation("LeaveManager")
-  approvedLeaveRequests LeaveRequest[]          @relation("LeaveApprover")
   salaryRecords         SalaryRecord[]
   payrolls              Payroll[]               @relation("EmployeePayrolls")
-  approvedPayrolls      Payroll[]               @relation("PayrollApprover")
+  serviceRequests       ServiceRequest[]        @relation("ServiceRequestSubject")
   performanceReviews    PerformanceReview[]     @relation("ReviewSubject")
   reviewsGiven          PerformanceReview[]     @relation("ReviewReviewer")
   documents             EmployeeDocument[]      @relation("EmployeeDocuments")
@@ -529,54 +663,169 @@ model LeaveBalance {
 }
 
 model LeaveRequest {
-  id              String             @id @default(uuid())
-  employeeId      String
-  leaveTypeId     String
-  startDate       DateTime
-  endDate         DateTime
-  totalDays       Decimal            @db.Decimal(5, 2)
-  isHalfDay       Boolean            @default(false)
-  reason          String?
-  status          LeaveRequestStatus
-  managerId       String?
-  approvedById    String?
-  approvedAt      DateTime?
-  rejectionReason String?
-  version         Int                @default(1)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  deletedAt       DateTime?
+  id                         String              @id @default(uuid())
+  requesterUserId            String
+  employeeId                 String
+  leaveTypeId                String
+  startDate                  DateTime
+  endDate                    DateTime
+  totalDays                  Decimal             @db.Decimal(5, 2)
+  isHalfDay                  Boolean             @default(false)
+  reason                     String?
+  status                     LeaveRequestStatus
+  routeType                  LeaveRouteType
+  currentStage               LeaveApprovalStage?
+  workflowVersion            Int                 @default(1)
+  requesterRoleCodesSnapshot String[]            @default([])
+  managerChainSnapshot       String[]            @default([])
+  departmentIdSnapshot       String?
+  finalDecisionAt            DateTime?
+  rejectionReason            String?
+  version                    Int                 @default(1)
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  deletedAt                  DateTime?
 
-  employee   Employee  @relation("EmployeeLeaveRequests", fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType  LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
-  manager    Employee? @relation("LeaveManager", fields: [managerId], references: [id], onDelete: SetNull)
-  approvedBy Employee? @relation("LeaveApprover", fields: [approvedById], references: [id], onDelete: SetNull)
-  decisions  LeaveDecision[]
+  requester User                @relation("LeaveRequester", fields: [requesterUserId], references: [id], onDelete: Restrict)
+  employee  Employee            @relation("EmployeeLeaveRequests", fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType LeaveType           @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  steps     LeaveApprovalStep[]
+  decisions LeaveDecision[]
 
-  @@index([employeeId])
+  @@index([requesterUserId])
+  @@index([employeeId, createdAt])
   @@index([leaveTypeId])
-  @@index([managerId])
-  @@index([approvedById])
-  @@index([status])
+  @@index([status, currentStage])
   @@index([deletedAt])
 }
 
+model LeaveApprovalStep {
+  id                  String             @id @default(uuid())
+  requestId           String
+  workflowVersion     Int
+  sequence            Int
+  stage               LeaveApprovalStage
+  assignedRoleCode    String
+  status              LeaveStepStatus    @default(PENDING)
+  decidedByUserId     String?
+  decidedAt           DateTime?
+  decisionType        LeaveDecisionType?
+  reason              String?
+  selfApprovalAllowed Boolean            @default(false)
+  isSelfApproval      Boolean            @default(false)
+  replacesStepId      String?
+  version             Int                @default(1)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  request      LeaveRequest                @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  decidedBy    User?                       @relation("LeaveStepDecider", fields: [decidedByUserId], references: [id], onDelete: Restrict)
+  assignees    LeaveApprovalStepAssignee[]
+  decisions    LeaveDecision[]
+  replacesStep LeaveApprovalStep?          @relation("LeaveStepReplacement", fields: [replacesStepId], references: [id], onDelete: Restrict)
+  replacements LeaveApprovalStep[]         @relation("LeaveStepReplacement")
+
+  @@unique([requestId, workflowVersion, sequence])
+  @@index([requestId, status])
+  @@index([stage, status])
+  @@index([decidedByUserId])
+}
+
+model LeaveApprovalStepAssignee {
+  id                  String    @id @default(uuid())
+  stepId              String
+  userId              String
+  delegatedFromUserId String?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  revokedAt           DateTime?
+
+  step          LeaveApprovalStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  user          User              @relation("LeaveStepAssignee", fields: [userId], references: [id], onDelete: Restrict)
+  delegatedFrom User?             @relation("LeaveStepDelegatedFrom", fields: [delegatedFromUserId], references: [id], onDelete: Restrict)
+
+  @@unique([stepId, userId])
+  @@index([userId, isActive])
+  @@index([delegatedFromUserId])
+}
+
 model LeaveDecision {
-  id          String               @id @default(uuid())
-  requestId   String
-  actorUserId String
-  stage       LeaveDecisionStage
-  outcome     LeaveDecisionOutcome
-  fromStatus  LeaveRequestStatus
-  toStatus    LeaveRequestStatus
-  reason      String?
-  createdAt   DateTime             @default(now())
+  id             String              @id @default(uuid())
+  requestId      String
+  stepId         String?
+  actorUserId    String
+  stage          LeaveApprovalStage?
+  decisionType   LeaveDecisionType
+  fromStatus     LeaveRequestStatus
+  toStatus       LeaveRequestStatus
+  reason         String?
+  idempotencyKey String?             @db.VarChar(128)
+  isOverride     Boolean             @default(false)
+  isSelfApproval Boolean             @default(false)
+  createdAt      DateTime            @default(now())
 
-  request LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  actor   User         @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  request LeaveRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  step    LeaveApprovalStep? @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  actor   User               @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
 
+  @@unique([actorUserId, idempotencyKey])
   @@index([requestId, createdAt])
+  @@index([stepId])
   @@index([actorUserId, createdAt])
+}
+
+model WorkflowStagePolicy {
+  id            String             @id @default(uuid())
+  workflowType  WorkflowType
+  stage         LeaveApprovalStage
+  mode          ApproverMode
+  primaryUserId String?
+  version       Int                @default(1)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  primaryUser User?                       @relation("WorkflowPrimaryApprover", fields: [primaryUserId], references: [id], onDelete: Restrict)
+  members     WorkflowStagePolicyMember[]
+
+  @@unique([workflowType, stage])
+  @@index([primaryUserId])
+}
+
+model WorkflowStagePolicyMember {
+  id        String   @id @default(uuid())
+  policyId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  policy WorkflowStagePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  user   User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([policyId, userId])
+  @@index([userId])
+}
+
+model WorkflowDelegation {
+  id              String             @id @default(uuid())
+  workflowType    WorkflowType
+  stage           LeaveApprovalStage
+  delegatorUserId String
+  delegateUserId  String
+  startsAt        DateTime
+  endsAt          DateTime
+  reason          String
+  createdById     String
+  revokedAt       DateTime?
+  version         Int                @default(1)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  delegator User @relation("WorkflowDelegator", fields: [delegatorUserId], references: [id], onDelete: Restrict)
+  delegate  User @relation("WorkflowDelegate", fields: [delegateUserId], references: [id], onDelete: Restrict)
+  createdBy User @relation("WorkflowDelegationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([workflowType, stage, startsAt, endsAt, revokedAt])
+  @@index([delegatorUserId])
+  @@index([delegateUserId])
 }
 
 model SalaryRecord {
@@ -601,38 +850,78 @@ model SalaryRecord {
   @@index([deletedAt])
 }
 
-model Payroll {
-  id           String        @id @default(uuid())
-  employeeId   String
-  year         Int
-  month        Int
-  baseSalary   Decimal       @db.Decimal(12, 2)
-  allowances   Decimal       @default(0) @db.Decimal(12, 2)
-  deductions   Decimal       @default(0) @db.Decimal(12, 2)
-  bonuses      Decimal       @default(0) @db.Decimal(12, 2)
-  taxAmount    Decimal       @default(0) @db.Decimal(12, 2)
-  grossPay     Decimal       @db.Decimal(12, 2)
-  netPay       Decimal       @db.Decimal(12, 2)
-  status       PayrollStatus @default(GENERATED)
-  approvedById String?
-  approvedAt   DateTime?
-  paidAt       DateTime?
-  generatedAt  DateTime      @default(now())
-  version      Int           @default(1)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  deletedAt    DateTime?
+model PayrollRun {
+  id                 String           @id @default(uuid())
+  year               Int
+  month              Int
+  revision           Int              @default(1)
+  status             PayrollRunStatus @default(GENERATED)
+  generatedByUserId  String
+  generatedAt        DateTime         @default(now())
+  approvedByUserId   String?
+  approvedAt         DateTime?
+  publishedByUserId  String?
+  publishedAt        DateTime?
+  paidByUserId       String?
+  paidAt             DateTime?
+  cancelledByUserId  String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  correctionOfId     String?
+  version            Int              @default(1)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
-  employee       Employee          @relation("EmployeePayrolls", fields: [employeeId], references: [id], onDelete: Cascade)
-  approvedBy     Employee?         @relation("PayrollApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  generatedBy  User         @relation("PayrollRunGenerator", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  approvedBy   User?        @relation("PayrollRunApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  publishedBy  User?        @relation("PayrollRunPublisher", fields: [publishedByUserId], references: [id], onDelete: Restrict)
+  paidBy       User?        @relation("PayrollRunPayer", fields: [paidByUserId], references: [id], onDelete: Restrict)
+  cancelledBy  User?        @relation("PayrollRunCanceller", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+  correctionOf PayrollRun?  @relation("PayrollRunCorrection", fields: [correctionOfId], references: [id], onDelete: Restrict)
+  corrections  PayrollRun[] @relation("PayrollRunCorrection")
+  payrolls     Payroll[]
+
+  @@unique([year, month, revision])
+  @@index([status, year, month])
+  @@index([generatedByUserId])
+  @@index([correctionOfId])
+}
+
+model Payroll {
+  id               String    @id @default(uuid())
+  runId            String
+  employeeId       String
+  year             Int
+  month            Int
+  baseSalary       Decimal   @db.Decimal(12, 2)
+  allowances       Decimal   @default(0) @db.Decimal(12, 2)
+  deductions       Decimal   @default(0) @db.Decimal(12, 2)
+  bonuses          Decimal   @default(0) @db.Decimal(12, 2)
+  taxAmount        Decimal   @default(0) @db.Decimal(12, 2)
+  grossPay         Decimal   @db.Decimal(12, 2)
+  netPay           Decimal   @db.Decimal(12, 2)
+  objectName       String?   @unique
+  objectGeneration String?
+  contentType      String?
+  sizeBytes        Int?
+  sha256           String?
+  revokedAt        DateTime?
+  revokedByUserId  String?
+  revocationReason String?
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  employee       Employee          @relation("EmployeePayrolls", fields: [employeeId], references: [id], onDelete: Restrict)
+  payrollRun     PayrollRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  revokedBy      User?             @relation("PayrollRevoker", fields: [revokedByUserId], references: [id], onDelete: Restrict)
   lineItems      PayrollLineItem[]
   loanRepayments LoanRepayment[]
 
-  @@unique([employeeId, year, month])
-  @@index([employeeId])
-  @@index([year, month])
-  @@index([status])
-  @@index([deletedAt])
+  @@unique([runId, employeeId])
+  @@index([employeeId, year, month])
+  @@index([runId])
+  @@index([revokedByUserId])
 }
 
 model PerformanceReview {
@@ -690,20 +979,113 @@ model EmployeeDocument {
   @@index([deletedAt])
 }
 
+model DocumentTemplate {
+  id        String             @id @default(uuid())
+  code      ServiceRequestType
+  name      String
+  version   Int
+  title     String
+  body      String
+  isActive  Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  documentVersions GeneratedDocumentVersion[]
+
+  @@unique([code, version])
+  @@index([code, isActive])
+}
+
+model ServiceRequest {
+  id                String               @id @default(uuid())
+  requestType       ServiceRequestType
+  requesterUserId   String
+  subjectEmployeeId String
+  status            ServiceRequestStatus @default(SUBMITTED)
+  requesterComment  String?
+  hrComment         String?
+  rejectionReason   String?
+  version           Int                  @default(1)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  requester User                       @relation("ServiceRequester", fields: [requesterUserId], references: [id], onDelete: Restrict)
+  subject   Employee                   @relation("ServiceRequestSubject", fields: [subjectEmployeeId], references: [id], onDelete: Restrict)
+  events    ServiceRequestEvent[]
+  documents GeneratedDocumentVersion[]
+
+  @@index([requesterUserId, createdAt])
+  @@index([subjectEmployeeId, createdAt])
+  @@index([status, createdAt])
+  @@index([requestType, status])
+}
+
+model ServiceRequestEvent {
+  id          String                  @id @default(uuid())
+  requestId   String
+  actorUserId String
+  type        ServiceRequestEventType
+  fromStatus  ServiceRequestStatus?
+  toStatus    ServiceRequestStatus
+  reason      String?
+  isOverride  Boolean                 @default(false)
+  createdAt   DateTime                @default(now())
+
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor   User           @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model GeneratedDocumentVersion {
+  id                String    @id @default(uuid())
+  requestId         String
+  templateId        String
+  versionNumber     Int
+  fileName          String
+  objectName        String    @unique
+  objectGeneration  String?
+  contentType       String
+  sizeBytes         Int
+  sha256            String    @db.VarChar(64)
+  generatedByUserId String
+  generatedAt       DateTime  @default(now())
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  publishedByUserId String?
+  publishedAt       DateTime?
+  revokedByUserId   String?
+  revokedAt         DateTime?
+  revocationReason  String?
+  createdAt         DateTime  @default(now())
+
+  request     ServiceRequest   @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  template    DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  generatedBy User             @relation("DocumentGenerator", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  approvedBy  User?            @relation("DocumentApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  publishedBy User?            @relation("DocumentPublisher", fields: [publishedByUserId], references: [id], onDelete: Restrict)
+  revokedBy   User?            @relation("DocumentRevoker", fields: [revokedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, versionNumber])
+  @@index([templateId])
+  @@index([publishedAt, revokedAt])
+}
+
 model Announcement {
-  id            String    @id @default(uuid())
-  title         String
-  content       String
-  audienceRoles LegacyRole[] @default([])
-  departmentId  String?
-  createdById   String
-  publishedAt   DateTime?
-  expiresAt     DateTime?
-  isActive      Boolean   @default(true)
-  version       Int       @default(1)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  id                String    @id @default(uuid())
+  title             String
+  content           String
+  audienceRoleCodes String[]  @default([])
+  departmentId      String?
+  createdById       String
+  publishedAt       DateTime?
+  expiresAt         DateTime?
+  isActive          Boolean   @default(true)
+  version           Int       @default(1)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   createdBy  Employee    @relation("AnnouncementCreator", fields: [createdById], references: [id], onDelete: Restrict)
@@ -1101,22 +1483,98 @@ model DocumentSequence {
   updatedAt DateTime @updatedAt
 }
 
+model Notification {
+  id           String    @id @default(uuid())
+  userId       String
+  type         String    @db.VarChar(100)
+  title        String    @db.VarChar(200)
+  message      String    @db.VarChar(1000)
+  resourceType String?   @db.VarChar(100)
+  resourceId   String?
+  readAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([resourceType, resourceId])
+}
+
+model IdempotencyRecord {
+  id           String   @id @default(uuid())
+  actorUserId  String
+  operation    String   @db.VarChar(120)
+  key          String   @db.VarChar(128)
+  requestHash  String   @db.VarChar(64)
+  resourceType String   @db.VarChar(100)
+  resourceId   String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@unique([actorUserId, operation, key])
+  @@index([expiresAt])
+}
+
 model AuditEvent {
-  id          String      @id @default(uuid())
-  actorUserId String?
-  requestId   String?
-  action      AuditAction
-  entityType  String
-  entityId    String?
-  summary     String
-  createdAt   DateTime    @default(now())
+  id                     String           @id @default(uuid())
+  sequence               BigInt           @unique
+  occurredAtUtc          DateTime         @default(now())
+  actorUserId            String?
+  actorEmployeeId        String?
+  actorNameSnapshot      String?
+  actorEmailSnapshot     String?
+  actorRoleCodesSnapshot String[]         @default([])
+  action                 AuditAction
+  module                 String           @db.VarChar(100)
+  resourceType           String           @db.VarChar(100)
+  resourceId             String?
+  subjectEmployeeId      String?
+  subjectDepartmentId    String?
+  targetUserId           String?
+  outcome                AuditOutcome     @default(SUCCESS)
+  reason                 String?
+  permissionCode         String?
+  scopeType              AccessScopeType?
+  beforeJson             Json?
+  afterJson              Json?
+  changedFields          String[]         @default([])
+  requestId              String?
+  correlationId          String?
+  workflowId             String?
+  workflowStage          String?
+  workflowStatus         String?
+  payrollPeriod          String?
+  requestType            String?
+  sessionId              String?
+  ipHash                 String?
+  userAgent              String?
+  route                  String?
+  httpMethod             String?
+  isOverride             Boolean          @default(false)
+  isSelfApproval         Boolean          @default(false)
+  metadataJson           Json?
+  previousEventHash      String?
+  eventHash              String           @unique
 
   actor   User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   changes AuditChange[]
 
-  @@index([actorUserId])
-  @@index([entityType, entityId])
-  @@index([createdAt])
+  @@index([occurredAtUtc])
+  @@index([actorUserId, occurredAtUtc])
+  @@index([subjectEmployeeId, occurredAtUtc])
+  @@index([subjectDepartmentId, occurredAtUtc])
+  @@index([module, occurredAtUtc])
+  @@index([resourceType, resourceId])
+  @@index([action, occurredAtUtc])
+  @@index([outcome, occurredAtUtc])
+  @@index([correlationId])
+  @@index([workflowId])
+  @@index([payrollPeriod, occurredAtUtc])
+  @@index([requestType, occurredAtUtc])
+  @@index([isOverride, occurredAtUtc])
+  @@index([isSelfApproval, occurredAtUtc])
 }
 
 model AuditChange {
@@ -1129,6 +1587,68 @@ model AuditChange {
   event AuditEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([eventId])
+}
+
+model AuditChainState {
+  id                    String    @id @default("default")
+  lastSequence          BigInt    @default(0)
+  lastHash              String?
+  prunedThroughSequence BigInt    @default(0)
+  prunedThroughHash     String?
+  prunedAt              DateTime?
+  updatedAt             DateTime  @updatedAt
+}
+
+model AuditExport {
+  id                String            @id @default(uuid())
+  requestedByUserId String
+  format            AuditExportFormat
+  filtersJson       Json
+  recordCount       Int
+  fileName          String
+  objectName        String            @unique
+  objectGeneration  String?
+  contentType       String
+  sizeBytes         Int
+  sha256            String            @db.VarChar(64)
+  createdAt         DateTime          @default(now())
+
+  requestedBy User @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([requestedByUserId, createdAt])
+}
+
+model AuditLegalHold {
+  id                String    @id @default(uuid())
+  name              String
+  reason            String
+  resourceType      String?
+  resourceId        String?
+  workflowId        String?
+  subjectEmployeeId String?
+  startsAt          DateTime  @default(now())
+  endsAt            DateTime?
+  createdByUserId   String
+  releasedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  createdBy User @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([resourceType, resourceId])
+  @@index([workflowId])
+  @@index([subjectEmployeeId])
+  @@index([releasedAt, endsAt])
+}
+
+model AuditRetentionPolicy {
+  id              String   @id @default("default")
+  enabled         Boolean  @default(false)
+  retentionDays   Int      @default(2555)
+  version         Int      @default(1)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model ImportRun {

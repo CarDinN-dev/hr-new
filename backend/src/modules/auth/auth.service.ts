@@ -1,17 +1,18 @@
 import { HttpException, HttpStatus, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import { AuditAction } from '@prisma/client';
+import { AuditAction, AuditOutcome, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import { RequestUser } from '../../common/types/request-user.type';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { AuditService } from '../audit/audit.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { JwtPayload } from './types/jwt-payload.type';
+import { StepUpDto } from './dto/step-up.dto';
 
 const productionSessionCookie = '__Host-medtech_hr_session';
 const developmentSessionCookie = 'medtech_hr_session';
@@ -53,6 +54,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly authorization: AuthorizationService,
+    private readonly audit: AuditService,
   ) {
     const saltRounds = Number(this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12));
     if (!Number.isInteger(saltRounds) || saltRounds < 10 || saltRounds > 15) {
@@ -61,16 +63,12 @@ export class AuthService {
     this.dummyPasswordHash = bcrypt.hash(randomBytes(32).toString('hex'), saltRounds);
   }
 
-  register(dto: RegisterDto, actor: RequestUser) {
-    return this.usersService.createUser(dto.email, dto.password, actor);
-  }
-
   async login(dto: LoginDto, request: Request) {
     const ip = request.ip || 'unknown';
     await this.checkLoginLimit(ip, dto.email);
 
     const user = await this.usersService.findByEmail(dto.email);
-    const activeUser = user && !user.deletedAt && user.isActive && !user.employee?.deletedAt ? user : null;
+    const activeUser = user && !user.deletedAt && user.isActive && user.localLoginEnabled && !user.employee?.deletedAt ? user : null;
     const passwordMatches = await bcrypt.compare(dto.password, activeUser?.passwordHash ?? (await this.dummyPasswordHash));
     if (!activeUser || !passwordMatches) {
       await this.recordFailedLogin(ip, dto.email);
@@ -97,31 +95,38 @@ export class AuthService {
     const decoded = this.jwtService.decode(accessToken) as { exp?: number } | null;
     if (!decoded?.exp) throw new Error('JWT expiry was not generated');
     const expiresAt = new Date(decoded.exp * 1000);
-    await this.prisma.$transaction([
-      this.prisma.authSession.create({
+    const ipHash = this.ipHash(request.ip);
+    const context = this.authorization.toRequestUser(authorizationUser, {
+      id: sid,
+      csrfToken,
+      provider,
+      reauthenticatedAt: new Date(),
+      ipHash,
+    });
+    context.requestId = this.requestId(request);
+    context.userAgent = this.userAgent(request);
+    context.route = request.path.slice(0, 500);
+    context.httpMethod = request.method.slice(0, 16);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.authSession.create({
         data: {
           id: sid,
           userId: user.id,
           tokenHash: this.tokenHash(accessToken),
           provider,
           authorizationVersion: authorizationUser.authorizationVersion,
-          ipHash: this.ipHash(request.ip),
+          ipHash,
           userAgent: this.userAgent(request),
           expiresAt,
         },
-      }),
-      this.prisma.auditEvent.create({
-        data: {
-          actorUserId: user.id,
-          requestId: this.requestId(request),
-          action: AuditAction.LOGIN,
-          entityType: 'AuthSession',
-          entityId: sid,
-          summary: `${provider} login`,
-        },
-      }),
-    ]);
-    const context = this.authorization.toRequestUser(authorizationUser, { id: sid, csrfToken });
+      });
+      await this.audit.record(tx, context, {
+        action: AuditAction.LOGIN,
+        resourceType: 'AuthSession',
+        resourceId: sid,
+        summary: `${provider} login`,
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { user: context, accessToken, csrfToken };
   }
 
@@ -136,6 +141,7 @@ export class AuthService {
         permissions: session.user.permissions,
         departmentScopeIds: session.user.departmentScopeIds,
         sessionId: session.user.sessionId,
+        authProvider: session.user.authProvider,
         authorizationVersion: session.user.authorizationVersion,
       },
       csrfToken: session.csrfToken,
@@ -173,12 +179,15 @@ export class AuthService {
     const session = await this.prisma.authSession.findFirst({ where: { id: sessionId, userId: user.id }, select: { id: true, revokedAt: true } });
     if (!session) throw new NotFoundException('Session not found');
     if (!session.revokedAt) {
-      await this.prisma.$transaction([
-        this.prisma.authSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } }),
-        this.prisma.auditEvent.create({
-          data: { actorUserId: user.id, requestId: user.requestId, action: AuditAction.LOGOUT, entityType: 'AuthSession', entityId: session.id, summary: 'Session revoked' },
-        }),
-      ]);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.authSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+        await this.audit.record(tx, user, {
+          action: AuditAction.LOGOUT,
+          resourceType: 'AuthSession',
+          resourceId: session.id,
+          summary: 'Session revoked',
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
     return { revoked: true, current: session.id === user.sessionId };
   }
@@ -190,13 +199,46 @@ export class AuthService {
 
   async logoutAll(user: RequestUser) {
     const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now } }),
-      this.prisma.auditEvent.create({
-        data: { actorUserId: user.id, requestId: user.requestId, action: AuditAction.LOGOUT, entityType: 'AuthSession', entityId: user.id, summary: 'All sessions revoked' },
-      }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now } });
+      await this.audit.record(tx, user, {
+        action: AuditAction.LOGOUT,
+        resourceType: 'AuthSession',
+        resourceId: user.id,
+        summary: 'All sessions revoked',
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { loggedOut: true };
+  }
+
+  async stepUpLocal(dto: StepUpDto, user: RequestUser) {
+    const account = await this.usersService.findById(user.id);
+    const passwordMatches = await bcrypt.compare(dto.password, account?.passwordHash ?? (await this.dummyPasswordHash));
+    if (!account || !account.isActive || account.deletedAt || !account.localLoginEnabled || !account.passwordHash || !passwordMatches) {
+      throw new UnauthorizedException('Authentication could not be verified');
+    }
+    const reauthenticatedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.authSession.updateMany({ where: { id: user.sessionId, userId: user.id, revokedAt: null, expiresAt: { gt: reauthenticatedAt } }, data: { reauthenticatedAt } });
+      if (updated.count !== 1) throw new UnauthorizedException('Session is invalid or expired');
+      await this.audit.record(tx, { ...user, reauthenticatedAt }, { action: AuditAction.LOGIN, resourceType: 'AuthSession', resourceId: user.sessionId, summary: 'Local step-up authentication completed' });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return { reauthenticatedAt };
+  }
+
+  async replaceMicrosoftSession(previousSessionId: string, userId: string) {
+    await this.prisma.authSession.updateMany({ where: { id: previousSessionId, userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
+  async recordProviderLoginFailure(provider: string, request: Request) {
+    await this.audit.record(this.prisma, null, {
+      action: AuditAction.LOGIN,
+      outcome: AuditOutcome.FAILED,
+      resourceType: 'AuthenticationAttempt',
+      resourceId: this.auditIdentityHash(`${provider}\0${request.ip || 'unknown'}`),
+      summary: `${provider} login failed`,
+      metadata: { provider, ipHash: this.ipHash(request.ip), userAgent: this.userAgent(request) },
+    });
   }
 
   async consumeMicrosoftLoginStart(ip = 'unknown') {
@@ -238,6 +280,14 @@ export class AuthService {
       this.incrementLoginAttempt(this.ipLoginKey(ip)),
     ]);
     await this.prisma.authThrottle.deleteMany({ where: { resetAt: { lte: new Date() } } });
+    await this.audit.record(this.prisma, null, {
+      action: AuditAction.LOGIN,
+      outcome: AuditOutcome.FAILED,
+      resourceType: 'AuthenticationAttempt',
+      resourceId: this.auditIdentityHash(email.toLowerCase()),
+      summary: 'Local login failed',
+      metadata: { provider: 'local', accountHash: this.auditIdentityHash(email.toLowerCase()), ipHash: this.ipHash(ip) },
+    });
   }
 
   private async incrementLoginAttempt(key: string) {
@@ -267,6 +317,10 @@ export class AuthService {
 
   private throttleKey(kind: string, value: string) {
     return `${kind}:${createHmac('sha256', this.configService.getOrThrow<string>('JWT_SECRET')).update(value).digest('hex')}`;
+  }
+
+  private auditIdentityHash(value: string) {
+    return createHmac('sha256', this.configService.getOrThrow<string>('JWT_SECRET')).update(`audit\0${value}`).digest('hex');
   }
 
   private ipHash(ip?: string) {

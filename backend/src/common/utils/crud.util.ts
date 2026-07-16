@@ -17,6 +17,7 @@ type ListOptions = {
   where?: Record<string, unknown>;
   include?: Record<string, unknown>;
   select?: Record<string, unknown>;
+  softDelete?: boolean;
 };
 
 export function paginationMeta(total: number, page: number, limit: number) {
@@ -38,7 +39,7 @@ export function listArgs(query: PaginationQueryDto, options: ListOptions = {}): 
     throw new BadRequestException(`Unsupported sort field: ${sortBy}`);
   }
 
-  const filters: Record<string, unknown>[] = [{ deletedAt: null }];
+  const filters: Record<string, unknown>[] = options.softDelete === false ? [] : [{ deletedAt: null }];
   if (options.where && Object.keys(options.where).length) {
     filters.push(options.where);
   }

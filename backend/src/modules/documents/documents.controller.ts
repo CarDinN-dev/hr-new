@@ -41,7 +41,7 @@ export class DocumentsController {
     return this.documentsService.upload(dto, file, user);
   }
 
-  @AnyPermission('document.self.read', 'document.hr.read')
+  @AnyPermission('document.self.read', 'document.hr.read', 'document.read_all', 'document.pdf.download_all')
   @Get(':id/content')
   async content(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) {
     const result = await this.documentsService.content(id, user);
@@ -51,13 +51,13 @@ export class DocumentsController {
     return result.buffer;
   }
 
-  @AnyPermission('document.self.read', 'document.hr.read')
+  @AnyPermission('document.self.read', 'document.hr.read', 'document.read_all')
   @Get()
   list(@Query() query: QueryDocumentsDto, @CurrentUser() user: RequestUser) {
     return this.documentsService.list(query, user);
   }
 
-  @AnyPermission('document.self.read', 'document.hr.read')
+  @AnyPermission('document.self.read', 'document.hr.read', 'document.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.documentsService.findById(id, user);

@@ -7,8 +7,8 @@ import { Public } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { MicrosoftAuthService } from './microsoft-auth.service';
+import { StepUpDto } from './dto/step-up.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -19,13 +19,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly microsoftAuthService: MicrosoftAuthService,
   ) {}
-
-  @ApiBearerAuth()
-  @Permissions('user.manage')
-  @Post('register')
-  register(@Body() dto: RegisterDto, @CurrentUser() user: RequestUser) {
-    return this.authService.register(dto, user);
-  }
 
   @Public()
   @Post('login')
@@ -56,6 +49,7 @@ export class AuthController {
       response.redirect(HttpStatus.SEE_OTHER, this.microsoftAuthService.successUrl());
     } catch {
       this.microsoftAuthService.clearTransactionCookie(response);
+      await this.authService.recordProviderLoginFailure('microsoft', request).catch(() => undefined);
       this.logger.warn('Microsoft sign-in failed');
       response.redirect(HttpStatus.SEE_OTHER, this.microsoftAuthService.failureUrl());
     }
@@ -75,6 +69,7 @@ export class AuthController {
         permissions: user.permissions,
         departmentScopeIds: user.departmentScopeIds,
         sessionId: user.sessionId,
+        authProvider: user.authProvider,
         authorizationVersion: user.authorizationVersion,
       },
       csrfToken: user.csrfToken,
@@ -86,6 +81,22 @@ export class AuthController {
   @Get('sessions')
   sessions(@CurrentUser() user: RequestUser) {
     return this.authService.listOwnSessions(user);
+  }
+
+  @ApiBearerAuth()
+  @Permissions('session.self.read')
+  @Post('step-up/local')
+  @HttpCode(HttpStatus.OK)
+  stepUpLocal(@Body() dto: StepUpDto, @CurrentUser() user: RequestUser) {
+    return this.authService.stepUpLocal(dto, user);
+  }
+
+  @ApiBearerAuth()
+  @Permissions('session.self.read')
+  @Get('microsoft/step-up')
+  async microsoftStepUp(@CurrentUser() user: RequestUser, @Req() request: Request, @Res() response: Response) {
+    response.setHeader('Cache-Control', 'no-store');
+    response.redirect(HttpStatus.FOUND, await this.microsoftAuthService.beginStepUp(request, response, user));
   }
 
   @ApiBearerAuth()

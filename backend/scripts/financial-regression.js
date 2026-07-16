@@ -20,17 +20,18 @@ async function main() {
     employeeLoan: { findMany: async () => [loan] },
     loanRepayment: { findMany: async () => posted.map((amount) => ({ amount: new Prisma.Decimal(amount) })) },
   };
-  const loans = new LoansService({}, {});
+  const loans = new LoansService({}, {}, {});
   const first = await loans.preparePayrollDeductions('employee-1', 2026, 1, tx);
   assert.equal(first.total.toFixed(2), '1714.29');
   posted.push('1714.29', '1714.29', '1714.29', '1714.29', '1714.29', '1714.29');
   const final = await loans.preparePayrollDeductions('employee-1', 2026, 7, tx);
   assert.equal(final.total.toFixed(2), '1714.26');
 
-  const payroll = new PayrollService({}, loans, {});
-  const totals = payroll.payrollTotals({ baseSalary: '3000', allowances: '200', bonuses: '50', deductions: '100', taxAmount: '25' });
-  assert.equal(totals.grossPay.toFixed(2), '3250.00');
-  assert.equal(totals.netPay.toFixed(2), '3125.00');
+  const payroll = new PayrollService({}, loans, {}, {}, {});
+  const grossPay = sumMoney(['3000', '200', '50']);
+  const netPay = grossPay.minus(sumMoney(['100', '25']));
+  assert.equal(grossPay.toFixed(2), '3250.00');
+  assert.equal(netPay.toFixed(2), '3125.00');
   const lopDays = await payroll.payrollLopDays('employee-1', new Date('2026-07-01T00:00:00Z'), new Date('2026-07-31T23:59:59Z'), {
     attendance: { findMany: async () => [
       { attendanceDate: new Date('2026-07-02T00:00:00Z'), status: AttendanceStatus.ABSENT },

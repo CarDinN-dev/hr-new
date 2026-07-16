@@ -33,7 +33,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!token) throw new UnauthorizedException('Session token is missing');
     const session = await this.prisma.authSession.findUnique({
       where: { id: payload.sid },
-      select: { id: true, userId: true, tokenHash: true, authorizationVersion: true, expiresAt: true, revokedAt: true, lastSeenAt: true },
+      select: { id: true, userId: true, tokenHash: true, provider: true, authorizationVersion: true, expiresAt: true, revokedAt: true, lastSeenAt: true, reauthenticatedAt: true, ipHash: true },
     });
     const now = new Date();
     const actualHash = createHash('sha256').update(token).digest();
@@ -53,6 +53,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (now.getTime() - session.lastSeenAt.getTime() >= 5 * 60 * 1000) {
       await this.prisma.authSession.update({ where: { id: session.id }, data: { lastSeenAt: now } });
     }
-    return this.authorization.toRequestUser(user, { id: session.id, csrfToken: payload.csrfToken });
+    return this.authorization.toRequestUser(user, {
+      id: session.id,
+      csrfToken: payload.csrfToken,
+      provider: session.provider,
+      reauthenticatedAt: session.reauthenticatedAt,
+      ipHash: session.ipHash,
+    });
   }
 }

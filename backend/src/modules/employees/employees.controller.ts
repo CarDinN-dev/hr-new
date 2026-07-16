@@ -21,7 +21,7 @@ export class EmployeesController {
     return this.employeesService.create(dto, user);
   }
 
-  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.department.read', 'employee.hr.read', 'employee.audit.read')
+  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
   @Get()
   list(@Query() query: QueryEmployeesDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.list(query, user);
@@ -51,7 +51,7 @@ export class EmployeesController {
     return this.employeesService.updatePayrollBank(id, dto, user);
   }
 
-  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.department.read', 'employee.hr.read', 'employee.audit.read')
+  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.employeesService.findById(id, user);

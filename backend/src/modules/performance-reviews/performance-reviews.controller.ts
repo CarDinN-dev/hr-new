@@ -14,25 +14,25 @@ import { PerformanceReviewsService } from './performance-reviews.service';
 export class PerformanceReviewsController {
   constructor(private readonly reviewsService: PerformanceReviewsService) {}
 
-  @AnyPermission('performance.team.manage', 'performance.hr.manage')
+  @AnyPermission('performance.team.manage', 'performance.management.manage', 'performance.hr.manage')
   @Post()
   create(@Body() dto: CreatePerformanceReviewDto, @CurrentUser() user: RequestUser) {
     return this.reviewsService.create(dto, user);
   }
 
-  @AnyPermission('performance.self.read', 'performance.team.read', 'performance.hr.manage')
+  @AnyPermission('performance.self.read', 'performance.team.read', 'performance.management.read', 'performance.hr.manage', 'performance.read_all')
   @Get()
   list(@Query() query: QueryPerformanceReviewsDto, @CurrentUser() user: RequestUser) {
     return this.reviewsService.list(query, user);
   }
 
-  @AnyPermission('performance.self.read', 'performance.team.read', 'performance.hr.manage')
+  @AnyPermission('performance.self.read', 'performance.team.read', 'performance.management.read', 'performance.hr.manage', 'performance.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.reviewsService.findById(id, user);
   }
 
-  @AnyPermission('performance.team.manage', 'performance.hr.manage')
+  @AnyPermission('performance.team.manage', 'performance.management.manage', 'performance.hr.manage')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdatePerformanceReviewDto, @CurrentUser() user: RequestUser) {
     return this.reviewsService.update(id, dto, user);

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  AccessScopeType,
   AuditAction,
   LoanRepaymentMode,
   LoanRepaymentSource,
@@ -9,12 +10,12 @@ import {
   Prisma,
 } from '@prisma/client';
 import { nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
-import { hasAnyPermission } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateLoanDto, LoanOverrideDto, ManualRepaymentDto, QueryLoansDto } from './dto/loan.dto';
+import { AuthorizationService } from '../authorization/authorization.service';
 
 const includeLoan = {
   employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, departmentId: true } },
@@ -27,9 +28,11 @@ export class LoansService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly authorization: AuthorizationService,
   ) {}
 
   async create(dto: CreateLoanDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'loan.hr.manage' });
     const principal = nonNegativeMoney(dto.principal, 'principal');
     if (principal.isZero()) throw new BadRequestException('principal must be greater than zero');
     const monthlyLimit = nonNegativeMoney(dto.monthlyLimit ?? 0, 'monthlyLimit');
@@ -48,13 +51,14 @@ export class LoansService {
         entityType: 'EmployeeLoan',
         entityId: loan.id,
         summary: 'Loan created as draft',
+        subjectEmployeeId: dto.employeeId,
       });
       return this.withBalance(loan);
     });
   }
 
   async list(query: QueryLoansDto, user: RequestUser) {
-    const filters: Record<string, unknown>[] = [this.accessWhere(user)];
+    const filters: Prisma.EmployeeLoanWhereInput[] = [this.accessWhere(user)];
     if (query.employeeId) filters.push({ employeeId: query.employeeId });
     if (query.status) filters.push({ status: query.status });
     const { page, limit, ...args } = listArgs(query, {
@@ -79,6 +83,7 @@ export class LoansService {
   async activate(id: string, user: RequestUser) {
     return this.transaction(async (tx) => {
       const loan = await this.ensureLoan(id, tx);
+      await this.authorization.assertEmployeeScope(user, loan.employeeId, { all: 'loan.hr.manage' });
       if (loan.status !== LoanStatus.DRAFT && loan.status !== LoanStatus.PAUSED) {
         throw new BadRequestException('Only draft or paused loans can be activated');
       }
@@ -102,6 +107,7 @@ export class LoansService {
     const amount = nonNegativeMoney(dto.amount, 'amount');
     return this.transaction(async (tx) => {
       const loan = await this.ensureLoan(id, tx);
+      await this.authorization.assertEmployeeScope(user, loan.employeeId, { all: 'loan.hr.manage' });
       if (loan.status === LoanStatus.SETTLED || loan.status === LoanStatus.CANCELLED) {
         throw new BadRequestException('A closed loan cannot be overridden');
       }
@@ -128,6 +134,7 @@ export class LoansService {
     if (amount.isZero()) throw new BadRequestException('amount must be greater than zero');
     return this.transaction(async (tx) => {
       const loan = await this.ensureLoan(id, tx);
+      await this.authorization.assertEmployeeScope(user, loan.employeeId, { all: 'loan.hr.manage' });
       if (loan.status !== LoanStatus.ACTIVE && loan.status !== LoanStatus.PAUSED) {
         throw new BadRequestException('Only active or paused loans can receive repayments');
       }
@@ -232,11 +239,18 @@ export class LoansService {
     return loan;
   }
 
-  private accessWhere(user: RequestUser) {
-    if (hasAnyPermission(user, ['loan.hr.read', 'loan.audit.read'])) return {};
-    return user.employeeId && user.permissions.includes('loan.self.read')
-      ? { employeeId: user.employeeId }
-      : { employeeId: '__no_loan_scope__' };
+  private accessWhere(user: RequestUser): Prisma.EmployeeLoanWhereInput {
+    const scopes: Prisma.EmployeeLoanWhereInput[] = [];
+    for (const permission of ['loan.hr.read', 'loan.audit.read', 'loan.read_all'] as const) {
+      const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
+      if (rule.unrestricted) {
+        if (!rule.excludeIds.length) return {};
+        scopes.push({ employeeId: { notIn: rule.excludeIds } });
+      }
+      else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
+    }
+    if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'loan.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
+    return scopes.length ? { OR: scopes } : { employeeId: '__no_loan_scope__' };
   }
 
   private async transaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {

@@ -33,7 +33,7 @@ The API is proxied through the frontend at `/api/v1`. Swagger is disabled in pro
 
 ## Cloudflare Quick Tunnel
 
-The Quick Tunnel exposes the loopback-only app on port `8080` at a temporary public HTTPS URL. It requires no domain or router changes and is intended only for testing and demonstrations. The existing JWT login, role checks, CSRF checks, and API authorization remain active; anyone with the URL can reach the login screen, so use strong passwords from the gitignored `.env` file.
+The Quick Tunnel exposes the loopback-only app on port `8080` at a temporary public HTTPS URL. It requires no domain or router changes and is intended only for testing and demonstrations. The existing JWT sessions, permission and resource-scope checks, CSRF protection, and API authorization remain active; anyone with the URL can reach the login screen, so use strong passwords from the gitignored `.env` file.
 
 On Windows:
 

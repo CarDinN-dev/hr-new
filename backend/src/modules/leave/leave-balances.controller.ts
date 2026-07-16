@@ -20,13 +20,13 @@ export class LeaveBalancesController {
     return this.leaveService.createBalance(dto, user);
   }
 
-  @AnyPermission('leave.self.read', 'leave.team.read', 'leave.department.read', 'leave.hr.read', 'leave.audit.read')
+  @AnyPermission('leave.self.read', 'leave.team.read', 'leave.management.read', 'leave.hr.read', 'leave.audit.read', 'leave.read_all')
   @Get()
   list(@Query() query: QueryLeaveBalancesDto, @CurrentUser() user: RequestUser) {
     return this.leaveService.listBalances(query, user);
   }
 
-  @AnyPermission('leave.self.read', 'leave.team.read', 'leave.department.read', 'leave.hr.read', 'leave.audit.read')
+  @AnyPermission('leave.self.read', 'leave.team.read', 'leave.management.read', 'leave.hr.read', 'leave.audit.read', 'leave.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.leaveService.findBalanceById(id, user);

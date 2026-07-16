@@ -1,4 +1,4 @@
-import type { AttendanceCode, EmployeeRecord, HrState, PayrollSlip } from "./data";
+import type { AttendanceCode, EmployeeRecord, HrState } from "./data";
 import { apiList, apiRequest, hasAnyPermission, hasPermission, type BackendSession } from "./api";
 
 type BackendRecord = Record<string, unknown>;
@@ -20,19 +20,15 @@ export async function persistNormalizedStateDelta(before: HrState, after: HrStat
     needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([])
   ]);
   const departmentIds = new Map(departments.map(row => [String(row.name), String(row.id)]));
-  const leaveTypeIds = new Map(leaveTypes.map(row => [String(row.name).toLowerCase(), String(row.id)]));
-
   if (hasAnyPermission(session, "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "payroll.configure", "payroll.update_bank")) {
     await syncEmployees(before, after, departmentIds, request, session);
   }
   if (hasPermission(session, "attendance.hr.manage")) await syncAttendance(before, after, request);
-  if (hasAnyPermission(session, "leave.self.create", "leave.self.cancel", "leave.team.approve_manager", "leave.department.approve_manager", "leave.hr.approve", "leave.hr.manage")) await syncLeaves(before, after, leaveTypeIds, request, session);
-  if (hasAnyPermission(session, "trip.self.create", "trip.team.approve_manager", "trip.department.approve_manager", "trip.hr.manage")) await syncTrips(before, after, request);
-  if (hasAnyPermission(session, "expense.self.create", "expense.team.approve_manager", "expense.department.approve_manager", "expense.hr.approve")) await syncExpenses(before, after, request);
+  if (hasAnyPermission(session, "trip.self.create", "trip.team.approve_manager", "trip.management.approve_manager", "trip.hr.manage")) await syncTrips(before, after, request);
+  if (hasAnyPermission(session, "expense.self.create", "expense.team.approve_manager", "expense.management.approve_manager", "expense.hr.approve")) await syncExpenses(before, after, request);
   if (hasPermission(session, "loan.hr.manage")) await syncLoans(before, after, request);
   if (hasPermission(session, "recruitment.manage")) await syncRecruitment(before, after, departmentIds, request);
   if (hasPermission(session, "eos.manage")) await syncEos(before, after, request);
-  if (hasAnyPermission(session, "payroll.generate", "payroll.approve", "payroll.mark_paid")) await syncPayroll(before, after, request, session);
   if (hasAnyPermission(session, "document.self.manage", "document.hr.manage")) await syncDocuments(before, after, session);
 }
 
@@ -168,24 +164,6 @@ async function syncAttendance(before: HrState, after: HrState, request: RequestF
   }
 }
 
-async function syncLeaves(before: HrState, after: HrState, typeIds: Map<string, string>, request: RequestFn, session: BackendSession) {
-  const previous = byId(before.leaves); const current = byId(after.leaves);
-  for (const leave of after.leaves) {
-    const old = previous.get(leave.id);
-    if (!old) {
-      const leaveTypeId = typeIds.get(leave.type.toLowerCase());
-      if (!leaveTypeId) throw new Error(`Leave type ${leave.type} is not configured.`);
-      await request("/leave/requests", "POST", { employeeId: hasPermission(session, "leave.hr.manage") ? leave.employeeId : undefined, leaveTypeId, startDate: leave.from, endDate: leave.to, isHalfDay: leave.days === 0.5, reason: leave.reason });
-    } else if (old.status !== leave.status && old.status === "Pending") {
-      await request(`/leave/requests/${leave.id}/decision`, "POST", { status: leave.status === "Approved" ? "APPROVED" : "REJECTED", rejectionReason: leave.status === "Rejected" ? "Rejected in HR console" : undefined });
-    }
-  }
-  for (const leave of before.leaves) if (!current.has(leave.id)) {
-    if (leave.status === "Pending" || leave.status === "Approved") await request(`/leave/requests/${leave.id}/cancel`, "POST");
-    if (hasPermission(session, "leave.hr.manage")) await request(`/leave/requests/${leave.id}`, "DELETE");
-  }
-}
-
 async function syncTrips(before: HrState, after: HrState, request: RequestFn) {
   const previous = byId(before.businessTrips); const current = byId(after.businessTrips);
   for (const trip of after.businessTrips) {
@@ -274,20 +252,6 @@ async function syncEos(before: HrState, after: HrState, request: RequestFn) {
     else if (old.status !== eos.status) await request(`/eos/${eos.id}/status`, "PATCH", { status: enumValue(eos.status) });
   }
   for (const eos of before.eosRecords) if (!current.has(eos.id)) await request(`/eos/${eos.id}`, "DELETE");
-}
-
-async function syncPayroll(before: HrState, after: HrState, request: RequestFn, session: BackendSession) {
-  const previous = byId(before.payroll);
-  for (const slip of after.payroll) {
-    const old = previous.get(slip.id);
-    if (!old) continue;
-    if (hasPermission(session, "payroll.approve") && old.status !== slip.status && slip.status === "Finalized") await request(`/payroll/${slip.id}/approve`, "POST");
-    else if (hasPermission(session, "payroll.generate") && !same(payrollAmounts(old), payrollAmounts(slip))) await request(`/payroll/${slip.id}`, "PATCH", payrollAmounts(slip));
-  }
-}
-
-function payrollAmounts(slip: PayrollSlip) {
-  return { baseSalary: slip.basic, allowances: slip.housing + slip.allowances, deductions: slip.deductions + slip.lopAmount + slip.loanDeduction, bonuses: slip.overtime + slip.bonus, taxAmount: 0 };
 }
 
 async function syncSettings(before: HrState, after: HrState, departments: BackendRecord[], leaveTypes: BackendRecord[], request: RequestFn, session: BackendSession) {
