@@ -325,7 +325,7 @@ test('JWT validation rejects revoked, expired, altered, and legacy sessions', as
   await assert.rejects(strategy.validate(request, payload), /invalid or expired/);
 });
 
-test('Microsoft identity requires HR.User but no legacy administrator role and protects transaction integrity', () => {
+test('Microsoft identity validates the tenant token and defers application access to local RBAC', () => {
   const tenantId = '11111111-1111-4111-8111-111111111111';
   const clientId = '22222222-2222-4222-8222-222222222222';
   const values = {
@@ -341,10 +341,12 @@ test('Microsoft identity requires HR.User but no legacy administrator role and p
   const claims = {
     tid: tenantId, oid: '33333333-3333-4333-8333-333333333333',
     iss: `https://login.microsoftonline.com/${tenantId}/v2.0`, aud: clientId,
-    preferred_username: 'employee@example.invalid', roles: ['HR.User'],
+    preferred_username: 'employee@example.invalid',
   };
   assert.deepEqual(service.validateIdentityClaims(claims), { objectId: claims.oid, email: 'employee@example.invalid' });
-  assert.throws(() => service.validateIdentityClaims({ ...claims, roles: [] }), /not authorized/);
+  assert.throws(() => service.validateIdentityClaims({ ...claims, tid: '44444444-4444-4444-8444-444444444444' }), /not authorized/);
+  assert.throws(() => service.validateIdentityClaims({ ...claims, aud: '55555555-5555-4555-8555-555555555555' }), /not authorized/);
+  assert.throws(() => service.validateIdentityClaims({ ...claims, idp: 'live.com' }), /not authorized/);
   const transaction = { version: 1, state: 'state', nonce: 'nonce', codeVerifier: 'v'.repeat(64), expiresAt: Date.now() + 60_000, mode: 'login' };
   const encrypted = service.encryptTransaction(transaction);
   assert.deepEqual(service.decryptTransaction(encrypted), transaction);

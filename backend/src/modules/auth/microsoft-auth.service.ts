@@ -7,7 +7,6 @@ import { UsersService } from '../users/users.service';
 import { AuthService, IssuedSession } from './auth.service';
 import { RequestUser } from '../../common/types/request-user.type';
 
-const requiredAppRole = 'HR.User';
 const callbackPath = '/api/v1/auth/microsoft/callback';
 const transactionPath = '/api/v1/auth/microsoft';
 const transactionLifetimeMs = 10 * 60 * 1000;
@@ -155,7 +154,6 @@ export class MicrosoftAuthService {
     const tenantId = this.stringClaim(claims.tid);
     const objectId = this.stringClaim(claims.oid);
     const email = this.stringClaim(claims.preferred_username) || this.stringClaim(claims.email);
-    const roles = Array.isArray(claims.roles) ? claims.roles.filter((role): role is string => typeof role === 'string') : [];
     const expectedIssuer = `https://login.microsoftonline.com/${this.tenantId}/v2.0`;
     if (
       tenantId.toLowerCase() !== this.tenantId.toLowerCase()
@@ -163,7 +161,6 @@ export class MicrosoftAuthService {
       || this.stringClaim(claims.aud) !== this.clientId
       || !guidPattern.test(objectId)
       || !email
-      || !roles.includes(requiredAppRole)
       || this.stringClaim(claims.idp).toLowerCase() === 'live.com'
     ) {
       throw new UnauthorizedException('Microsoft account is not authorized for this application.');
