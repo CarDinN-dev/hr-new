@@ -5125,7 +5125,7 @@ summary {
   padding: 0;
 }
 
-.modal-actions {
+.modal .modal-actions {
   position: sticky;
   bottom: -1.35rem;
   z-index: 2;
@@ -5404,13 +5404,13 @@ summary {
     padding: 1rem;
   }
 
-  .modal-actions {
+  .modal .modal-actions {
     bottom: -1rem;
     margin: 1rem -1rem -1rem;
     padding: 0.8rem 1rem calc(0.8rem + env(safe-area-inset-bottom));
   }
 
-  .modal-actions button {
+  .modal .modal-actions button {
     flex: 1 1 120px;
   }
 
