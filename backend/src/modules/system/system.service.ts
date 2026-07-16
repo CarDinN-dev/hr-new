@@ -17,6 +17,7 @@ import {
   ReplaceRolePermissionsDto, RevokePermissionOverrideDto, RevokeSystemSessionDto,
   RevokeWorkflowDelegationDto, SystemMutationDto, UpdateRoleDto, UpdateSystemUserDto, UpdateWorkflowPolicyDto,
 } from './dto/system.dto';
+import { MicrosoftDirectoryProvisioningService } from './microsoft-directory-provisioning.service';
 
 const activeAssignmentWhere = (now: Date): Prisma.UserRoleWhereInput => ({
   revokedAt: null,
@@ -31,12 +32,34 @@ export class SystemService {
     private readonly audit: AuditService,
     private readonly authorization: AuthorizationService,
     private readonly config: ConfigService,
+    private readonly microsoftDirectory: MicrosoftDirectoryProvisioningService,
   ) {}
 
-  createUser(dto: CreateSystemUserDto, actor: RequestUser) {
+  async createUser(dto: CreateSystemUserDto, actor: RequestUser) {
     this.assertSystemScope(actor, 'user.manage');
     if (dto.localLoginEnabled && !dto.password) throw new BadRequestException('A password is required when local login is enabled');
     if (dto.password && Buffer.byteLength(dto.password, 'utf8') > 72) throw new BadRequestException('Password must not exceed 72 bytes');
+    const email = dto.email.trim().toLowerCase();
+    if (!dto.localLoginEnabled && dto.microsoftLoginEnabled === false) throw new BadRequestException('At least one sign-in method must be enabled');
+    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) throw new ConflictException('Email address is already in use');
+    const requestedRoles = await this.prisma.role.findMany({
+      where: { id: { in: dto.roleIds }, isActive: true },
+      select: { id: true, protection: true },
+    });
+    if (requestedRoles.length !== new Set(dto.roleIds).size) throw new BadRequestException('One or more roles do not exist or are inactive');
+    this.assertAssignableRoles(requestedRoles, actor);
+    if (dto.employeeId) {
+      const employee = await this.prisma.employee.findFirst({
+        where: { id: dto.employeeId, deletedAt: null },
+        select: { id: true, userId: true },
+      });
+      if (!employee) throw new NotFoundException('Employee not found');
+      if (employee.userId) throw new ConflictException('Employee is already linked to a user');
+    }
+    const microsoftProvisioning = dto.microsoftLoginEnabled === false
+      ? undefined
+      : await this.microsoftDirectory.provisionUser(email);
     return this.serializable(async (tx) => {
       const roles = await tx.role.findMany({ where: { id: { in: dto.roleIds }, isActive: true }, select: { id: true, code: true, protection: true } });
       if (roles.length !== new Set(dto.roleIds).size) throw new BadRequestException('One or more roles do not exist or are inactive');
@@ -49,9 +72,10 @@ export class SystemService {
       const passwordHash = dto.password ? await bcrypt.hash(dto.password, this.bcryptRounds()) : null;
       const account = await tx.user.create({
         data: {
-          email: dto.email.trim().toLowerCase(), passwordHash,
+          email, passwordHash,
           localLoginEnabled: dto.localLoginEnabled ?? false,
           microsoftLoginEnabled: dto.microsoftLoginEnabled ?? true,
+          microsoftObjectId: microsoftProvisioning?.objectId,
         },
       });
       if (dto.employeeId) await tx.employee.update({ where: { id: dto.employeeId }, data: { userId: account.id } });
@@ -59,7 +83,14 @@ export class SystemService {
       await this.audit.record(tx, actor, {
         action: AuditAction.CREATE, resourceType: 'User', resourceId: account.id, targetUserId: account.id,
         summary: 'Login user created', reason: dto.reason,
-        after: { email: account.email, localLoginEnabled: account.localLoginEnabled, microsoftLoginEnabled: account.microsoftLoginEnabled, roleCodes: roles.map((role) => role.code) },
+        after: {
+          email: account.email,
+          localLoginEnabled: account.localLoginEnabled,
+          microsoftLoginEnabled: account.microsoftLoginEnabled,
+          microsoftAccessProvisioned: Boolean(microsoftProvisioning),
+          microsoftAssignmentCreated: microsoftProvisioning?.assignmentCreated ?? false,
+          roleCodes: roles.map((role) => role.code),
+        },
       });
       await this.notifyAccessChange(tx, account.id, 'ACCOUNT_CREATED', 'Account created', 'Your HR account and initial access were created.', 'User', account.id);
       return tx.user.findUniqueOrThrow({ where: { id: account.id }, select: { id: true, email: true, isActive: true, authorizationVersion: true } });
