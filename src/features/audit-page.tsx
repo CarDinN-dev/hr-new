@@ -189,7 +189,7 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
           <label>End date (optional)<input type="date" value={holdDraft.endsAt} onChange={event => setHoldDraft(previous => ({ ...previous, endsAt: event.target.value }))} /></label>
           <label className="wide">Reason<textarea value={holdDraft.reason} onChange={event => setHoldDraft(previous => ({ ...previous, reason: event.target.value }))} /></label>
         </div>
-        <div className="modal-actions"><button className="primary" disabled={holdDraft.name.trim().length < 2 || holdDraft.reason.trim().length < 3 || createHold.isPending} onClick={() => createHold.mutate()}>Create hold</button></div>
+        <div className="form-actions"><button className="primary" disabled={holdDraft.name.trim().length < 2 || holdDraft.reason.trim().length < 3 || createHold.isPending} onClick={() => createHold.mutate()}>Create hold</button></div>
         {createHold.isError && <p className="sync-alert">{createHold.error.message}</p>}
         <div className="list-stack">{holds.data?.map(hold => <div className="list-row" key={hold.id}><div><strong>{hold.name}</strong><span>{hold.releasedAt ? "Released" : "Active"} · {hold.resourceType || "All matching audit records"} · created {new Date(hold.createdAt).toLocaleDateString()}</span></div>{!hold.releasedAt && <button onClick={() => setRelease({ hold, reason: "" })}>Release</button>}</div>)}</div>
       </div>

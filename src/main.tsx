@@ -509,7 +509,7 @@ function App() {
           <ShieldCheck size={28} />
           <h1>{workspaceLoading ? "Loading HR workspace" : "Workspace could not be loaded"}</h1>
           <p>{workspaceLoading ? "Your records are being loaded securely." : workspaceLoadError}</p>
-          {!workspaceLoading && <div className="modal-actions">
+          {!workspaceLoading && <div className="form-actions">
             <button className="primary" type="button" onClick={() => void workspaceQuery.refetch()}>Try again</button>
             <button type="button" onClick={() => void logout()}>Sign out</button>
           </div>}
@@ -706,12 +706,12 @@ function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState
     <section className="panel span-2"><div className="panel-head"><div><h3>Personal details</h3><span>Only the fields you can maintain yourself are editable.</span></div></div>
       {!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
         {(["firstName", "lastName", "phone", "address", "emergencyContactName", "emergencyContactPhone"] as const).map(key => <label key={key}>{({ firstName: "First name", lastName: "Last name", phone: "Phone", address: "Address", emergencyContactName: "Emergency contact", emergencyContactPhone: "Emergency phone" } as const)[key]}<input value={basic[key]} onChange={event => setBasic(value => ({ ...value, [key]: event.target.value }))} /></label>)}
-        {hasPermission(session, "employee.self.update_basic") && <div className="modal-actions"><button className="primary" type="button" onClick={() => void saveBasic().catch(error => notify(errorMessage(error)))}>Save personal details</button></div>}
+        {hasPermission(session, "employee.self.update_basic") && <div className="form-actions"><button className="primary" type="button" onClick={() => void saveBasic().catch(error => notify(errorMessage(error)))}>Save personal details</button></div>}
       </div>}
     </section>
     {hasPermission(session, "employee.self.read_bank") && <section className="panel"><div className="panel-head"><div><h3>Bank details</h3><span>Used for salary payment.</span></div></div>{!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
       {(["bankCode", "iban", "accountNumber"] as const).map(key => <label key={key}>{({ bankCode: "Bank code", iban: "IBAN", accountNumber: "Account number" } as const)[key]}<input value={bank[key]} onChange={event => setBank(value => ({ ...value, [key]: event.target.value }))} /></label>)}
-      {hasPermission(session, "employee.self.update_bank") && <div className="modal-actions"><button className="primary" type="button" onClick={() => void saveBank().catch(error => notify(errorMessage(error)))}>Save bank details</button></div>}
+      {hasPermission(session, "employee.self.update_bank") && <div className="form-actions"><button className="primary" type="button" onClick={() => void saveBank().catch(error => notify(errorMessage(error)))}>Save bank details</button></div>}
     </div>}</section>}
     <section className="panel"><div className="panel-head"><div><h3>Signed-in devices</h3><span>Revoke sessions you no longer use.</span></div></div>
       {sessions.isPending ? <p className="muted">Loading sessions...</p> : sessions.isError ? <p className="muted">{errorMessage(sessions.error)}</p> : <div className="list-stack">{sessions.data?.map(item => <div className="list-row" key={item.id}><div><strong>{item.current ? "This device" : item.provider}</strong><span>{item.userAgent || "Unknown browser"}</span></div>{!item.revokedAt && <button type="button" onClick={() => void revoke(item.id).catch(error => notify(errorMessage(error)))}>Revoke</button>}</div>)}</div>}
@@ -1359,7 +1359,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
         <label className="wide" htmlFor="trip-purpose">Purpose<textarea id="trip-purpose" name="trip-purpose" value={purpose} onChange={event => setPurpose(event.target.value)} /></label>
       </div>
       <p className="muted">Duration: {days || "-"} day(s). Estimated trip cost: {formatMoney(tripTotal({ days, perDiem: Number(perDiem) || 0, travelCost: Number(travelCost) || 0 }), state.settings.company.currency)}.</p>
-      <div className="modal-actions"><button className="primary" onClick={submit}>Add trip request</button></div>
+      <div className="form-actions"><button className="primary" onClick={submit}>Add trip request</button></div>
     </div>}
     <div className="panel">
       <div className="panel-head"><h3>Trip Register</h3><span>{state.businessTrips.length} records</span></div>
@@ -1436,7 +1436,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
         <label htmlFor="expense-amount">Amount<input id="expense-amount" name="expense-amount" type="number" min="0" value={amount} onChange={event => setAmount(event.target.value)} /></label>
         <label className="wide" htmlFor="expense-description">Description<textarea id="expense-description" name="expense-description" value={description} onChange={event => setDescription(event.target.value)} /></label>
       </div>
-      <div className="modal-actions"><button className="primary" onClick={submit}>Submit expense</button></div>
+      <div className="form-actions"><button className="primary" onClick={submit}>Submit expense</button></div>
     </div>}
     <div className="panel">
       <div className="panel-head"><h3>Expense Register</h3><span>{state.expenses.length} records</span></div>
@@ -1793,7 +1793,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
         <label>Posted on<input id="recruitment-job-posted" name="recruitment-job-posted" type="date" value={jobPostedOn} onChange={event => setJobPostedOn(event.target.value)} /></label>
         <label className="wide" htmlFor="recruitment-job-description">Description<textarea id="recruitment-job-description" name="recruitment-job-description" value={jobDescription} onChange={event => setJobDescription(event.target.value)} /></label>
       </div>
-      <div className="modal-actions"><button className="primary" onClick={saveJob}>{editingJobId ? "Update opening" : "Add opening"}</button></div></>}
+      <div className="form-actions"><button className="primary" onClick={saveJob}>{editingJobId ? "Update opening" : "Add opening"}</button></div></>}
       <DataTable
         empty="No job openings yet."
         columns={["Title", "Department", "Openings", "Candidates", "Posted", "Status", "Actions"]}
@@ -1826,7 +1826,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
         <label>Rating (0-5)<input id="candidate-rating" name="candidate-rating" type="number" min="0" max="5" value={candidateRating} onChange={event => setCandidateRating(event.target.value)} /></label>
         <label className="wide" htmlFor="candidate-notes">Notes<textarea id="candidate-notes" name="candidate-notes" value={candidateNotes} onChange={event => setCandidateNotes(event.target.value)} /></label>
       </div>
-      <div className="modal-actions"><button className="primary" onClick={saveCandidate}>{editingCandidateId ? "Update candidate" : "Add candidate"}</button></div></>}
+      <div className="form-actions"><button className="primary" onClick={saveCandidate}>{editingCandidateId ? "Update candidate" : "Add candidate"}</button></div></>}
 
       <div className="recruitment-pipeline">
         {candidateStages.map(stage => {
@@ -1910,7 +1910,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
         <div><span>Open advances</span><strong>{formatMoney(summary.tripAdvanceDeduction, state.settings.company.currency)}</strong></div>
         <div><span>EOS payable</span><strong>{formatMoney(summary.netSettlement, state.settings.company.currency)}</strong></div>
       </div>}
-      {employee && canExport && <div className="modal-actions">
+      {employee && canExport && <div className="form-actions">
         <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf("gratuity_statement", employee, state, reason), "gratuity_statement", employee.id))}>Gratuity PDF</button>
         <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf("final_settlement", employee, state, reason), "final_settlement", employee.id))}>Settlement PDF</button>
       </div>}

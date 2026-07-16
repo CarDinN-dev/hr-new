@@ -1160,6 +1160,7 @@ button:focus-visible {
 .inline-controls,
 .row-actions,
 .modal-actions,
+.form-actions,
 .hero-actions {
   display: flex;
   align-items: center;
@@ -2138,9 +2139,14 @@ summary {
   grid-column: 1 / -1;
 }
 
-.modal-actions {
+.modal-actions,
+.form-actions {
   justify-content: flex-end;
   margin-top: 1rem;
+}
+
+.form-grid > .form-actions {
+  grid-column: 1 / -1;
 }
 
 .profile-head {
@@ -5186,7 +5192,7 @@ summary {
   padding: 0;
 }
 
-.modal .modal-actions {
+.modal-backdrop > .modal .modal-actions {
   position: sticky;
   bottom: -1.35rem;
   z-index: 2;
@@ -5465,13 +5471,13 @@ summary {
     padding: 1rem;
   }
 
-  .modal .modal-actions {
+  .modal-backdrop > .modal .modal-actions {
     bottom: -1rem;
     margin: 1rem -1rem -1rem;
     padding: 0.8rem 1rem calc(0.8rem + env(safe-area-inset-bottom));
   }
 
-  .modal .modal-actions button {
+  .modal-backdrop > .modal .modal-actions button {
     flex: 1 1 120px;
   }
 
