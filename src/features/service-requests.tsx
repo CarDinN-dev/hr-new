@@ -34,7 +34,7 @@ export function ServiceRequestsPanel({ session, notify }: { session: BackendSess
   const canRead = hasAnyPermission(session, "service_request.self.read", "service_request.hr.read", "service_request.read_all");
   const requests = useQuery({
     queryKey: workflowKey(session, "service-requests"),
-    queryFn: () => apiList<ServiceRequest>("/service-requests?limit=100"),
+    queryFn: () => apiList<ServiceRequest>("/service-requests"),
     enabled: canRead,
   });
   const refresh = () => Promise.all([

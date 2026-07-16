@@ -36,7 +36,7 @@ export function SystemWorkflowSettings({ session, notify }: { session: BackendSe
 
   const users = useQuery({
     queryKey: key(session, "system-workflow-users"),
-    queryFn: () => apiList<SystemUser>("/system/users?limit=100&isActive=true"),
+    queryFn: () => apiList<SystemUser>("/system/users?isActive=true"),
     enabled: canRead,
   });
   const policies = useQuery({

@@ -41,9 +41,9 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   const client = useQueryClient();
   const broad = hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
   const canInbox = hasAnyPermission(session, "leave.team.approve_line_manager", "leave.management.approve_manager", "leave.hr.approve", "leave.executive.approve_cpo", "leave.executive.approve_coo", "leave.executive.self_approve_coo");
-  const records = useQuery({ queryKey: workflowKey(session, "leave-records", broad), queryFn: () => apiList<LeaveRecord>(broad ? "/leave/requests?limit=100" : "/leave/mine?limit=100") });
-  const inbox = useQuery({ queryKey: workflowKey(session, "leave-inbox"), queryFn: () => apiList<LeaveRecord>("/leave/inbox?limit=100"), enabled: canInbox });
-  const leaveTypes = useQuery({ queryKey: workflowKey(session, "leave-types"), queryFn: () => apiList<LeaveTypeRecord>("/leave/types?limit=100") });
+  const records = useQuery({ queryKey: workflowKey(session, "leave-records", broad), queryFn: () => apiList<LeaveRecord>(broad ? "/leave/requests" : "/leave/mine") });
+  const inbox = useQuery({ queryKey: workflowKey(session, "leave-inbox"), queryFn: () => apiList<LeaveRecord>("/leave/inbox"), enabled: canInbox });
+  const leaveTypes = useQuery({ queryKey: workflowKey(session, "leave-types"), queryFn: () => apiList<LeaveTypeRecord>("/leave/types") });
   const [form, setForm] = useState({ leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false, reason: "" });
   const [decision, setDecision] = useState<Decision | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
