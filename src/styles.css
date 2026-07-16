@@ -759,19 +759,6 @@ button:focus-visible {
 .content > .report-grid,
 .content > .settings-grid {
   min-width: 0;
-  animation: contentIn 220ms ease both;
-}
-
-@keyframes contentIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 .hero-panel {
