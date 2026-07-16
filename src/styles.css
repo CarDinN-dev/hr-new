@@ -2862,6 +2862,33 @@ summary {
   margin-bottom: 1rem;
 }
 
+.audit-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.85rem;
+}
+
+.audit-pagination > .muted {
+  margin-right: auto;
+}
+
+.audit-pagination label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.audit-pagination select {
+  width: auto;
+  min-width: 76px;
+}
+
 .switch-row {
   display: flex;
   align-items: center;

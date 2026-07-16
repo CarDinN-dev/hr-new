@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ShieldCheck } from "lucide-react";
-import { apiDownload, apiList, apiRequest, hasPermission, type BackendSession } from "../api";
+import { apiDownload, apiList, apiPage, apiRequest, hasPermission, type BackendSession } from "../api";
 
 type AuditEvent = {
   id: string;
@@ -34,22 +34,30 @@ type LegalHold = {
   createdBy?: { email: string };
 };
 
+type PaginationMeta = {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+};
+
 const queryKey = (session: BackendSession, name: string, ...parts: unknown[]) =>
   [name, session.sessionId, session.authorizationVersion, ...parts] as const;
 
 export function AuditHistoryPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
   const client = useQueryClient();
   const [filters, setFilters] = useState({ search: "", outcome: "", action: "", resourceType: "", dateFrom: "", dateTo: "" });
+  const [pagination, setPagination] = useState({ page: 1, limit: 15 });
   const [exportFormat, setExportFormat] = useState<"CSV" | "PDF" | null>(null);
   const [exportReason, setExportReason] = useState("");
   const [policyDraft, setPolicyDraft] = useState<{ enabled: boolean; retentionDays: number; reason: string } | null>(null);
   const [holdDraft, setHoldDraft] = useState({ name: "", reason: "", resourceType: "", resourceId: "", endsAt: "" });
   const [release, setRelease] = useState<{ hold: LegalHold; reason: string } | null>(null);
-  const params = auditParams(filters);
+  const params = auditParams(filters, pagination);
 
   const events = useQuery({
     queryKey: queryKey(session, "audit-events", params.toString()),
-    queryFn: () => apiList<AuditEvent>(`/audit/events?${params}`),
+    queryFn: () => apiPage<AuditEvent, PaginationMeta>(`/audit/events?${params}`),
   });
   const chain = useQuery({
     queryKey: queryKey(session, "audit-chain"),
@@ -122,6 +130,15 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
     notify("Audit export downloaded.");
   }
 
+  function updateFilter(name: keyof typeof filters, value: string) {
+    setFilters(previous => ({ ...previous, [name]: value }));
+    setPagination(previous => ({ ...previous, page: 1 }));
+  }
+
+  const page = events.data?.meta?.page ?? pagination.page;
+  const totalPages = events.data?.meta?.totalPages ?? 1;
+  const total = events.data?.meta?.total ?? 0;
+
   return <section className="stack">
     <div className="panel">
       <div className="panel-head">
@@ -141,14 +158,21 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
         </div>}
       </div>
       <div className="form-grid compact audit-filters">
-        <label>Search<input type="search" value={filters.search} onChange={event => setFilters(previous => ({ ...previous, search: event.target.value }))} /></label>
-        <label>Outcome<select value={filters.outcome} onChange={event => setFilters(previous => ({ ...previous, outcome: event.target.value }))}><option value="">All</option><option>SUCCESS</option><option>DENIED</option><option>FAILED</option></select></label>
-        <label>Action<input value={filters.action} onChange={event => setFilters(previous => ({ ...previous, action: event.target.value.toUpperCase() }))} /></label>
-        <label>Resource type<input value={filters.resourceType} onChange={event => setFilters(previous => ({ ...previous, resourceType: event.target.value }))} /></label>
-        <label>From<input type="date" value={filters.dateFrom} onChange={event => setFilters(previous => ({ ...previous, dateFrom: event.target.value }))} /></label>
-        <label>To<input type="date" value={filters.dateTo} onChange={event => setFilters(previous => ({ ...previous, dateTo: event.target.value }))} /></label>
+        <label>Search<input type="search" value={filters.search} onChange={event => updateFilter("search", event.target.value)} /></label>
+        <label>Outcome<select value={filters.outcome} onChange={event => updateFilter("outcome", event.target.value)}><option value="">All</option><option>SUCCESS</option><option>DENIED</option><option>FAILED</option></select></label>
+        <label>Action<input value={filters.action} onChange={event => updateFilter("action", event.target.value.toUpperCase())} /></label>
+        <label>Resource type<input value={filters.resourceType} onChange={event => updateFilter("resourceType", event.target.value)} /></label>
+        <label>From<input type="date" value={filters.dateFrom} onChange={event => updateFilter("dateFrom", event.target.value)} /></label>
+        <label>To<input type="date" value={filters.dateTo} onChange={event => updateFilter("dateTo", event.target.value)} /></label>
       </div>
-      {events.isPending ? <p className="muted">Loading audit history…</p> : events.isError ? <p className="sync-alert">{events.error.message}</p> : <div className="table-wrap"><table><thead><tr><th>Sequence</th><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason</th></tr></thead><tbody>{events.data?.map(item => <tr key={item.id}><td>{item.sequence}</td><td>{new Date(item.occurredAtUtc).toLocaleString()}</td><td>{item.actorEmailSnapshot || "System"}</td><td>{item.action}</td><td>{item.resourceType}{item.resourceId ? <small><br />{item.resourceId}</small> : null}</td><td>{item.outcome}</td><td>{item.reason || "—"}</td></tr>)}</tbody></table></div>}
+      {events.isPending ? <p className="muted">Loading audit history…</p> : events.isError ? <p className="sync-alert">{events.error.message}</p> : <>
+        <div className="table-wrap"><table><thead><tr><th>Sequence</th><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason</th></tr></thead><tbody>{events.data?.data.map(item => <tr key={item.id}><td>{item.sequence}</td><td>{new Date(item.occurredAtUtc).toLocaleString()}</td><td>{item.actorEmailSnapshot || "System"}</td><td>{item.action}</td><td>{item.resourceType}{item.resourceId ? <small><br />{item.resourceId}</small> : null}</td><td>{item.outcome}</td><td>{item.reason || "—"}</td></tr>)}</tbody></table></div>
+        <div className="audit-pagination">
+          <span className="muted" aria-live="polite">Page {page} of {totalPages} · {total} entries</span>
+          <label>Entries per page<select value={pagination.limit} onChange={event => setPagination({ page: 1, limit: Number(event.target.value) })}><option value={15}>15</option><option value={50}>50</option><option value={100}>100</option></select></label>
+          <div className="inline-controls"><button disabled={page <= 1 || events.isFetching} onClick={() => setPagination(previous => ({ ...previous, page: previous.page - 1 }))}>Previous</button><button disabled={page >= totalPages || events.isFetching} onClick={() => setPagination(previous => ({ ...previous, page: previous.page + 1 }))}>Next</button></div>
+        </div>
+      </>}
     </div>
 
     {hasPermission(session, "audit.configure") && <>
@@ -177,11 +201,13 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
   </section>;
 }
 
-function auditParams(filters: { search: string; outcome: string; action: string; resourceType: string; dateFrom: string; dateTo: string }) {
+export function auditParams(filters: { search: string; outcome: string; action: string; resourceType: string; dateFrom: string; dateTo: string }, pagination: { page: number; limit: number }) {
   const params = new URLSearchParams();
   for (const [name, value] of Object.entries(filters)) if (value) params.set(name, value);
   if (filters.dateFrom) params.set("dateFrom", new Date(`${filters.dateFrom}T00:00:00Z`).toISOString());
   if (filters.dateTo) params.set("dateTo", new Date(`${filters.dateTo}T23:59:59.999Z`).toISOString());
+  params.set("page", String(pagination.page));
+  params.set("limit", String(pagination.limit));
   return params;
 }
 
