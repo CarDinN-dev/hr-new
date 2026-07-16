@@ -731,7 +731,7 @@ function TeamPage({ state, session, notify }: { state: HrState; session: Backend
   </div>;
 }
 
-type DashboardAttendanceReport = { data: { summary: { totalRecords: number; byStatus: Record<string, number> } } };
+type DashboardAttendanceReport = { summary: { totalRecords: number; byStatus: Record<string, number> } };
 type DashboardLeave = { id: string; status: string; startDate: string; endDate: string; totalDays: string; employee: { firstName: string; lastName: string }; leaveType: { name: string } };
 type DashboardPayrollRun = { id: string; year: number; month: number; status: string; _count?: { payrolls: number } };
 type DashboardPayslip = { id: string; netPay: string };
@@ -749,8 +749,9 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const currentYear = new Date().getFullYear(); const currentMonth = new Date().getMonth() + 1;
   const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}&limit=100`), enabled: hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
   const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}&limit=100`), enabled: hasPermission(session, "payroll.payslip.read_all") });
-  const byStatus = attendance.data?.data.summary.byStatus;
-  const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendance.data!.data.summary.totalRecords) } : fallbackAttendance;
+  const attendanceSummary = attendance.data?.summary;
+  const byStatus = attendanceSummary?.byStatus;
+  const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendanceSummary.totalRecords) } : fallbackAttendance;
   const pendingLeave = (leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
   const currentPayroll = payrollRuns.data ?? [];
   const expiringDocs = state.employees.filter(employee => daysUntil(employee.fields["QID Expiry Date"]) <= 60 || daysUntil(employee.fields["Passport Expiry Date"]) <= 60);

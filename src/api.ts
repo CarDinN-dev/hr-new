@@ -328,6 +328,11 @@ export async function apiList<T>(path: string) {
   throw new ApiError("The data set is too large to load safely.", 422);
 }
 
+export async function apiPage<T, M = unknown>(path: string, init: RequestInit & { csrfToken?: string } = {}) {
+  const envelope = await apiRequestEnvelope<T[]>(path, init);
+  return { data: envelope.data ?? [], meta: envelope.meta as M | undefined };
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<T> {
   const envelope = await apiRequestEnvelope<T>(path, init);
   return envelope.data as T;
