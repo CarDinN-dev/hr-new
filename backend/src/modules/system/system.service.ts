@@ -420,9 +420,8 @@ export class SystemService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const now = new Date();
-    const access = this.authorization.scopeRule(actor, 'session.manage', AccessScopeType.ALL_SYSTEM);
     const where: Prisma.AuthSessionWhereInput = {
-      id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds },
+      ...this.sessionScopeWhere(actor),
       userId: query.userId,
       ...(query.active === true ? { revokedAt: null, expiresAt: { gt: now } } : {}),
       ...(query.active === false ? { OR: [{ revokedAt: { not: null } }, { expiresAt: { lte: now } }] } : {}),
@@ -437,6 +436,40 @@ export class SystemService {
       this.prisma.authSession.count({ where }),
     ]);
     return { data, meta: paginationMeta(total, page, limit) };
+  }
+
+  revokeAllSessions(dto: RevokeSystemSessionDto, actor: RequestUser) {
+    this.assertSystemScope(actor, 'session.manage');
+    return this.serializable(async (tx) => {
+      const now = new Date();
+      const sessions = await tx.authSession.findMany({
+        where: { ...this.sessionScopeWhere(actor), revokedAt: null, expiresAt: { gt: now } },
+        select: { id: true, userId: true },
+      });
+      const sessionIds = sessions.map((session) => session.id);
+      const userIds = [...new Set(sessions.map((session) => session.userId))];
+      const revoked = sessionIds.length
+        ? await tx.authSession.updateMany({ where: { id: { in: sessionIds }, revokedAt: null }, data: { revokedAt: now } })
+        : { count: 0 };
+      if (userIds.length) {
+        await tx.notification.createMany({
+          data: userIds.map((userId) => ({
+            userId, type: 'SESSION_REVOKED', title: 'Sessions revoked',
+            message: 'An administrator revoked all active sessions.', resourceType: 'AuthSession', resourceId: actor.sessionId,
+          })),
+        });
+      }
+      await this.audit.record(tx, actor, {
+        action: AuditAction.REVOKE, resourceType: 'AuthSessionBulk', resourceId: actor.sessionId,
+        summary: 'Administrative bulk session revocation', reason: dto.reason,
+        after: { revokedCount: revoked.count, affectedUserCount: userIds.length },
+      });
+      return {
+        revokedCount: revoked.count,
+        affectedUserCount: userIds.length,
+        currentSessionRevoked: sessionIds.includes(actor.sessionId),
+      };
+    });
   }
 
   revokeSession(id: string, dto: RevokeSystemSessionDto, actor: RequestUser) {
@@ -536,6 +569,15 @@ export class SystemService {
     }).catch(() => undefined);
     if (resourceId) throw new NotFoundException('Record not found');
     throw new ForbiddenException('Insufficient permission');
+  }
+
+  private sessionScopeWhere(actor: RequestUser): Prisma.AuthSessionWhereInput {
+    const access = this.authorization.scopeRule(actor, 'session.manage', AccessScopeType.ALL_SYSTEM);
+    return {
+      id: access.unrestricted
+        ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined)
+        : { in: access.includeIds, notIn: access.excludeIds },
+    };
   }
 
   private notifyAccessChange(

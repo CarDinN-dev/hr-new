@@ -468,4 +468,16 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   ]);
   assert.deepEqual(databaseCounts.slice(0, 2), [8, require('../prisma/rbac-catalog.json').permissions.length]);
   assert.ok(databaseCounts[2] > 30);
+
+  const bulkTarget = await loginRole('EMPLOYEE');
+  const searchedSessions = await api('/system/sessions?active=true&page=1&limit=10&search=rbac.employee', {}, sessions.ADMIN);
+  assert.equal(searchedSessions.status, 200);
+  assert.ok(searchedSessions.data.length <= 10);
+  assert.ok(searchedSessions.data.every((entry) => entry.user.email === personaEmail('EMPLOYEE')));
+  const bulkRevocation = await api('/system/sessions/revoke-all', { method: 'POST', body: { reason: 'Administrative bulk session revocation test' } }, sessions.ADMIN);
+  assert.equal(bulkRevocation.status, 201);
+  assert.equal(bulkRevocation.data.currentSessionRevoked, true);
+  assert.ok(bulkRevocation.data.revokedCount >= 2);
+  assert.equal((await api('/auth/me', {}, bulkTarget)).status, 401);
+  assert.equal((await api('/auth/me', {}, sessions.ADMIN)).status, 401);
 });

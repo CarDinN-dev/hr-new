@@ -35,6 +35,7 @@ export class SystemController {
 
   @Permissions('permission.read') @Get('permissions') permissions(@CurrentUser() user: RequestUser) { return this.system.listPermissions(user); }
   @Permissions('session.manage') @Get('sessions') sessions(@Query() query: QuerySystemSessionsDto, @CurrentUser() user: RequestUser) { return this.system.listSessions(query, user); }
+  @Permissions('session.manage') @Post('sessions/revoke-all') revokeAllSessions(@Body() dto: RevokeSystemSessionDto, @CurrentUser() user: RequestUser) { return this.system.revokeAllSessions(dto, user); }
   @Permissions('session.manage') @Post('sessions/:id/revoke') revokeSession(@Param('id') id: string, @Body() dto: RevokeSystemSessionDto, @CurrentUser() user: RequestUser) { return this.system.revokeSession(id, dto, user); }
 
   @Permissions('workflow.policy.read') @Get('workflow-policy') workflowPolicies(@CurrentUser() user: RequestUser) { return this.system.listWorkflowPolicies(user); }
