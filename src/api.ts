@@ -317,9 +317,12 @@ export async function logoutBackend(session: BackendSession) {
 
 export async function apiList<T>(path: string) {
   const records: T[] = [];
+  const [pathname, query = ""] = path.split("?", 2);
+  const params = new URLSearchParams(query);
+  params.set("limit", "100");
   for (let page = 1; page <= 100; page += 1) {
-    const separator = path.includes("?") ? "&" : "?";
-    const envelope = await apiRequestEnvelope<T[]>(`${path}${separator}page=${page}&limit=100`);
+    params.set("page", String(page));
+    const envelope = await apiRequestEnvelope<T[]>(`${pathname}?${params}`);
     const pageRecords = envelope.data ?? [];
     records.push(...pageRecords);
     const meta = envelope.meta as { totalPages?: number } | undefined;
