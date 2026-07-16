@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const test = require('node:test');
+const { plainToInstance } = require('class-transformer');
+const { validateSync } = require('class-validator');
 const {
   AccessScopeType,
   AttendanceStatus,
@@ -10,6 +12,7 @@ const {
 } = require('@prisma/client');
 const { HttpExceptionFilter } = require('../dist/common/filters/http-exception.filter');
 const { listArgs } = require('../dist/common/utils/crud.util');
+const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto');
 const { PermissionsGuard } = require('../dist/modules/authorization/permissions.guard');
 const { AuthorizationService } = require('../dist/modules/authorization/authorization.service');
 const { AttendanceService } = require('../dist/modules/attendance/attendance.service');
@@ -18,6 +21,8 @@ const { JwtStrategy } = require('../dist/modules/auth/strategies/jwt.strategy');
 const { MicrosoftAuthService } = require('../dist/modules/auth/microsoft-auth.service');
 const { DocumentsService } = require('../dist/modules/documents/documents.service');
 const { LoansService } = require('../dist/modules/loans/loans.service');
+const { LeaveService } = require('../dist/modules/leave/leave.service');
+const { PayrollService } = require('../dist/modules/payroll/payroll.service');
 const { EmploymentContractsService } = require('../dist/modules/employment-contracts/employment-contracts.service');
 const { PerformanceReviewsService } = require('../dist/modules/performance-reviews/performance-reviews.service');
 const { SystemService } = require('../dist/modules/system/system.service');
@@ -104,6 +109,23 @@ const audit = { record: async () => undefined };
 test('generic list helpers never expose soft-deleted records', () => {
   const args = listArgs({ page: 1, limit: 20, includeDeleted: true }, {});
   assert.deepEqual(args.where.AND[0], { deletedAt: null });
+});
+
+test('pagination accepts identical duplicate values but rejects conflicting values', () => {
+  const duplicate = plainToInstance(PaginationQueryDto, { page: ['1', '1'], limit: ['100', '100'] });
+  assert.equal(validateSync(duplicate).length, 0);
+  assert.equal(duplicate.page, 1);
+  assert.equal(duplicate.limit, 100);
+
+  const conflicting = plainToInstance(PaginationQueryDto, { limit: ['20', '100'] });
+  assert.ok(validateSync(conflicting).some((error) => error.property === 'limit'));
+});
+
+test('unlinked self-service list endpoints return empty collections', async () => {
+  const actor = user({ employeeId: null });
+  const expected = { data: [], meta: { total: 0, page: 1, limit: 100, totalPages: 1 } };
+  assert.deepEqual(await LeaveService.prototype.listMine.call({}, { page: 1, limit: 100 }, actor), expected);
+  assert.deepEqual(await PayrollService.prototype.listMyPayslips.call({}, { page: 1, limit: 100 }, actor), expected);
 });
 
 test('permissions guard is default-deny and implements all/any without an administrator bypass', async () => {

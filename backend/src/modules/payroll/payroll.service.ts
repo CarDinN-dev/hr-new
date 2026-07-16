@@ -300,7 +300,7 @@ export class PayrollService {
   }
 
   async listMyPayslips(query: QueryPayrollDto, user: RequestUser) {
-    if (!user.employeeId) throw new NotFoundException('No employee profile is linked to this user');
+    if (!user.employeeId) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
     return this.listPayslipsInternal(query, user, { employeeId: user.employeeId, revokedAt: null, payrollRun: { status: { in: [PayrollRunStatus.PUBLISHED, PayrollRunStatus.PAID] } } });
   }
 

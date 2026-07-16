@@ -664,7 +664,7 @@ type AuthSessionRecord = {
 };
 
 function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void> }) {
-  const employee = state.employees.find(item => item.id === session.employeeId) ?? state.employees[0];
+  const employee = state.employees.find(item => item.id === session.employeeId);
   const [basic, setBasic] = useState({ firstName: "", lastName: "", phone: "", address: "", emergencyContactName: "", emergencyContactPhone: "" });
   const [bank, setBank] = useState({ bankCode: "", iban: "", accountNumber: "" });
   const sessions = useQuery({
@@ -709,10 +709,10 @@ function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState
         {hasPermission(session, "employee.self.update_basic") && <div className="modal-actions"><button className="primary" type="button" onClick={() => void saveBasic().catch(error => notify(errorMessage(error)))}>Save personal details</button></div>}
       </div>}
     </section>
-    {hasPermission(session, "employee.self.read_bank") && <section className="panel"><div className="panel-head"><div><h3>Bank details</h3><span>Used for salary payment.</span></div></div><div className="form-grid">
+    {hasPermission(session, "employee.self.read_bank") && <section className="panel"><div className="panel-head"><div><h3>Bank details</h3><span>Used for salary payment.</span></div></div>{!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
       {(["bankCode", "iban", "accountNumber"] as const).map(key => <label key={key}>{({ bankCode: "Bank code", iban: "IBAN", accountNumber: "Account number" } as const)[key]}<input value={bank[key]} onChange={event => setBank(value => ({ ...value, [key]: event.target.value }))} /></label>)}
       {hasPermission(session, "employee.self.update_bank") && <div className="modal-actions"><button className="primary" type="button" onClick={() => void saveBank().catch(error => notify(errorMessage(error)))}>Save bank details</button></div>}
-    </div></section>}
+    </div>}</section>}
     <section className="panel"><div className="panel-head"><div><h3>Signed-in devices</h3><span>Revoke sessions you no longer use.</span></div></div>
       {sessions.isPending ? <p className="muted">Loading sessions...</p> : sessions.isError ? <p className="muted">{errorMessage(sessions.error)}</p> : <div className="list-stack">{sessions.data?.map(item => <div className="list-row" key={item.id}><div><strong>{item.current ? "This device" : item.provider}</strong><span>{item.userAgent || "Unknown browser"}</span></div>{!item.revokedAt && <button type="button" onClick={() => void revoke(item.id).catch(error => notify(errorMessage(error)))}>Revoke</button>}</div>)}</div>}
     </section>
