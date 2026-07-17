@@ -252,9 +252,12 @@ export async function loadBackendState(current: HrState, session: BackendSession
     const employeeId = String(item.employeeId || "");
     if (!day || !employeeId) continue;
     attendanceState[day] ??= {};
-    attendanceApprovals[day] ??= {};
-    attendanceState[day][employeeId] = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
-    attendanceApprovals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
+    const code = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
+    attendanceState[day][employeeId] = code;
+    if (code === "H" || code === "A") {
+      attendanceApprovals[day] ??= {};
+      attendanceApprovals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
+    }
   }
   const company = settings ? {
     name: String(settings.name || current.settings.company.name),
@@ -344,9 +347,12 @@ export async function loadBackendAttendancePeriod(year: number, month: number) {
     const employeeId = String(item.employeeId || "");
     if (!day || !employeeId) continue;
     attendance[day] ??= {};
-    approvals[day] ??= {};
-    attendance[day][employeeId] = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
-    approvals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
+    const code = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
+    attendance[day][employeeId] = code;
+    if (code === "H" || code === "A") {
+      approvals[day] ??= {};
+      approvals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
+    }
   }
   return { attendance, approvals, prefix: `${year}-${String(month).padStart(2, "0")}` };
 }

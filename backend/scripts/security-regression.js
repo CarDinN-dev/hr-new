@@ -289,6 +289,30 @@ test('attendance dates, lateness, and hours are derived by the server', () => {
   assert.equal(attendance.companyDay(new Date('2026-07-13T21:30:00Z')).toISOString(), '2026-07-14T00:00:00.000Z');
 });
 
+test('attendance approval decisions survive an attendance correction and are audited', async () => {
+  const record = {
+    id: 'attendance-1', employeeId: 'employee-1', attendanceDate: new Date('2026-07-14T00:00:00Z'),
+    checkIn: null, checkOut: null, status: AttendanceStatus.HALF_DAY, approvalStatus: 'NOT_APPROVED', notes: null,
+    workingHours: new Prisma.Decimal(0),
+  };
+  let updateData; let auditEvent;
+  const tx = {
+    attendance: {
+      findFirst: async () => record,
+      update: async ({ data }) => { updateData = data; return { ...record, ...data }; },
+    },
+    payroll: { findFirst: async () => null },
+    attendanceCorrection: { create: async () => ({}) },
+  };
+  const prisma = { $transaction: async (operation) => operation(tx) };
+  const attendance = new AttendanceService(prisma, { record: async (_tx, _user, event) => { auditEvent = event; } }, authorizationStub());
+  await attendance.update('attendance-1', { approvalStatus: 'APPROVED', correctionReason: 'Manager approved attendance' }, user({ permissions: ['attendance.hr.manage'] }));
+  assert.equal(updateData.approvalStatus, 'APPROVED');
+  assert.deepEqual(auditEvent.changes.find((change) => change.field === 'approvalStatus'), {
+    field: 'approvalStatus', previousValue: 'NOT_APPROVED', nextValue: 'APPROVED',
+  });
+});
+
 test('backend payroll and audit CSV exports neutralize spreadsheet formulas', async () => {
   const auditCsv = Object.create(AuditService.prototype).auditCsv([{
     sequence: 1n, occurredAtUtc: new Date('2026-07-17T00:00:00Z'), actorEmailSnapshot: '=HYPERLINK("bad")',

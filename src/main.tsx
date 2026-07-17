@@ -454,6 +454,7 @@ function App() {
 
   async function loadAttendancePeriod(year: number, month: number) {
     const key = `${year}-${String(month).padStart(2, "0")}`;
+    await saveBackendNow();
     if (attendancePeriodsLoaded.current.has(key)) return;
     const loaded = await loadBackendAttendancePeriod(year, month);
     const replacePeriod = (records: HrState["attendance"] | HrState["attendanceApprovals"], incoming: typeof records) => ({
@@ -1212,6 +1213,12 @@ function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadP
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [importing, setImporting] = useState(false);
+  const { data: attendanceRecords = [] } = useQuery({
+    queryKey: ["attendance-records", date],
+    queryFn: () => apiList<AttendanceRecord>(`/attendance?dateFrom=${encodeURIComponent(date)}&dateTo=${encodeURIComponent(date)}`),
+    staleTime: 30_000,
+  });
+  const attendanceByEmployee = useMemo(() => new Map(attendanceRecords.map(record => [record.employeeId, record])), [attendanceRecords]);
   const active = activeEmployees(state.employees).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"]));
   const day = state.attendance[date] || {};
   const stats = attendanceStats(state.employees, state.attendance, year, month);
@@ -1305,8 +1312,8 @@ function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadP
           {canManage && <div className="inline-controls">
             <button onClick={downloadAttendanceTemplate}><Download size={16} /> Template</button>
             <label className="button-like"><Upload size={16} /> {importing ? "Importing..." : "Import attendance"}<input disabled={importing} type="file" accept=".xls,.html,.csv,.tsv,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
-            <button onClick={() => setState(prev => markAllAttendance(prev, date, "P"))}>Mark all present</button>
-            <button onClick={() => setState(prev => clearAttendanceDay(prev, date))}>Clear day</button>
+            <button onClick={() => { if (window.confirm(`Mark all active employees present for ${formatDate(date)}? Existing leave records will be retained.`)) setState(prev => markAllAttendance(prev, date, "P")); }}>Mark all present</button>
+            <button onClick={() => { if (window.confirm(`Clear all non-leave attendance records for ${formatDate(date)}?`)) setState(prev => clearAttendanceDay(prev, date)); }}>Clear day</button>
           </div>}
         </div>
 
@@ -1338,9 +1345,9 @@ function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadP
                 </div>
                 {group.employees.map(employee => {
                   const code = day[employee.id];
-                  const punch = attendancePunch(employee, code, state.settings.workdayHours, state.settings.halfDayHours);
+                  const punch = attendancePunch(attendanceByEmployee.get(employee.id), code, state.settings.workdayHours, state.settings.halfDayHours);
                   const approval = state.attendanceApprovals[date]?.[employee.id];
-                  const needsReview = (code === "H" || code === "A") && !approval;
+                  const needsReview = (code === "H" || code === "A") && approval !== "Approved";
                   return (
                     <div className="attendance-record" key={employee.id}>
                       <div className="attendance-row">
@@ -1350,7 +1357,7 @@ function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadP
                         <strong>{punch.out}</strong>
                         <strong>{punch.hours}</strong>
                         <Badge value={punch.status} />
-                        <Badge value={approval || (needsReview ? "Pending" : code ? "Approved" : "Not marked")} />
+                        <Badge value={code === "H" || code === "A" ? (approval || "Pending") : code ? "Approved" : "Not marked"} />
                         {canManage ? <div className="att-btns">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div> : <span>-</span>}
                       </div>
                       {canManage && needsReview && (
@@ -1385,13 +1392,41 @@ function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadP
   );
 }
 
-function attendancePunch(employee: EmployeeRecord, code: AttendanceCode | undefined, workdayHours: number, halfDayHours: number) {
-  void employee;
+type AttendanceRecord = {
+  employeeId: string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  workingHours?: string | number | null;
+  status?: string | null;
+  isLate?: boolean | null;
+  lateMinutes?: number | null;
+};
+
+function attendancePunch(record: AttendanceRecord | undefined, code: AttendanceCode | undefined, workdayHours: number, halfDayHours: number) {
   if (!code) return { in: "-", out: "-", hours: "-", status: "Unmarked", note: "Not recorded." };
+  if (record) {
+    const hours = Number(record.workingHours);
+    const late = record.isLate || record.status === "LATE";
+    const status = record.status === "LATE" ? "Late" : code === "L" ? "Leave" : code === "A" ? "Absent" : code === "H" ? "Half-day" : "Present";
+    const note = late ? `Late by ${record.lateMinutes ?? 0} minute(s).` : record.checkIn && !record.checkOut ? "Checked in; awaiting checkout." : record.checkIn ? "Recorded from employee punches." : "Manual attendance record.";
+    return {
+      in: formatAttendanceTime(record.checkIn),
+      out: formatAttendanceTime(record.checkOut),
+      hours: Number.isFinite(hours) ? hours.toFixed(2) : "-",
+      status,
+      note,
+    };
+  }
   if (code === "L") return { in: "Leave", out: "-", hours: "0.00", status: "Leave", note: "Approved leave day." };
   if (code === "A") return { in: "-", out: "-", hours: "0.00", status: "Absent", note: "Recorded as absent." };
   if (code === "H") return { in: "-", out: "-", hours: halfDayHours.toFixed(2), status: "Half-day", note: "Recorded as half-day." };
   return { in: "-", out: "-", hours: workdayHours.toFixed(2), status: "Present", note: "Recorded as present." };
+}
+
+function formatAttendanceTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Qatar", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
 }
 
 function AttendanceMetric({ label, value, tone }: { label: string; value: React.ReactNode; tone: "present" | "half" | "leave" | "absent" | "payroll" }) {

@@ -170,16 +170,20 @@ export function employeeImportRowPayload(employee: EmployeeRecord, departmentIds
 }
 
 async function syncAttendance(before: HrState, after: HrState, request: RequestFn) {
-  const backend = await apiList<BackendRecord>("/attendance");
-  const records = new Map(backend.map(row => [`${dateOnly(row.attendanceDate)}:${row.employeeId}`, row]));
   const keys = new Set([...attendanceKeys(before), ...attendanceKeys(after)]);
-  for (const key of keys) {
+  const changes = [...keys].map(key => {
     const [day, employeeId] = splitAttendanceKey(key);
     const oldCode = before.attendance[day]?.[employeeId];
     const nextCode = after.attendance[day]?.[employeeId];
     const oldApproval = before.attendanceApprovals[day]?.[employeeId];
     const nextApproval = after.attendanceApprovals[day]?.[employeeId];
-    if (oldCode === nextCode && oldApproval === nextApproval) continue;
+    return { key, day, employeeId, nextCode, nextApproval, changed: oldCode !== nextCode || oldApproval !== nextApproval };
+  }).filter(change => change.changed);
+  if (!changes.length) return;
+  const days = [...new Set(changes.map(change => change.day))];
+  const backend = (await Promise.all(days.map(day => apiList<BackendRecord>(`/attendance?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`)))).flat();
+  const records = new Map(backend.map(row => [`${dateOnly(row.attendanceDate)}:${row.employeeId}`, row]));
+  for (const { key, day, employeeId, nextCode, nextApproval } of changes) {
     const existing = records.get(key);
     if (!nextCode) {
       if (existing) await request(`/attendance/${existing.id}`, "DELETE");

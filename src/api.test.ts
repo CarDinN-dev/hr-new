@@ -46,21 +46,25 @@ it("follows server totalPages without an arbitrary client page ceiling", async (
   expect(fetchMock).toHaveBeenCalledTimes(103);
 });
 
-it("loads only the selected attendance month with credentialed requests", async () => {
+it("loads only the selected attendance month with credentialed requests and preserves review semantics", async () => {
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
     json: async () => ({
       success: true,
-      data: [{ employeeId: "employee-1", attendanceDate: "2026-02-17T00:00:00.000Z", status: "HALF_DAY", approvalStatus: "APPROVED" }],
+      data: [
+        { employeeId: "employee-1", attendanceDate: "2026-02-17T00:00:00.000Z", status: "HALF_DAY", approvalStatus: "APPROVED" },
+        { employeeId: "employee-2", attendanceDate: "2026-02-18T00:00:00.000Z", status: "ABSENT", approvalStatus: "NOT_APPROVED" },
+        { employeeId: "employee-3", attendanceDate: "2026-02-19T00:00:00.000Z", status: "PRESENT", approvalStatus: "NOT_APPROVED" },
+      ],
       meta: { totalPages: 1 },
     }),
   });
   vi.stubGlobal("fetch", fetchMock);
 
   await expect(loadBackendAttendancePeriod(2026, 2)).resolves.toEqual({
-    attendance: { "2026-02-17": { "employee-1": "H" } },
-    approvals: { "2026-02-17": { "employee-1": "Approved" } },
+    attendance: { "2026-02-17": { "employee-1": "H" }, "2026-02-18": { "employee-2": "A" }, "2026-02-19": { "employee-3": "P" } },
+    approvals: { "2026-02-17": { "employee-1": "Approved" }, "2026-02-18": { "employee-2": "Not approved" } },
     prefix: "2026-02",
   });
   expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/attendance?dateFrom=2026-02-01&dateTo=2026-02-28&limit=100&page=1");

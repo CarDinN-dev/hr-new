@@ -151,6 +151,7 @@ export class AttendanceService {
           checkIn: dto.checkIn ?? record.checkIn ?? undefined,
           checkOut: dto.checkOut ?? record.checkOut ?? undefined,
           status: dto.status ?? record.status,
+          approvalStatus: dto.approvalStatus ?? record.approvalStatus,
           notes: dto.notes ?? record.notes ?? undefined,
         },
         attendanceDate,
@@ -184,6 +185,7 @@ export class AttendanceService {
         changes: [
           { field: 'status', previousValue: record.status, nextValue: data.status },
           { field: 'workingHours', previousValue: previousHours.toFixed(2), nextValue: nextHours.toFixed(2) },
+          { field: 'approvalStatus', previousValue: record.approvalStatus, nextValue: data.approvalStatus },
         ],
       });
       return updated;
