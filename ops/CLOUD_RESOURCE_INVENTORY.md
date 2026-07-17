@@ -47,5 +47,4 @@ The hourly backup timer creates a custom-format PostgreSQL dump and checksum man
 
 ## External identity
 
-The Microsoft Entra application remains configured for the former Quick Tunnel callback. `MICROSOFT_LOGIN_ENABLED=false` is therefore the fail-closed production setting until an Entra administrator updates and verifies the callback for the current endpoint.
-
+Microsoft OIDC is enabled in production. The single-tenant Entra application has assignment required, implicit access-token and ID-token issuance disabled, and exactly one redirect URI: `https://resulted-supporting-alone-limitation.trycloudflare.com/api/v1/auth/microsoft/callback`. The application continues to convert Microsoft authorization-code responses into the existing server-side HR ERP session; Microsoft tokens are not stored by the browser.

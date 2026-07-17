@@ -17,7 +17,7 @@ Public endpoint: <https://resulted-supporting-alone-limitation.trycloudflare.com
 
 The requested role-assignment flow and the planned technical hardening are implemented, tested, published, and deployed. The running revision is healthy, its selected source hashes match the committed release archive, and the external VM application/database ports remain closed.
 
-Production sign-off remains blocked by business data and acceptance gates rather than an unresolved deployment failure. The reporting hierarchy is incomplete, two leave approval policies have invalid primary approvers, Microsoft OIDC remains intentionally disabled, the monitoring email channel has not been delivery-verified, and the full authenticated eight-role browser matrix has not been signed off. The single-VM Quick Tunnel design also cannot provide a 10/10 availability rating.
+Production sign-off remains blocked by business data and acceptance gates rather than an unresolved deployment failure. The reporting hierarchy is incomplete, two leave approval policies have invalid primary approvers, the monitoring email channel has not been delivery-verified, and the full authenticated eight-role browser matrix has not been signed off. The single-VM Quick Tunnel design also cannot provide a 10/10 availability rating.
 
 ## Deployed role-assignment flow
 
@@ -34,11 +34,13 @@ No database table, migration, graph dependency, or parallel authorization model 
 | GitHub | Deployed application commit `2acb92e`; branch also contains evidence-only report commits; draft PR #1; GitGuardian check passed |
 | Release archive | SHA-256 `13f6889db85569d1cf31b35201c39f148bbe87b2a2fdb6f7a0fa08df18a1dea9` |
 | Deployment | Guarded deployment `20260717T073521Z` passed backup, build, migration, local API, and web health gates |
+| Microsoft restoration | Entra callback updated and guarded configuration deployment `20260717T075244Z` passed; live providers report `microsoft: true` |
 | Images | API `cea42370607c1435a419d4f525b09ab6b01865507418b0e19c6260caccc55ddc`; web `bf68f017aceecb2e3d0fa51188ea70a7b49ee79cafa90d275d759c01f4d77ae5` |
 | Database | 15 migrations found; schema up to date; no pending migrations |
 | Runtime | PostgreSQL, API, web, and ClamAV all running healthy with zero restarts |
 | Public smoke | `/`, `/healthz`, and `/api/v1/health` returned HTTP 200 |
 | Security headers | HSTS, CSP, Permissions-Policy, Referrer-Policy, `nosniff`, and frame denial present |
+| Microsoft OIDC | Live start returned 302 to the correct single-tenant authorization endpoint with exact callback, PKCE S256, state, nonce, no-store caching, and a secure HttpOnly transaction cookie; malformed callback failed closed to `?microsoft=denied` |
 | Authorization probe | Unauthenticated role-flow mutation returned HTTP 401 |
 | Network exposure | VM ports 22, 80, 443, 3000, and 5432 were closed from the external probe; web remains loopback-bound |
 | Source integrity | Release-archive and deployed hashes matched for the role-flow UI, styles, controller, service, DTO, regression test, and `.gitattributes` |
@@ -94,7 +96,6 @@ The invalid workflow policies are the `LEAVE` workflow `CPO` and `COO` primary-a
 |---|---|---|---|
 | P0 | Approve and apply the employee/department reporting hierarchy and correct invalid leave approvers | HR/CPO/COO | Organization-readiness endpoint is clean or every top-level exception is explicitly approved |
 | P1 | Complete authenticated desktop/mobile browser acceptance for all eight roles, keyboard flow, stale/failure states, and re-login after revocation | QA with role owners | Signed matrix with no open P0/P1 defects |
-| P1 | Re-enable Microsoft OIDC only after the Entra callback is changed to the current approved endpoint | Entra administrator | Successful positive and callback-manipulation tests; no token stored in browser storage |
 | P1 | Verify monitoring notification delivery, not merely channel configuration | Operations | Received test alerts for public uptime, API/component, backup, authentication, resource, and scanner conditions |
 | P1 | Approve document/payroll/audit retention periods and align GCS lifecycle/versioning | HR/Legal | Signed schedule and verified bucket lifecycle configuration |
 | P1 | Complete a controlled live malware rejection smoke if no approved EICAR evidence is retained | Security administrator | Rejected scan record, audit entry, alert, and blocked download |
