@@ -1,0 +1,20 @@
+[Unit]
+Description=MedTech HR ERP application-consistent backup
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=HOME=/var/lib/medtech-backup
+Environment=CLOUDSDK_CONFIG=/var/lib/medtech-backup/gcloud
+StateDirectory=medtech-backup
+ExecStart=/usr/local/sbin/medtech-hr-erp-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups /run /var/lib/medtech-backup

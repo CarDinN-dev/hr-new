@@ -364,9 +364,16 @@ function App() {
   useEffect(() => {
     if (!backendSession || !backendReady.current) return;
     const timer = window.setTimeout(() => {
-      void saveBackendNow().catch(error => {
+      void saveBackendNow().catch(async error => {
         backendReady.current = false;
-        setSyncError(errorMessage(error));
+        const message = errorMessage(error);
+        try {
+          await refreshWorkspace();
+          backendReady.current = true;
+          setSyncError(`${message} Server state was reloaded; review and reapply any unsaved changes.`);
+        } catch {
+          setSyncError(`${message} Refresh failed; reload the page before retrying.`);
+        }
       });
     }, 900);
     return () => window.clearTimeout(timer);
@@ -1103,6 +1110,11 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
       notify("Employee code and full name are required.");
       return;
     }
+    const managerCode = draft.fields["Reporting Manager Employee Code/Name"].trim().split(/\s+-\s+|\s+/u)[0];
+    if (managerCode && !state.employees.some(item => item.id !== draft.id && item.status !== "Terminated" && item.fields["Employee Code"] === managerCode)) {
+      notify("Select an active reporting manager from the employee list.");
+      return;
+    }
     save(draft);
     notify(employee ? "Employee updated." : "Employee added.");
     close();
@@ -1132,10 +1144,16 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
               <summary>{section.title}</summary>
               <div className="form-grid">
               {section.fields.map(field => {
+                const isManager = field === "Reporting Manager Employee Code/Name";
+                const managerValues = isManager
+                  ? state.employees.filter(item => item.id !== draft.id && item.status !== "Terminated").map(item => `${item.fields["Employee Code"]} - ${employeeName(item)} · ${item.fields.Department || "No department"} · ${item.status}`)
+                  : undefined;
                 const options = field === "Department" ? state.settings.departments : employeeFieldOptions[field];
                 const values = options && Array.from(new Set([...options, draft.fields[field] || ""])).filter(Boolean);
                 return <label key={field}>{field}
-                  {values
+                  {isManager
+                    ? <><input list={`manager-options-${draft.id}`} value={draft.fields[field] || ""} placeholder="Search by employee code or name" onChange={event => setField(field, event.target.value.split(" · ")[0])} /><datalist id={`manager-options-${draft.id}`}>{managerValues?.map(item => <option value={item} key={item} />)}</datalist></>
+                    : values
                     ? <select value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
                     : <input type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
                 </label>;

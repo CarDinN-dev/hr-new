@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessScopeType, AuditAction, DocumentVisibility, Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { AccessScopeType, AuditAction, DocumentScanStatus, DocumentVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
@@ -11,6 +11,8 @@ import { UploadDocumentDto } from './dto/upload-document.dto';
 import { DocumentStorageService } from './document-storage.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { assertDocumentFile } from './document-file-validation';
+import { DocumentMalwareScannerService } from './document-malware-scanner.service';
 
 const documentInclude = {
   employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true } },
@@ -30,6 +32,9 @@ const documentSelect = {
   uploadedById: true,
   expiryDate: true,
   visibility: true,
+  scanStatus: true,
+  scannedAt: true,
+  scanResultCode: true,
   version: true,
   createdAt: true,
   updatedAt: true,
@@ -44,6 +49,7 @@ export class DocumentsService {
     private readonly storage: DocumentStorageService,
     private readonly audit: AuditService,
     private readonly authorization: AuthorizationService,
+    private readonly scanner: DocumentMalwareScannerService,
   ) {}
 
   async create(dto: CreateDocumentDto, user: RequestUser) {
@@ -59,7 +65,7 @@ export class DocumentsService {
 
     return this.documentTransaction(async (tx) => {
       const document = await tx.employeeDocument.create({
-        data: { ...dto, visibility, uploadedById },
+        data: { ...dto, visibility, uploadedById, scanStatus: DocumentScanStatus.CLEAN },
         select: documentSelect,
       });
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'EmployeeDocument', entityId: document.id, summary: 'Document metadata created', subjectEmployeeId: dto.employeeId });
@@ -69,6 +75,7 @@ export class DocumentsService {
 
   async upload(dto: UploadDocumentDto, file: Express.Multer.File | undefined, user: RequestUser) {
     if (!file?.buffer?.length) throw new BadRequestException('A document file is required');
+    assertDocumentFile(file);
     if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
     const manageAll = this.authorization.permissionAllowedForScope(user, 'document.hr.manage', AccessScopeType.ALL_EMPLOYEES, dto.employeeId);
     this.assertCanManageEmployeeDocument(user, dto.employeeId, manageAll);
@@ -90,7 +97,7 @@ export class DocumentsService {
       );
     const id = randomUUID();
     try {
-      return await this.documentTransaction(async (tx) => {
+      const document = await this.documentTransaction(async (tx) => {
         const sequence = await tx.documentSequence.upsert({
           where: { key: 'employee_document' },
           create: { key: 'employee_document', value: 1 },
@@ -112,6 +119,7 @@ export class DocumentsService {
             uploadedById,
             expiryDate: dto.expiryDate,
             visibility,
+            scanStatus: this.scanner.initialStatus(),
           },
           select: documentSelect,
         });
@@ -124,6 +132,8 @@ export class DocumentsService {
         });
         return document;
       });
+      this.scanner.wake();
+      return document;
     } catch (error) {
       await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
       throw error;
@@ -139,10 +149,13 @@ export class DocumentsService {
         contentType: true,
         objectName: true,
         objectGeneration: true,
+        scanStatus: true,
       },
     });
     if (!document) throw new NotFoundException('Document not found');
     if (!document.objectName) throw new NotFoundException('Stored document content is not available');
+    if (document.scanStatus === DocumentScanStatus.REJECTED) throw new NotFoundException('Document not found');
+    if (document.scanStatus !== DocumentScanStatus.CLEAN) throw new ServiceUnavailableException('Document is unavailable until malware scanning succeeds');
     const buffer = await this.storage.download(document.objectName, document.objectGeneration);
     await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'EmployeeDocument', entityId: id, summary: 'Document content downloaded', subjectEmployeeId: document.employeeId ?? undefined });
     return { buffer, fileName: document.fileName, contentType: document.contentType ?? 'application/octet-stream' };

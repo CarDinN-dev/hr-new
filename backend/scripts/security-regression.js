@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const test = require('node:test');
+const { createServer } = require('node:net');
 const bcrypt = require('bcrypt');
 const { plainToInstance } = require('class-transformer');
 const { validateSync } = require('class-validator');
@@ -23,12 +24,16 @@ const { AuthService, sessionTokenFromRequest } = require('../dist/modules/auth/a
 const { JwtStrategy } = require('../dist/modules/auth/strategies/jwt.strategy');
 const { MicrosoftAuthService } = require('../dist/modules/auth/microsoft-auth.service');
 const { DocumentsService } = require('../dist/modules/documents/documents.service');
+const { assertDocumentFile } = require('../dist/modules/documents/document-file-validation');
+const { DocumentMalwareScannerService } = require('../dist/modules/documents/document-malware-scanner.service');
 const { LoansService } = require('../dist/modules/loans/loans.service');
 const { LeaveService } = require('../dist/modules/leave/leave.service');
 const { PayrollService } = require('../dist/modules/payroll/payroll.service');
 const { EmploymentContractsService } = require('../dist/modules/employment-contracts/employment-contracts.service');
 const { PerformanceReviewsService } = require('../dist/modules/performance-reviews/performance-reviews.service');
 const { SystemService } = require('../dist/modules/system/system.service');
+const { OrganizationReadinessService } = require('../dist/modules/system/organization-readiness.service');
+const { AssignRoleFlowDto } = require('../dist/modules/system/dto/system.dto');
 const { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } = require('../dist/common/decorators/permissions.decorator');
 const { IS_PUBLIC_KEY } = require('../dist/common/decorators/public.decorator');
 
@@ -78,6 +83,35 @@ function reflector(metadata = {}) {
     },
   };
 }
+
+test('document uploads reject MIME spoofing at the shared storage boundary', () => {
+  const file = (mimetype, buffer) => ({ mimetype, buffer });
+  assert.doesNotThrow(() => assertDocumentFile(file('application/pdf', Buffer.from('%PDF-1.7\n'))));
+  assert.doesNotThrow(() => assertDocumentFile(file('image/png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))));
+  assert.throws(() => assertDocumentFile(file('application/pdf', Buffer.from('<script>alert(1)</script>'))), /does not match/);
+  assert.throws(() => assertDocumentFile(file('image/jpeg', Buffer.from('%PDF-1.7'))), /does not match/);
+});
+
+test('document scanner streams bytes to clamd and accepts only a clean response', async () => {
+  const server = createServer(socket => {
+    const chunks = [];
+    socket.on('data', chunk => chunks.push(chunk));
+    socket.on('end', () => {
+      const request = Buffer.concat(chunks);
+      assert.ok(request.subarray(0, 10).equals(Buffer.from('zINSTREAM\0')));
+      assert.ok(request.includes(Buffer.from('safe document')));
+      socket.end('stream: OK\0');
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = server.address().port;
+    const scanner = new DocumentMalwareScannerService({ get: (key, fallback) => ({ NODE_ENV: 'test', DOCUMENT_SCAN_ENABLED: 'true', CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: String(port) })[key] ?? fallback }, {}, {}, {});
+    assert.equal(await scanner.scan(Buffer.from('safe document')), 'stream: OK');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
 
 function authorizationStub() {
   return {
@@ -443,6 +477,94 @@ test('self escalation and removal of the final Super Administrator are rejected'
     }),
     /final active Super Administrator/,
   );
+});
+
+test('role flow is restricted to administrators and validates its fixed role catalogue', async () => {
+  const valid = plainToInstance(AssignRoleFlowDto, {
+    roleCodes: ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER'], expectedAuthorizationVersion: 4, reason: 'Approved responsibilities',
+  });
+  assert.equal(validateSync(valid).length, 0);
+  const invalid = plainToInstance(AssignRoleFlowDto, {
+    roleCodes: ['EMPLOYEE', 'COO'], expectedAuthorizationVersion: 4, reason: 'Invalid executive assignment',
+  });
+  assert.ok(validateSync(invalid).some((error) => error.property === 'roleCodes'));
+
+  const service = new SystemService({}, audit, authorizationStub(), { get: (_key, fallback) => fallback }, {});
+  const directGrantOnly = user({ roles: ['EMPLOYEE'], permissions: ['role.assign'] });
+  await assert.rejects(service.assignRoleFlow('target-user', valid, directGrantOnly), /Administrator role is required/);
+  await assert.rejects(service.assignRoleFlow('target-user', {
+    roleCodes: ['EMPLOYEE', 'MANAGER'], expectedAuthorizationVersion: 4, reason: 'Missing manager prerequisite',
+  }, user({ roles: ['ADMIN'], permissions: ['role.assign'] })), /requires Line Manager/);
+});
+
+test('role flow preserves locked and custom roles and uses the audited assignment transaction', async () => {
+  const role = (id, code, protection = RoleProtection.STANDARD) => ({ id, code, protection });
+  const roles = [
+    role('role-employee', 'EMPLOYEE'), role('role-line', 'LINE_MANAGER'), role('role-manager', 'MANAGER'),
+    role('role-hr', 'HR'), role('role-cpo', 'CPO'), role('role-custom', 'CUSTOM_FINANCE'),
+  ];
+  const current = [
+    { roleId: 'role-employee', role: role('role-employee', 'EMPLOYEE') },
+    { roleId: 'role-cpo', role: role('role-cpo', 'CPO') },
+    { roleId: 'role-custom', role: role('role-custom', 'CUSTOM_FINANCE') },
+  ];
+  let sessionsRevoked = false; let notificationCreated = false; let auditEvent; const upsertedRoleIds = [];
+  const prisma = {
+    $transaction: async (operation) => operation(prisma),
+    user: {
+      findFirst: async (args) => args.select?.roles
+        ? { id: 'target-user', email: 'target@example.invalid', authorizationVersion: 5, roles: [], permissionOverrides: [] }
+        : { id: 'target-user', authorizationVersion: 4 },
+      updateMany: async () => ({ count: 1 }),
+    },
+    role: {
+      findMany: async (args) => args.where.code
+        ? roles.filter((item) => args.where.code.in.includes(item.code)).map(({ id, code }) => ({ id, code }))
+        : roles.filter((item) => args.where.id.in.includes(item.id)),
+    },
+    userRole: {
+      findMany: async () => current,
+      updateMany: async () => ({ count: 1 }),
+      upsert: async (args) => { upsertedRoleIds.push(args.where.userId_roleId.roleId); return {}; },
+    },
+    authSession: { updateMany: async () => { sessionsRevoked = true; return { count: 1 }; } },
+    notification: { create: async () => { notificationCreated = true; return {}; } },
+  };
+  const service = new SystemService(prisma, { record: async (_tx, _actor, event) => { auditEvent = event; } }, authorizationStub(), { get: (_key, fallback) => fallback }, {});
+  const admin = user({ roles: ['ADMIN'], permissions: ['role.assign'] });
+  await service.assignRoleFlow('target-user', {
+    roleCodes: ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER'], expectedAuthorizationVersion: 4, reason: 'Approved manager duties',
+  }, admin);
+
+  assert.deepEqual(new Set(auditEvent.after.roleCodes), new Set(['EMPLOYEE', 'LINE_MANAGER', 'MANAGER', 'CPO', 'CUSTOM_FINANCE']));
+  assert.deepEqual(new Set(upsertedRoleIds), new Set(['role-employee', 'role-line', 'role-manager']));
+  assert.equal(sessionsRevoked, true);
+  assert.equal(notificationCreated, true);
+});
+
+test('organization remediation previews required manager roles and rejects reporting cycles', () => {
+  const service = new OrganizationReadinessService({}, audit, authorizationStub());
+  const linkedUser = (id, roles = []) => ({ id: `user-${id}`, isActive: true, deletedAt: null, authorizationVersion: 1, roles: roles.map(code => ({ role: { id: `role-${code}`, code } })) });
+  const employee = (id, managerId, roles = []) => ({ id, employeeCode: id, firstName: id, lastName: 'Test', managerId, userId: `user-${id}`, version: 1, employmentStatus: 'ACTIVE', deletedAt: null, user: linkedUser(id, roles) });
+  const state = {
+    employees: [employee('employee-1', null), employee('manager-1', null), employee('director-1', null)],
+    departments: [{ id: 'department-1', code: 'OPS', name: 'Operations', managerId: null, updatedAt: new Date(0) }],
+    roles: ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER', 'SUPER_ADMIN'].map(code => ({ id: `role-${code}`, code })),
+    workflowPolicies: [],
+  };
+  const preview = service.buildPreview(state, {
+    employeeManagers: [{ employeeId: 'employee-1', managerId: 'manager-1' }, { employeeId: 'manager-1', managerId: 'director-1' }],
+    departmentManagers: [{ departmentId: 'department-1', managerId: 'director-1' }],
+  });
+  assert.deepEqual(new Set(preview.roleAdditions.map(item => `${item.employeeId}:${item.roleCode}`)), new Set([
+    'employee-1:EMPLOYEE', 'manager-1:EMPLOYEE', 'manager-1:LINE_MANAGER',
+    'director-1:EMPLOYEE', 'director-1:LINE_MANAGER', 'director-1:MANAGER',
+  ]));
+  assert.match(preview.previewHash, /^[a-f0-9]{64}$/);
+  assert.throws(() => service.buildPreview(state, {
+    employeeManagers: [{ employeeId: 'employee-1', managerId: 'manager-1' }, { employeeId: 'manager-1', managerId: 'employee-1' }],
+    departmentManagers: [],
+  }), /cycle/);
 });
 
 test('multi-page payslips repeat headers and reserve totals and footer space', () => {

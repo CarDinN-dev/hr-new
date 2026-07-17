@@ -78,39 +78,17 @@ Changing bootstrap password variables does not rotate an existing account. Rotat
 - Keep `CORS_ORIGIN` empty when the frontend proxies `/api/v1` from the same domain.
 - Do not restart the Cloudflare tunnel during an application-only deployment; a Quick Tunnel URL can change when its process restarts.
 
+## Guided role assignment
+
+The System page contains an Admin/Super Admin-only role flow for standard operational access. It always assigns `EMPLOYEE`, guides direct-report and management-tree access through `LINE_MANAGER` and `MANAGER`, and optionally assigns `HR`. `CPO`, `COO`, `ADMIN`, `SUPER_ADMIN`, and custom roles are locked and preserved by the flow. The backend rechecks the administrator role, rejects self-assignment and stale versions, records the reason, and revokes the target user's sessions. Reporting lines are separate: use the preview-first organization remediation workflow to change `Employee.managerId`.
+
 ## Backup and restore operator procedure
 
-The application has no snapshot, scheduled-backup, rollback, or restore control. Before every production migration, an operator must create a PostgreSQL custom-format dump from the existing Compose project and record its SHA-256 digest:
+Production runs an hourly systemd backup timer through `ops/backup.sh`. Each custom-format PostgreSQL dump has a SHA-256 manifest and is uploaded through the dedicated backup identity to daily, weekly, and monthly recovery prefixes. Do not run backup or regression scripts against an unguarded production database.
 
-```sh
-cd /opt/medtech-hr-erp
-mkdir -p backups
-docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
-  pg_dump -U postgres -d hr_erp -Fc > "backups/hr_erp-$(date -u +%Y%m%dT%H%M%SZ).dump"
-sha256sum backups/hr_erp-*.dump > backups/SHA256SUMS
-sha256sum --check backups/SHA256SUMS
-```
+Production operations are consolidated in `ops/production.sh`. On the existing host, run `sudo PROJECT_DIR=/opt/medtech-hr-erp bash ops/production.sh preflight` before any release and `sudo bash ops/production.sh deploy` for the guarded backup, migration, staged service restart, health verification, and image rollback path. The malware scanner must be healthy before the API is recreated; uploaded files remain unavailable until their persisted scan state is `CLEAN`.
 
-Copy the dump and checksum to an access-controlled backup location outside the VM. Never commit either file. Verify the private document bucket has object versioning and an appropriate retention policy before deployment:
-
-```sh
-gcloud storage buckets update "gs://$GCS_DOCUMENTS_BUCKET" --versioning
-gcloud storage buckets update "gs://$GCS_DOCUMENTS_BUCKET" --retention-period=30d
-gcloud storage buckets describe "gs://$GCS_DOCUMENTS_BUCKET"
-```
-
-Retention is a governance decision; use the organization-approved duration instead of `30d` where required. Test each dump in an isolated database, never over the production database:
-
-```sh
-docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
-  createdb -U postgres hr_erp_restore_test
-docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
-  pg_restore -U postgres -d hr_erp_restore_test --clean --if-exists < backups/hr_erp-YYYYMMDDTHHMMSSZ.dump
-docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
-  psql -U postgres -d hr_erp_restore_test -c 'SELECT COUNT(*) FROM "Employee";'
-docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
-  dropdb -U postgres hr_erp_restore_test
-```
+For a restore drill, download one `hr_erp.dump` and its matching `manifest.json` using an auditor identity, then run `sudo bash ops/production.sh restore-drill /path/hr_erp.dump /path/manifest.json`. The command verifies the manifest checksum, restores into a temporary private PostgreSQL network, applies newer migrations, boots the real API image, runs its health check and financial regression, reports integrity counts, and deletes every temporary container, network, and volume.
 
 For an actual recovery, stop application writes, verify the dump checksum, restore into a newly created database, validate migrations and record counts, then switch the API only after the restore test succeeds. Recover document objects from GCS generations according to the bucket retention policy.
 

@@ -12,7 +12,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import {
-  AssignUserRolesDto, ChangeUserStatusDto, CreatePermissionOverrideDto, CreateRoleDto, CreateSystemUserDto,
+  AssignRoleFlowDto, AssignUserRolesDto, ChangeUserStatusDto, CreatePermissionOverrideDto, CreateRoleDto, CreateSystemUserDto,
   CreateWorkflowDelegationDto, QuerySystemSessionsDto, QuerySystemUsersDto,
   ReplaceRolePermissionsDto, RevokePermissionOverrideDto, RevokeSystemSessionDto,
   RevokeWorkflowDelegationDto, SystemMutationDto, UpdateRoleDto, UpdateSystemUserDto, UpdateWorkflowPolicyDto,
@@ -24,6 +24,8 @@ const activeAssignmentWhere = (now: Date): Prisma.UserRoleWhereInput => ({
   OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
   role: { isActive: true },
 });
+
+const roleFlowCodes = new Set(['EMPLOYEE', 'LINE_MANAGER', 'MANAGER', 'HR']);
 
 @Injectable()
 export class SystemService {
@@ -204,7 +206,7 @@ export class SystemService {
     });
   }
 
-  assignRoles(targetId: string, dto: AssignUserRolesDto, actor: RequestUser) {
+  assignRoles(targetId: string, dto: AssignUserRolesDto, actor: RequestUser, preservedRoleIds = new Set<string>()) {
     this.assertSystemScope(actor, 'role.assign', targetId);
     if (targetId === actor.id) throw new ForbiddenException('Self-role assignment is not permitted');
     if (!dto.roleIds.length) throw new BadRequestException('At least one active role is required');
@@ -235,6 +237,7 @@ export class SystemService {
       const now = new Date();
       await tx.userRole.updateMany({ where: { userId: targetId, revokedAt: null, roleId: { notIn: dto.roleIds } }, data: { revokedAt: now, reason: dto.reason } });
       for (const role of roles) {
+        if (preservedRoleIds.has(role.id)) continue;
         await tx.userRole.upsert({
           where: { userId_roleId: { userId: targetId, roleId: role.id } },
           create: { id: randomUUID(), userId: targetId, roleId: role.id, assignedById: actor.id, reason: dto.reason },
@@ -250,6 +253,34 @@ export class SystemService {
       });
       return this.effectivePermissionsWithClient(tx, targetId);
     });
+  }
+
+  async assignRoleFlow(targetId: string, dto: AssignRoleFlowDto, actor: RequestUser) {
+    if (!actor.roles.some((code) => code === 'ADMIN' || code === 'SUPER_ADMIN')) {
+      throw new ForbiddenException('Administrator role is required');
+    }
+    if (!dto.roleCodes.includes('EMPLOYEE')) throw new BadRequestException('Employee baseline role is required');
+    if (dto.roleCodes.includes('MANAGER') && !dto.roleCodes.includes('LINE_MANAGER')) {
+      throw new BadRequestException('Manager role requires Line Manager');
+    }
+
+    const now = new Date();
+    const [target, requestedRoles, current] = await Promise.all([
+      this.prisma.user.findFirst({ where: { id: targetId, isActive: true, deletedAt: null }, select: { id: true } }),
+      this.prisma.role.findMany({ where: { code: { in: dto.roleCodes }, isActive: true }, select: { id: true, code: true } }),
+      this.prisma.userRole.findMany({ where: { userId: targetId, ...activeAssignmentWhere(now) }, select: { roleId: true, role: { select: { code: true } } } }),
+    ]);
+    if (!target) throw new NotFoundException('Active user not found');
+    if (requestedRoles.length !== new Set(dto.roleCodes).size || requestedRoles.some((role) => !roleFlowCodes.has(role.code))) {
+      throw new BadRequestException('One or more role-flow roles do not exist or are inactive');
+    }
+
+    const preservedRoleIds = new Set(current.filter((assignment) => !roleFlowCodes.has(assignment.role.code)).map((assignment) => assignment.roleId));
+    return this.assignRoles(targetId, {
+      roleIds: [...preservedRoleIds, ...requestedRoles.map((role) => role.id)],
+      expectedAuthorizationVersion: dto.expectedAuthorizationVersion,
+      reason: dto.reason,
+    }, actor, preservedRoleIds);
   }
 
   createOverride(targetId: string, dto: CreatePermissionOverrideDto, actor: RequestUser) {

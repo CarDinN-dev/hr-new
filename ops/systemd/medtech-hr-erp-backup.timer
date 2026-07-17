@@ -1,0 +1,11 @@
+[Unit]
+Description=Run MedTech HR ERP backups hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+Unit=medtech-hr-erp-backup.service
+
+[Install]
+WantedBy=timers.target

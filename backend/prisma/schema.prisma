@@ -181,6 +181,13 @@ enum DocumentVisibility {
   PUBLIC
 }
 
+enum DocumentScanStatus {
+  PENDING
+  CLEAN
+  REJECTED
+  FAILED
+}
+
 enum TripStatus {
   PENDING
   APPROVED
@@ -970,6 +977,10 @@ model EmployeeDocument {
   uploadedById     String
   expiryDate       DateTime?
   visibility       DocumentVisibility @default(MANAGER_AND_HR)
+  scanStatus       DocumentScanStatus @default(PENDING)
+  scannedAt        DateTime?
+  scanResultCode   String?            @db.VarChar(200)
+  quarantineReference String?
   version          Int                @default(1)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
@@ -982,6 +993,7 @@ model EmployeeDocument {
   @@index([uploadedById])
   @@index([documentType])
   @@index([expiryDate])
+  @@index([scanStatus, createdAt])
   @@index([deletedAt])
 }
 
