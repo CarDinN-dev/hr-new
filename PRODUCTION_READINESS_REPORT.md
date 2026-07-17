@@ -4,7 +4,7 @@ Report date: 17 July 2026
 
 Decision: **BLOCK production sign-off**
 
-Deployed application revision: `2acb92ed4021656ded30ac9c7a5af600603fd12d`
+Deployed application revision: `85aa0ea3f5644732f63b4a83b8bcf6a27b2d58c9`
 
 GitHub branch: `codex/complete-hr-erp-remediation`
 
@@ -31,11 +31,11 @@ No database table, migration, graph dependency, or parallel authorization model 
 
 | Area | Result |
 |---|---|
-| GitHub | Deployed application commit `2acb92e`; branch also contains evidence-only report commits; draft PR #1; GitGuardian check passed |
-| Release archive | SHA-256 `13f6889db85569d1cf31b35201c39f148bbe87b2a2fdb6f7a0fa08df18a1dea9` |
-| Deployment | Guarded deployment `20260717T073521Z` passed backup, build, migration, local API, and web health gates |
+| GitHub | Deployed application commit `85aa0ea`; draft PR #1; GitHub remote head verified |
+| Release archive | Targeted committed-source archive for `85aa0ea` transferred through IAP and extracted without touching production `.env` |
+| Deployment | Guarded deployment `20260717T093313Z` passed preflight, backup, build, migration, local API, and web health gates |
 | Microsoft restoration | Entra callback updated and guarded configuration deployment `20260717T075244Z` passed; live providers report `microsoft: true` |
-| Images | API `cea42370607c1435a419d4f525b09ab6b01865507418b0e19c6260caccc55ddc`; web `bf68f017aceecb2e3d0fa51188ea70a7b49ee79cafa90d275d759c01f4d77ae5` |
+| Images | API `670e6556b8e6c70ade58c20bb80db4dca9947281a201cb62dc0e1330e83d882f`; web `936aec314e86831f44c282595cd9bde107f74ad793afe26ee22626bacebc2df5` |
 | Database | 15 migrations found; schema up to date; no pending migrations |
 | Runtime | PostgreSQL, API, web, and ClamAV all running healthy with zero restarts |
 | Public smoke | `/`, `/healthz`, and `/api/v1/health` returned HTTP 200 |
@@ -43,14 +43,14 @@ No database table, migration, graph dependency, or parallel authorization model 
 | Microsoft OIDC | Live start returned 302 to the correct single-tenant authorization endpoint with exact callback, PKCE S256, state, nonce, no-store caching, and a secure HttpOnly transaction cookie; malformed callback failed closed to `?microsoft=denied` |
 | Authorization probe | Unauthenticated role-flow mutation returned HTTP 401 |
 | Network exposure | VM ports 22, 80, 443, 3000, and 5432 were closed from the external probe; web remains loopback-bound |
-| Source integrity | Release-archive and deployed hashes matched for the role-flow UI, styles, controller, service, DTO, regression test, and `.gitattributes` |
+| Source integrity | Deployed service, save-before-period-load guard, and live-punch query markers confirmed directly on the VM after release |
 
 The first deployment preflight caught Windows CRLF line endings in shell scripts before any container or database change. A repository `.gitattributes` rule now forces `*.sh` to Linux LF. The corrected archive passed Bash parsing and production preflight before deployment.
 
 ## Automated test evidence
 
 - Frontend: production build passed; 12 test files and 43 tests passed.
-- Backend security: 24 tests passed, including Admin/Super Admin allow rules, other-role/direct-permission-only denial, invalid codes, self-assignment, stale versions, locked-role preservation, audit recording, notification, and session revocation.
+- Backend security: 25 tests passed, including Admin/Super Admin allow rules, other-role/direct-permission-only denial, invalid codes, self-assignment, stale versions, locked-role preservation, audit recording, notification, session revocation, and attendance-approval persistence.
 - RBAC: 9 tests passed. Microsoft provisioning: 4 tests passed. Financial regression: passed.
 - Disposable PostgreSQL integration: clean isolated database, migrations, and integration regression passed on the VM without touching production data.
 - Prisma validation, backend lint, Compose validation, and `git diff --check` passed.
@@ -58,6 +58,14 @@ The first deployment preflight caught Windows CRLF line endings in shell scripts
 - An isolated encrypted-backup restore drill, migrations, health smoke, and financial-consistency regression passed during the remediation program.
 
 The authenticated Chrome-profile bridge was unavailable during the final deployment run because of an internal browser-runtime conflict. Therefore this report does not claim completion of the required Admin/Super Admin/HR/Manager/Employee desktop and mobile browser matrix. Automated UI and authorization coverage passed, but authenticated browser acceptance remains a production gate.
+
+## Attendance remediation release
+
+The attendance release corrects the approval persistence defect: `PATCH /attendance/:id` now retains `approvalStatus` and records the before/after approval value in the audit event. Half-day and absent rows continue to require review after a refresh unless they are approved; ordinary present and leave rows no longer appear as “Not approved.” Rejected rows remain visibly unapproved and can be reassessed by an authorized reviewer.
+
+The page now loads the selected day’s server attendance records to display actual punch-in, punch-out, worked-hour, and late-arrival values rather than inventing attendance times. When a manager changes date or month, pending local changes are synchronously saved through the existing queue before a server period replaces the viewport state. Attendance synchronization now fetches only the changed date or dates, rather than the complete attendance history. Bulk “mark all” and “clear day” actions require a confirmation and retain leave records.
+
+Release validation on 17 July 2026: frontend production build and all 43 frontend tests passed; backend build, 25 security checks, 9 RBAC checks, and financial regression passed; Prisma validation, both production dependency audits, Compose validation using the example environment, and `git diff --check` passed. The guarded deployment reported 15 current migrations and no pending migration. Four production containers are healthy, application/database ports are loopback-only, the public health endpoint returned HTTP 200, security headers remained present, public providers report `local: true` and `microsoft: true`, and an unauthenticated role-flow mutation returned HTTP 401.
 
 ## Cloud and operational controls completed
 
