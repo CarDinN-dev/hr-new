@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { defaultState } from "./data";
-import { applyEmployeeRows, employeeTemplateColumns, parseEmployeeSheet, parseEmployeeWorkbook, parseEmployeeWorkbookRows } from "./employeeSheet";
+import { applyEmployeeRows, employeeTemplateColumns, parseEmployeeSheet, parseEmployeeWorkbook, parseEmployeeWorkbookRows, validateEmployeeImportCounts } from "./employeeSheet";
 
 describe("employee sheet import", () => {
   it("adds and updates employees from the Excel template table", () => {
@@ -71,6 +71,13 @@ describe("employee sheet import", () => {
     expect(imported.rows).toHaveLength(1);
     expect(imported.skipped).toBe(1);
     expect(imported.errors[0]).toContain("duplicated");
+    expect(() => validateEmployeeImportCounts(imported.rows.length, imported.skipped)).toThrow("Import aborted");
+  });
+
+  it("rejects the complete employee import before upload when it is empty or over the row limit", () => {
+    expect(() => validateEmployeeImportCounts(0, 0)).toThrow("No employee rows");
+    expect(() => validateEmployeeImportCounts(5_001, 0)).toThrow("5,000 rows");
+    expect(() => validateEmployeeImportCounts(5_000, 0)).not.toThrow();
   });
 
   it("opens the exact downloadable .xlsx template through the browser file path", async () => {

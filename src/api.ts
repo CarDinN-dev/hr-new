@@ -5,6 +5,7 @@ import {
   type EmployeeStatus,
   type HrState,
   type LeaveStatus,
+  type PdfTemplate,
   type PayrollSlip
 } from "./data";
 
@@ -64,7 +65,7 @@ type BackendDepartment = {
   code: string;
 };
 
-type BackendEmployee = {
+export type BackendEmployee = {
   id: string;
   employeeCode: string;
   firstName: string;
@@ -79,6 +80,10 @@ type BackendEmployee = {
   salary?: string | number;
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
+  photo?: string | null;
+  departmentId?: string | null;
+  positionId?: string | null;
+  managerId?: string | null;
   department?: BackendDepartment | null;
   position?: { title: string; code: string } | null;
   manager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
@@ -90,7 +95,7 @@ type BackendEmployee = {
   salaryRecords?: Array<Record<string, unknown>>;
 };
 
-type BackendLeave = {
+export type BackendLeave = {
   id: string;
   employeeId: string;
   startDate: string;
@@ -103,7 +108,7 @@ type BackendLeave = {
   leaveType?: { name: string } | null;
 };
 
-type BackendPayroll = {
+export type BackendPayroll = {
   id: string;
   employeeId: string;
   year: number;
@@ -117,6 +122,22 @@ type BackendPayroll = {
   status: string;
   lineItems?: Array<Record<string, unknown>>;
   employee?: BackendEmployee;
+};
+
+export type BackendEos = {
+  id?: string;
+  employeeId: string;
+  asOf: string;
+  reason: string;
+  serviceYears: string | number;
+  gratuity: string | number;
+  leaveEncashment: string | number;
+  lopDeduction: string | number;
+  expenseReimbursement: string | number;
+  tripAdvanceDeduction: string | number;
+  netSettlement: string | number;
+  status?: string;
+  createdAt?: string;
 };
 
 
@@ -150,6 +171,12 @@ export async function restoreBackendSession(): Promise<BackendSession | null> {
     if (error instanceof ApiError && error.status === 401) return null;
     throw error;
   }
+}
+
+export type AuthProviders = { local: boolean; microsoft: boolean };
+
+export function loadAuthProviders() {
+  return apiRequest<AuthProviders>("/auth/providers");
 }
 
 export function startMicrosoftLogin() {
@@ -197,11 +224,14 @@ export async function loadBackendState(current: HrState, session: BackendSession
     : hasPermission(session, "employee.self.read")
       ? apiRequest<BackendEmployee>("/employees/me").then(employee => employee ? [employee] : [])
       : Promise.resolve([] as BackendEmployee[]);
+  const now = new Date();
+  const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const currentMonthEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0)).toISOString().slice(0, 10);
   const [employees, departments, leaveTypes, attendance, leaves, payroll, trips, expenses, loans, jobs, candidates, eos, documents, settings] = await Promise.all([
     employeesRequest,
     listWhen<BackendDepartment>(hasPermission(session, "department.read"), "/departments"),
     listWhen<Record<string, unknown>>(hasAnyPermission(session, "leave.self.read", "leave.configure"), "/leave/types"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"), "/attendance"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"), `/attendance?dateFrom=${currentMonthStart}&dateTo=${currentMonthEnd}`),
     Promise.resolve([] as BackendLeave[]),
     Promise.resolve([] as Array<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>),
     listWhen<Record<string, unknown>>(hasAnyPermission(session, "trip.self.read", "trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all"), "/business-trips"),
@@ -210,7 +240,7 @@ export async function loadBackendState(current: HrState, session: BackendSession
     listWhen<Record<string, unknown>>(hasPermission(session, "recruitment.read"), "/recruitment/jobs"),
     listWhen<Record<string, unknown>>(hasPermission(session, "recruitment.read"), "/recruitment/candidates"),
     listWhen<Record<string, unknown>>(hasPermission(session, "eos.read"), "/eos"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "document.self.read", "document.hr.read"), "/documents"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "document.self.read", "document.team.read", "document.hr.read", "document.read_all"), "/documents"),
     getWhen<Record<string, unknown> | null>(hasPermission(session, "organization.read"), "/organization-settings")
   ]);
 
@@ -275,14 +305,9 @@ export async function loadBackendState(current: HrState, session: BackendSession
         stage: titleCase(String(item.stage)) as HrState["candidates"][number]["stage"], rating: Number(item.rating || 0), notes: String(item.notes || ""),
         appliedOn: dateOnly(String(item.appliedOn || "")), employeeId: item.employeeId ? String(item.employeeId) : undefined
       })),
-      eosRecords: eos.map(item => ({
-        id: String(item.id), employeeId: String(item.employeeId), asOf: dateOnly(String(item.asOf || "")), reason: String(item.reason || ""),
-        serviceYears: Number(item.serviceYears || 0), gratuity: Number(item.gratuity || 0), leaveEncashment: Number(item.leaveEncashment || 0),
-        lopDeduction: Number(item.lopDeduction || 0), expenseReimbursement: Number(item.expenseReimbursement || 0), tripAdvanceDeduction: Number(item.tripAdvanceDeduction || 0),
-        netSettlement: Number(item.netSettlement || 0), status: titleCase(String(item.status)) as HrState["eosRecords"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
-      })),
+      eosRecords: eos.map(item => mapEos(item as unknown as BackendEos)),
       documents: documents.map(item => ({
-        id: String(item.id), employeeId: String(item.employeeId), template: String(item.documentType) as HrState["documents"][number]["template"],
+        id: String(item.id), employeeId: item.employeeId ? String(item.employeeId) : "", template: String(item.documentType) as HrState["documents"][number]["template"],
         documentNumber: String(item.documentNumber || item.id), generatedOn: dateOnly(String(item.createdAt || "")), status: "Generated" as const,
         filename: String(item.fileName || "document"), sizeBytes: item.sizeBytes == null ? undefined : Number(item.sizeBytes), downloadUrl: String(item.fileUrl || "")
       })),
@@ -308,6 +333,44 @@ export async function generateBackendPayroll(session: BackendSession, year: numb
   });
 }
 
+export async function loadBackendAttendancePeriod(year: number, month: number) {
+  const start = `${year}-${String(month).padStart(2, "0")}-01`;
+  const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  const records = await apiList<Record<string, unknown>>(`/attendance?dateFrom=${start}&dateTo=${end}`);
+  const attendance: HrState["attendance"] = {};
+  const approvals: HrState["attendanceApprovals"] = {};
+  for (const item of records) {
+    const day = dateOnly(String(item.attendanceDate || ""));
+    const employeeId = String(item.employeeId || "");
+    if (!day || !employeeId) continue;
+    attendance[day] ??= {};
+    approvals[day] ??= {};
+    attendance[day][employeeId] = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
+    approvals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
+  }
+  return { attendance, approvals, prefix: `${year}-${String(month).padStart(2, "0")}` };
+}
+
+export async function loadBackendReportState(state: HrState, template: PdfTemplate, year: number, month: number): Promise<HrState> {
+  if (template === "attendance_report") {
+    const loaded = await loadBackendAttendancePeriod(year, month);
+    return {
+      ...state,
+      attendance: { ...Object.fromEntries(Object.entries(state.attendance).filter(([day]) => !day.startsWith(loaded.prefix))), ...loaded.attendance },
+      attendanceApprovals: { ...Object.fromEntries(Object.entries(state.attendanceApprovals).filter(([day]) => !day.startsWith(loaded.prefix))), ...loaded.approvals },
+    };
+  }
+  if (template === "leave_report") {
+    const leaves = await apiList<BackendLeave>(`/leave/requests?dateFrom=${year}-01-01&dateTo=${year}-12-31`);
+    return { ...state, leaves: leaves.map(mapLeave) };
+  }
+  if (template === "payroll_register") {
+    const payroll = await apiList<BackendPayroll>(`/payroll/payslips?year=${year}&month=${month}`);
+    return { ...state, payroll: payroll.map(mapPayroll) };
+  }
+  return state;
+}
+
 export async function logoutBackend(session: BackendSession) {
   return apiRequest<{ loggedOut: boolean }>("/auth/logout", {
     method: "POST",
@@ -320,7 +383,7 @@ export async function apiList<T>(path: string) {
   const [pathname, query = ""] = path.split("?", 2);
   const params = new URLSearchParams(query);
   params.set("limit", "100");
-  for (let page = 1; page <= 100; page += 1) {
+  for (let page = 1; ; page += 1) {
     params.set("page", String(page));
     const envelope = await apiRequestEnvelope<T[]>(`${pathname}?${params}`);
     const pageRecords = envelope.data ?? [];
@@ -328,7 +391,6 @@ export async function apiList<T>(path: string) {
     const meta = envelope.meta as { totalPages?: number } | undefined;
     if (meta?.totalPages !== undefined ? page >= meta.totalPages : pageRecords.length < 100) return records;
   }
-  throw new ApiError("The data set is too large to load safely.", 422);
 }
 
 export async function apiPage<T, M = unknown>(path: string, init: RequestInit & { csrfToken?: string } = {}) {
@@ -344,7 +406,7 @@ export async function apiRequest<T>(path: string, init: RequestInit & { csrfToke
 export async function apiDownload(path: string, init: RequestInit & { csrfToken?: string } = {}) {
   const headers = new Headers(init.headers);
   if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
-  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "same-origin" });
+  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "include" });
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event(authorizationExpiredEvent));
     let message = `Download failed (${response.status})`;
@@ -361,7 +423,7 @@ async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfTok
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
 
-  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "same-origin" });
+  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "include" });
   let payload: Partial<ApiEnvelope<T>> | undefined;
   try {
     payload = await response.json();
@@ -378,7 +440,7 @@ async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfTok
   return { success: true, data: payload as T };
 }
 
-function mapEmployee(employee: BackendEmployee): EmployeeRecord {
+export function mapEmployee(employee: BackendEmployee): EmployeeRecord {
   const fields = Object.fromEntries(employeeImportColumns.map(column => [column, ""]));
   const salaryRecord = employee.salaryRecords?.[0];
   const salary = String(Number(salaryRecord?.baseSalary ?? employee.salary ?? 0));
@@ -388,6 +450,7 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
 
   return normalizeEmployee({
     id: employee.id,
+    photo: employee.photo || "",
     status: mapEmployeeStatus(employee.employmentStatus),
     fields: {
       ...fields,
@@ -410,14 +473,17 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
       "Emergency Contact Mobile No.": employee.emergencyContactPhone || "",
       ...mapEmployeeDetails(employee),
       Basic: salary,
-      HRA: String(Number(salaryRecord?.allowances || 0)),
-      "Overtime Amount": String(Number(salaryRecord?.bonuses || 0)),
+      HRA: String(Number(salaryRecord?.housingAllowance ?? salaryRecord?.allowances ?? 0)),
+      "Food Allowance": String(Number(salaryRecord?.foodAllowance || 0)),
+      "Mobile Allowance": String(Number(salaryRecord?.mobileAllowance || 0)),
+      "Special Allowance": String(Number(salaryRecord?.specialAllowance || 0)),
+      "Overtime Amount": String(Number(salaryRecord?.overtimeAmount ?? salaryRecord?.bonuses ?? 0)),
       Total: String(Number(salary) + Number(salaryRecord?.allowances || 0) + Number(salaryRecord?.bonuses || 0))
     }
   });
 }
 
-function mapLeave(leave: BackendLeave): HrState["leaves"][number] {
+export function mapLeave(leave: BackendLeave): HrState["leaves"][number] {
   return {
     id: leave.id,
     employeeId: leave.employeeId,
@@ -433,7 +499,7 @@ function mapLeave(leave: BackendLeave): HrState["leaves"][number] {
   };
 }
 
-function mapPayroll(item: BackendPayroll): PayrollSlip {
+export function mapPayroll(item: BackendPayroll): PayrollSlip {
   const base = Number(item.baseSalary || 0);
   const allowances = Number(item.allowances || 0);
   const deductions = Number(item.deductions || 0);
@@ -460,6 +526,15 @@ function mapPayroll(item: BackendPayroll): PayrollSlip {
     net: Number(item.netPay || 0),
     note: "Synced from backend",
     status: item.status === "PAID" || item.status === "APPROVED" ? "Finalized" : "Draft"
+  };
+}
+
+export function mapEos(item: BackendEos): HrState["eosRecords"][number] {
+  return {
+    id: String(item.id || "preview"), employeeId: String(item.employeeId), asOf: dateOnly(String(item.asOf || "")), reason: String(item.reason || ""),
+    serviceYears: Number(item.serviceYears || 0), gratuity: Number(item.gratuity || 0), leaveEncashment: Number(item.leaveEncashment || 0),
+    lopDeduction: Number(item.lopDeduction || 0), expenseReimbursement: Number(item.expenseReimbursement || 0), tripAdvanceDeduction: Number(item.tripAdvanceDeduction || 0),
+    netSettlement: Number(item.netSettlement || 0), status: titleCase(String(item.status || "DRAFT")) as HrState["eosRecords"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
   };
 }
 

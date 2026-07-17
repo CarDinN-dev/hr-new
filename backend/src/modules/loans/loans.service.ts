@@ -9,12 +9,12 @@ import {
   PayrollLineKind,
   Prisma,
 } from '@prisma/client';
-import { nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
+import { money, nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateLoanDto, LoanOverrideDto, ManualRepaymentDto, QueryLoansDto } from './dto/loan.dto';
+import { CreateLoanDto, LoanOverrideDto, LoanStatusTransitionDto, ManualRepaymentDto, QueryLoansDto, UpdateLoanDto } from './dto/loan.dto';
 import { AuthorizationService } from '../authorization/authorization.service';
 
 const includeLoan = {
@@ -74,6 +74,37 @@ export class LoansService {
     return { data: data.map((loan) => this.withBalance(loan)), meta: paginationMeta(total, page, limit) };
   }
 
+  async update(id: string, dto: UpdateLoanDto, user: RequestUser) {
+    return this.transaction(async (tx) => {
+      const loan = await this.ensureLoan(id, tx);
+      await this.authorization.assertEmployeeScope(user, loan.employeeId, { all: 'loan.hr.manage' });
+      if (loan.status !== LoanStatus.DRAFT) throw new BadRequestException('Only draft loans can be edited');
+      const principal = dto.principal === undefined ? undefined : nonNegativeMoney(dto.principal, 'principal');
+      if (principal?.isZero()) throw new BadRequestException('principal must be greater than zero');
+      const monthlyLimit = dto.monthlyLimit === undefined ? undefined : nonNegativeMoney(dto.monthlyLimit, 'monthlyLimit');
+      const repaymentMode = dto.repaymentMode ?? loan.repaymentMode;
+      const effectiveMonthlyLimit = monthlyLimit ?? loan.monthlyLimit;
+      if (repaymentMode === LoanRepaymentMode.MONTHLY_LIMIT && effectiveMonthlyLimit.isZero()) {
+        throw new BadRequestException('monthlyLimit must be greater than zero for monthly-limit loans');
+      }
+      const updated = await tx.employeeLoan.update({
+        where: { id },
+        data: { ...dto, principal, monthlyLimit, version: { increment: 1 } },
+        include: includeLoan,
+      });
+      await this.audit.record(tx, user, {
+        action: AuditAction.UPDATE,
+        entityType: 'EmployeeLoan',
+        entityId: id,
+        summary: 'Draft loan updated',
+        subjectEmployeeId: loan.employeeId,
+        before: loan,
+        after: updated,
+      });
+      return this.withBalance(updated);
+    });
+  }
+
   async find(id: string, user: RequestUser) {
     const loan = await this.prisma.employeeLoan.findFirst({ where: { AND: [{ id }, { deletedAt: null }, this.accessWhere(user)] }, include: includeLoan });
     if (!loan) throw new NotFoundException('Loan not found');
@@ -98,6 +129,31 @@ export class LoansService {
         entityId: id,
         summary: 'Loan activated',
         changes: [{ field: 'status', previousValue: loan.status, nextValue: LoanStatus.ACTIVE }],
+      });
+      return this.withBalance(updated);
+    });
+  }
+
+  async pause(id: string, dto: LoanStatusTransitionDto, user: RequestUser) {
+    return this.transitionStatus(id, LoanStatus.ACTIVE, LoanStatus.PAUSED, dto.reason, user);
+  }
+
+  async cancel(id: string, dto: LoanStatusTransitionDto, user: RequestUser) {
+    return this.transaction(async (tx) => {
+      const loan = await this.ensureLoan(id, tx);
+      await this.authorization.assertEmployeeScope(user, loan.employeeId, { all: 'loan.hr.manage' });
+      if (loan.status !== LoanStatus.DRAFT && loan.status !== LoanStatus.ACTIVE && loan.status !== LoanStatus.PAUSED) {
+        throw new BadRequestException('Only open loans can be cancelled');
+      }
+      const updated = await tx.employeeLoan.update({ where: { id }, data: { status: LoanStatus.CANCELLED, version: { increment: 1 } }, include: includeLoan });
+      await this.audit.record(tx, user, {
+        action: AuditAction.TRANSITION,
+        entityType: 'EmployeeLoan',
+        entityId: id,
+        summary: 'Loan cancelled',
+        reason: dto.reason,
+        subjectEmployeeId: loan.employeeId,
+        changes: [{ field: 'status', previousValue: loan.status, nextValue: LoanStatus.CANCELLED }],
       });
       return this.withBalance(updated);
     });
@@ -161,9 +217,11 @@ export class LoansService {
     employeeId: string,
     year: number,
     month: number,
+    availablePay: Prisma.Decimal,
+    grossPay: Prisma.Decimal,
+    companyCap: { type: string; value: Prisma.Decimal },
     tx: Prisma.TransactionClient,
   ) {
-    const period = year * 12 + month;
     const loans = await tx.employeeLoan.findMany({
       where: {
         employeeId,
@@ -172,10 +230,18 @@ export class LoansService {
         OR: [{ startYear: { lt: year } }, { startYear: year, startMonth: { lte: month } }],
       },
       include: { overrides: { where: { year, month } } },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ startYear: 'asc' }, { startMonth: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
     const deductions: Array<{ loanId: string; amount: Prisma.Decimal; description: string }> = [];
+    let payRemaining = Prisma.Decimal.max(ZERO_MONEY, availablePay);
+    const configuredCap = companyCap.value.isZero()
+      ? null
+      : companyCap.type === 'PERCENT'
+        ? money(grossPay.times(Prisma.Decimal.min(100, companyCap.value)).div(100), 'loan deduction cap')
+        : companyCap.value;
+    let capRemaining = configuredCap;
     for (const loan of loans) {
+      if (payRemaining.isZero()) break;
       const remaining = await this.remainingBalance(loan.id, loan.principal, tx);
       if (remaining.isZero()) continue;
       const override = loan.overrides[0];
@@ -183,40 +249,57 @@ export class LoansService {
       if (override) {
         installment = override.amount;
       } else if (loan.repaymentMode === LoanRepaymentMode.DURATION) {
-        const elapsed = period - (loan.startYear * 12 + loan.startMonth);
-        if (elapsed >= loan.termMonths) continue;
         installment = loan.principal.div(loan.termMonths).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
       } else if (loan.repaymentMode === LoanRepaymentMode.MONTHLY_LIMIT) {
         installment = loan.monthlyLimit;
       } else {
         continue;
       }
-      if (!override?.approvedAboveLimit && loan.monthlyLimit.gt(0)) {
-        installment = Prisma.Decimal.min(installment, loan.monthlyLimit);
+      if (!override?.approvedAboveLimit) {
+        if (loan.monthlyLimit.gt(0)) installment = Prisma.Decimal.min(installment, loan.monthlyLimit);
+        if (capRemaining) installment = Prisma.Decimal.min(installment, capRemaining);
       }
-      installment = nonNegativeMoney(Prisma.Decimal.min(installment, remaining), 'loan deduction');
+      installment = nonNegativeMoney(Prisma.Decimal.min(installment, remaining, payRemaining), 'loan deduction');
       if (installment.isZero()) continue;
       deductions.push({ loanId: loan.id, amount: installment, description: `${loan.type} installment` });
+      payRemaining = money(payRemaining.minus(installment));
+      if (capRemaining) capRemaining = Prisma.Decimal.max(ZERO_MONEY, money(capRemaining.minus(installment)));
     }
     return { deductions, total: sumMoney(deductions.map((item) => item.amount)) };
   }
 
-  async postPayrollDeductions(
+  async replacePayrollDeductionLines(
     payrollId: string,
-    year: number,
-    month: number,
     deductions: Array<{ loanId: string; amount: Prisma.Decimal; description: string }>,
     tx: Prisma.TransactionClient,
   ) {
-    await tx.loanRepayment.deleteMany({ where: { payrollId } });
     await tx.payrollLineItem.deleteMany({ where: { payrollId, kind: PayrollLineKind.LOAN_REPAYMENT } });
     for (const deduction of deductions) {
       await tx.payrollLineItem.create({
         data: { payrollId, loanId: deduction.loanId, kind: PayrollLineKind.LOAN_REPAYMENT, description: deduction.description, amount: deduction.amount },
       });
-      await tx.loanRepayment.create({
-        data: { payrollId, loanId: deduction.loanId, year, month, amount: deduction.amount, source: LoanRepaymentSource.PAYROLL },
+    }
+  }
+
+  async postPayrollDeductions(payrollId: string, year: number, month: number, tx: Prisma.TransactionClient) {
+    const lines = await tx.payrollLineItem.findMany({ where: { payrollId, kind: PayrollLineKind.LOAN_REPAYMENT, loanId: { not: null } } });
+    for (const line of lines) {
+      await tx.loanRepayment.upsert({
+        where: { payrollId_loanId: { payrollId, loanId: line.loanId! } },
+        create: { payrollId, loanId: line.loanId!, year, month, amount: line.amount, source: LoanRepaymentSource.PAYROLL },
+        update: { year, month, amount: line.amount, status: LoanRepaymentStatus.POSTED, reversedAt: null },
       });
+    }
+    await this.refreshLoanStatuses(lines.map((line) => line.loanId!), tx);
+  }
+
+  async refreshLoanStatuses(loanIds: string[], tx: Prisma.TransactionClient) {
+    for (const id of new Set(loanIds)) {
+      const loan = await tx.employeeLoan.findUnique({ where: { id } });
+      if (!loan || loan.status === LoanStatus.CANCELLED || loan.status === LoanStatus.DRAFT) continue;
+      const remaining = await this.remainingBalance(id, loan.principal, tx);
+      const status = remaining.isZero() ? LoanStatus.SETTLED : loan.status === LoanStatus.SETTLED ? LoanStatus.ACTIVE : loan.status;
+      if (status !== loan.status) await tx.employeeLoan.update({ where: { id }, data: { status, version: { increment: 1 } } });
     }
   }
 
@@ -237,6 +320,25 @@ export class LoansService {
     const loan = await tx.employeeLoan.findFirst({ where: { id, deletedAt: null } });
     if (!loan) throw new NotFoundException('Loan not found');
     return loan;
+  }
+
+  private transitionStatus(id: string, from: LoanStatus, to: LoanStatus, reason: string, user: RequestUser) {
+    return this.transaction(async (tx) => {
+      const loan = await this.ensureLoan(id, tx);
+      await this.authorization.assertEmployeeScope(user, loan.employeeId, { all: 'loan.hr.manage' });
+      if (loan.status !== from) throw new BadRequestException(`Loan must be ${from.toLowerCase()}`);
+      const updated = await tx.employeeLoan.update({ where: { id }, data: { status: to, version: { increment: 1 } }, include: includeLoan });
+      await this.audit.record(tx, user, {
+        action: AuditAction.TRANSITION,
+        entityType: 'EmployeeLoan',
+        entityId: id,
+        summary: `Loan moved to ${to.toLowerCase()}`,
+        reason,
+        subjectEmployeeId: loan.employeeId,
+        changes: [{ field: 'status', previousValue: from, nextValue: to }],
+      });
+      return this.withBalance(updated);
+    });
   }
 
   private accessWhere(user: RequestUser): Prisma.EmployeeLoanWhereInput {

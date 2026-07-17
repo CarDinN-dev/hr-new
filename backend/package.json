@@ -15,6 +15,8 @@
     "import:console-state": "node scripts/import-console-state.js --apply",
     "rbac:sync": "node prisma/sync-rbac.js",
     "audit:prune": "node scripts/prune-audit-events.js --apply",
+    "loans:reconcile-payroll": "npm run build && node scripts/reconcile-premature-loan-repayments.js",
+    "loans:reconcile-payroll:apply": "npm run build && node scripts/reconcile-premature-loan-repayments.js --apply",
     "seed:test-personas": "node scripts/seed-test-personas.js",
     "format": "prettier --write \"src/**/*.ts\" \"prisma/**/*.ts\"",
     "start": "nest start",

@@ -124,6 +124,7 @@ export class LeaveService {
   }
 
   async createBalance(dto: CreateLeaveBalanceDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'leave.configure' });
     await Promise.all([this.ensureEmployee(dto.employeeId), this.findTypeById(dto.leaveTypeId)]);
     this.assertBalanceValues(dto.totalDays, dto.usedDays ?? 0, dto.pendingDays ?? 0);
     return this.leaveTransaction(async (tx) => {
@@ -156,6 +157,7 @@ export class LeaveService {
     return this.leaveTransaction(async (tx) => {
       const balance = await tx.leaveBalance.findFirst({ where: { id, deletedAt: null } });
       if (!balance) throw new NotFoundException('Leave balance not found');
+      await this.authorization.assertEmployeeScope(user, balance.employeeId, { all: 'leave.configure' });
       this.assertBalanceValues(dto.totalDays ?? balance.totalDays, dto.usedDays ?? balance.usedDays, dto.pendingDays ?? balance.pendingDays);
       const updated = await tx.leaveBalance.update({ where: { id }, data: dto, include: leaveBalanceInclude });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'LeaveBalance', resourceId: id, summary: 'Leave balance updated', subjectEmployeeId: balance.employeeId, before: balance, after: updated });
@@ -167,6 +169,7 @@ export class LeaveService {
     return this.leaveTransaction(async (tx) => {
       const balance = await tx.leaveBalance.findFirst({ where: { id, deletedAt: null } });
       if (!balance) throw new NotFoundException('Leave balance not found');
+      await this.authorization.assertEmployeeScope(user, balance.employeeId, { all: 'leave.configure' });
       const active = await tx.leaveRequest.findFirst({
         where: { employeeId: balance.employeeId, leaveTypeId: balance.leaveTypeId, status: { in: [...activePendingStatuses, LeaveRequestStatus.APPROVED] }, deletedAt: null }, select: { id: true },
       });
@@ -192,7 +195,7 @@ export class LeaveService {
       if (!employee?.userId || !employee.user?.isActive) throw new BadRequestException('Employee requires an active linked user account');
       if (!leaveType) throw new NotFoundException('Leave type not found');
       await this.assertLeavePeriodAvailable(employeeId, startDate, endDate, undefined, tx);
-      if (leaveType.isPaid) await this.reserveBalance(tx, employeeId, dto.leaveTypeId, startDate.getUTCFullYear(), totalDays);
+      if (leaveType.isPaid) await this.reserveBalance(tx, employeeId, dto.leaveTypeId, this.leaveAllocation(startDate, endDate, dto.isHalfDay ?? false));
       const workflowVersion = 1;
       const workflow = await this.workflowPlan(tx, employee, employee.userId, workflowVersion);
       const request = await tx.leaveRequest.create({
@@ -221,9 +224,7 @@ export class LeaveService {
   }
 
   async listRequests(query: QueryLeaveRequestsDto, user: RequestUser) {
-    const result = await this.listWithWhere(query, await this.requestAccessWhere(user));
-    const visible = (await Promise.all((result.data as LeaveRequestView[]).map(async (request) => await this.canAccessRequest(user, request) ? request : null))).filter((request): request is LeaveRequestView => request !== null);
-    return { ...result, data: visible };
+    return this.listWithWhere(query, await this.requestAccessWhere(user));
   }
 
   async listMine(query: QueryLeaveRequestsDto, user: RequestUser) {
@@ -233,14 +234,8 @@ export class LeaveService {
   }
 
   async inbox(query: QueryLeaveRequestsDto, user: RequestUser) {
-    // Prisma cannot compare columns in a nested filter. Filtering by active stage/version is completed below.
-    const result = await this.listWithWhere({ ...query, limit: Math.min(query.limit ?? 20, 100) }, {
-      deletedAt: null,
-      steps: { some: { assignees: { some: { userId: user.id, isActive: true, revokedAt: null } } } },
-      status: { in: [...activePendingStatuses.filter((status) => status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION)] },
-    });
-    const data = result.data as LeaveRequestView[];
-    return { ...result, data: data.filter((request) => request.steps.some((step) => step.workflowVersion === request.workflowVersion && step.stage === request.currentStage && step.assignees.some((assignee) => assignee.userId === user.id && assignee.isActive && !assignee.revokedAt) && this.authorization.permissionAllowedForScope(user, stagePermission[step.stage], AccessScopeType.ASSIGNED_APPROVALS, request.id))) };
+    const ids = await this.assignedRequestIds(user);
+    return this.listWithWhere(query, { id: { in: ids } });
   }
 
   async findRequestById(id: string, user: RequestUser) {
@@ -266,6 +261,7 @@ export class LeaveService {
       if (duplicate) return duplicate;
       const request = await this.ensureRequest(id, tx);
       if (request.requesterUserId !== user.id || request.employeeId !== user.employeeId) throw new NotFoundException('Leave request not found');
+      if (!this.authorization.permissionAllowedForScope(user, 'leave.self.create', AccessScopeType.SELF, request.employeeId)) throw new NotFoundException('Leave request not found');
       if (request.status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION) throw new BadRequestException('Only returned leave requests can be corrected');
       this.assertExpectedVersion(request.version, dto.expectedVersion);
       const nextTypeId = dto.leaveTypeId ?? request.leaveTypeId;
@@ -274,7 +270,7 @@ export class LeaveService {
       const nextHalf = dto.isHalfDay ?? request.isHalfDay;
       const nextDays = this.leaveDuration(nextStart, nextEnd, nextHalf);
       await this.assertLeavePeriodAvailable(request.employeeId, nextStart, nextEnd, id, tx);
-      await this.adjustReservedBalance(tx, request, nextTypeId, nextStart.getUTCFullYear(), nextDays);
+      await this.adjustReservedBalance(tx, request, nextTypeId, nextStart, nextEnd, nextHalf);
       const updated = await tx.leaveRequest.update({
         where: { id },
         data: { leaveTypeId: nextTypeId, startDate: nextStart, endDate: nextEnd, totalDays: nextDays, isHalfDay: nextHalf, reason: dto.reason ?? request.reason, version: { increment: 1 } },
@@ -324,6 +320,7 @@ export class LeaveService {
       if (duplicate) return duplicate;
       const request = await this.ensureRequest(id, tx);
       if (request.requesterUserId !== user.id || request.employeeId !== user.employeeId) throw new NotFoundException('Leave request not found');
+      if (!this.authorization.permissionAllowedForScope(user, 'leave.self.create', AccessScopeType.SELF, request.employeeId)) throw new NotFoundException('Leave request not found');
       if (request.status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION) throw new BadRequestException('Only returned leave requests can be resubmitted');
       this.assertExpectedVersion(request.version, dto.expectedVersion);
       const employee = await tx.employee.findUnique({ where: { id: request.employeeId }, include: { user: { select: { id: true, isActive: true } } } });
@@ -354,11 +351,13 @@ export class LeaveService {
       if (duplicate) return duplicate;
       const request = await this.ensureRequest(id, tx);
       const own = request.requesterUserId === user.id && request.employeeId === user.employeeId;
-      if (!own && !this.authorization.has(user, 'leave.hr.manage') && !user.isSuperAdmin) throw new NotFoundException('Leave request not found');
+      const selfAllowed = own && this.authorization.permissionAllowedForScope(user, 'leave.self.cancel', AccessScopeType.SELF, request.employeeId);
+      const hrAllowed = this.authorization.permissionAllowedForScope(user, 'leave.hr.manage', AccessScopeType.ALL_EMPLOYEES, request.employeeId);
+      if (!selfAllowed && !hrAllowed) throw new NotFoundException('Leave request not found');
       this.assertExpectedVersion(request.version, dto.expectedVersion);
       if (!([...activePendingStatuses, LeaveRequestStatus.APPROVED] as LeaveRequestStatus[]).includes(request.status)) throw new BadRequestException('This leave request cannot be cancelled');
       if (request.status === LeaveRequestStatus.APPROVED) {
-        if (own && !this.authorization.has(user, 'leave.hr.manage') && !user.isSuperAdmin) throw new ForbiddenException('Approved leave requires HR cancellation');
+        if (!hrAllowed) throw new ForbiddenException('Approved leave requires HR cancellation');
         await this.assertPayrollIsOpen(request.employeeId, request.startDate, request.endDate, tx);
       }
       await this.releaseBalance(tx, request, request.status === LeaveRequestStatus.APPROVED);
@@ -717,14 +716,36 @@ export class LeaveService {
       if (allowed.length) scopes.push({ employeeId: { in: allowed } });
     }
     if (this.authorization.hasAny(user, Object.values(stagePermission))) {
-      const assignedSteps = await this.prisma.leaveApprovalStep.findMany({
-        where: { status: LeaveStepStatus.PENDING, assignees: { some: { userId: user.id, isActive: true, revokedAt: null } } },
-        select: { stage: true, workflowVersion: true, request: { select: { id: true, workflowVersion: true, currentStage: true } } },
-      });
-      const ids = assignedSteps.filter((step) => step.workflowVersion === step.request.workflowVersion && step.stage === step.request.currentStage && this.authorization.permissionAllowedForScope(user, stagePermission[step.stage], AccessScopeType.ASSIGNED_APPROVALS, step.request.id)).map((step) => step.request.id);
+      const ids = await this.assignedRequestIds(user);
       if (ids.length) scopes.push({ id: { in: ids } });
     }
     return scopes.length ? { OR: scopes } : { id: '__no_leave_scope__' };
+  }
+
+  private async assignedRequestIds(user: RequestUser) {
+    const employeeSeparation = user.employeeId
+      ? Prisma.sql`AND request."employeeId" <> ${user.employeeId}`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; stage: LeaveApprovalStage }>>(Prisma.sql`
+      SELECT request."id", step."stage"
+      FROM "LeaveRequest" AS request
+      INNER JOIN "LeaveApprovalStep" AS step
+        ON step."requestId" = request."id"
+       AND step."workflowVersion" = request."workflowVersion"
+       AND step."stage" = request."currentStage"
+       AND step."status" = 'PENDING'::"LeaveStepStatus"
+      INNER JOIN "LeaveApprovalStepAssignee" AS assignee
+        ON assignee."stepId" = step."id"
+       AND assignee."userId" = ${user.id}
+       AND assignee."isActive" = TRUE
+       AND assignee."revokedAt" IS NULL
+      WHERE request."deletedAt" IS NULL
+        AND request."requesterUserId" <> ${user.id}
+        ${employeeSeparation}
+    `);
+    return rows
+      .filter((row) => this.authorization.permissionAllowedForScope(user, stagePermission[row.stage], AccessScopeType.ASSIGNED_APPROVALS, row.id))
+      .map((row) => row.id);
   }
 
   private async canAccessRequest(user: RequestUser, request: LeaveRequestView) {
@@ -762,54 +783,61 @@ export class LeaveService {
     const target = employeeId ?? user.employeeId;
     if (!target) throw new NotFoundException('No employee profile is linked to this user');
     if (target === user.employeeId) {
-      if (!this.authorization.permissionAllowedForScope(user, 'leave.self.create', AccessScopeType.SELF, target)) throw new NotFoundException('Employee not found');
+      const selfAllowed = this.authorization.permissionAllowedForScope(user, 'leave.self.create', AccessScopeType.SELF, target);
+      const hrAllowed = this.authorization.permissionAllowedForScope(user, 'leave.hr.manage', AccessScopeType.ALL_EMPLOYEES, target);
+      if (!selfAllowed && !hrAllowed) throw new NotFoundException('Employee not found');
     } else if (!this.authorization.permissionAllowedForScope(user, 'leave.hr.manage', AccessScopeType.ALL_EMPLOYEES, target)) throw new ForbiddenException('Only HR may submit leave for another employee');
     return target;
   }
 
-  private async reserveBalance(tx: Prisma.TransactionClient, employeeId: string, leaveTypeId: string, year: number, days: Prisma.Decimal) {
-    const balance = await this.findBalance(employeeId, leaveTypeId, year, tx);
-    const available = balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays);
-    if (available.lt(days)) throw new BadRequestException('Insufficient leave balance');
-    await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { increment: days } } });
+  private async reserveBalance(tx: Prisma.TransactionClient, employeeId: string, leaveTypeId: string, allocation: Array<{ year: number; days: Prisma.Decimal }>) {
+    const balances = await Promise.all(allocation.map(async ({ year, days }) => ({ balance: await this.findBalance(employeeId, leaveTypeId, year, tx), days })));
+    for (const { balance, days } of balances) {
+      if (balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays).lt(days)) throw new BadRequestException(`Insufficient leave balance for ${balance.year}`);
+    }
+    for (const { balance, days } of balances) await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { increment: days } } });
   }
 
-  private async finalizeBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; totalDays: Prisma.Decimal; status: LeaveRequestStatus }) {
+  private async finalizeBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; endDate: Date; isHalfDay: boolean; status: LeaveRequestStatus }) {
     const type = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
     if (!type) throw new NotFoundException('Leave type not found');
     if (!type.isPaid || request.status === LeaveRequestStatus.APPROVED) return;
-    const balance = await this.findBalance(request.employeeId, request.leaveTypeId, request.startDate.getUTCFullYear(), tx);
-    if (balance.pendingDays.lt(request.totalDays)) throw new ConflictException('Leave balance is inconsistent');
-    await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { decrement: request.totalDays }, usedDays: { increment: request.totalDays } } });
+    const balances = await Promise.all(this.leaveAllocation(request.startDate, request.endDate, request.isHalfDay).map(async ({ year, days }) => ({ balance: await this.findBalance(request.employeeId, request.leaveTypeId, year, tx), days })));
+    for (const { balance, days } of balances) if (balance.pendingDays.lt(days)) throw new ConflictException('Leave balance is inconsistent');
+    for (const { balance, days } of balances) await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { decrement: days }, usedDays: { increment: days } } });
   }
 
-  private async releaseBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; totalDays: Prisma.Decimal; status: LeaveRequestStatus }, fromUsed: boolean) {
+  private async releaseBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; endDate: Date; isHalfDay: boolean; status: LeaveRequestStatus }, fromUsed: boolean) {
     const type = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
     if (!type?.isPaid) return;
-    const balance = await this.findBalance(request.employeeId, request.leaveTypeId, request.startDate.getUTCFullYear(), tx);
-    const current = fromUsed ? balance.usedDays : balance.pendingDays;
-    if (current.lt(request.totalDays)) throw new ConflictException('Leave balance is inconsistent');
-    await tx.leaveBalance.update({ where: { id: balance.id }, data: fromUsed ? { usedDays: { decrement: request.totalDays } } : { pendingDays: { decrement: request.totalDays } } });
+    const balances = await Promise.all(this.leaveAllocation(request.startDate, request.endDate, request.isHalfDay).map(async ({ year, days }) => ({ balance: await this.findBalance(request.employeeId, request.leaveTypeId, year, tx), days })));
+    for (const { balance, days } of balances) if ((fromUsed ? balance.usedDays : balance.pendingDays).lt(days)) throw new ConflictException('Leave balance is inconsistent');
+    for (const { balance, days } of balances) await tx.leaveBalance.update({ where: { id: balance.id }, data: fromUsed ? { usedDays: { decrement: days } } : { pendingDays: { decrement: days } } });
   }
 
-  private async adjustReservedBalance(tx: Prisma.TransactionClient, request: Awaited<ReturnType<LeaveService['ensureRequest']>>, nextTypeId: string, nextYear: number, nextDays: Prisma.Decimal) {
+  private async adjustReservedBalance(tx: Prisma.TransactionClient, request: Awaited<ReturnType<LeaveService['ensureRequest']>>, nextTypeId: string, nextStart: Date, nextEnd: Date, nextHalfDay: boolean) {
     const [previousType, nextType] = await Promise.all([
       tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } }),
       tx.leaveType.findFirst({ where: { id: nextTypeId, deletedAt: null } }),
     ]);
     if (!previousType || !nextType) throw new NotFoundException('Leave type not found');
-    const previousBalance = previousType.isPaid ? await this.findBalance(request.employeeId, request.leaveTypeId, request.startDate.getUTCFullYear(), tx) : null;
-    const nextBalance = nextType.isPaid ? await this.findBalance(request.employeeId, nextTypeId, nextYear, tx) : null;
-    if (previousBalance?.pendingDays.lt(request.totalDays)) throw new ConflictException('Leave balance is inconsistent');
-    if (previousBalance && nextBalance && previousBalance.id === nextBalance.id) {
-      const available = nextBalance.totalDays.minus(nextBalance.usedDays).minus(nextBalance.pendingDays).plus(request.totalDays);
-      if (available.lt(nextDays)) throw new BadRequestException('Insufficient leave balance');
-      await tx.leaveBalance.update({ where: { id: nextBalance.id }, data: { pendingDays: { increment: nextDays.minus(request.totalDays) } } });
-      return;
+    const changes = new Map<string, { leaveTypeId: string; year: number; delta: Prisma.Decimal }>();
+    const add = (leaveTypeId: string, year: number, delta: Prisma.Decimal) => {
+      const key = `${leaveTypeId}:${year}`;
+      const current = changes.get(key);
+      changes.set(key, { leaveTypeId, year, delta: (current?.delta ?? new Prisma.Decimal(0)).plus(delta) });
+    };
+    if (previousType.isPaid) for (const item of this.leaveAllocation(request.startDate, request.endDate, request.isHalfDay)) add(request.leaveTypeId, item.year, item.days.negated());
+    if (nextType.isPaid) for (const item of this.leaveAllocation(nextStart, nextEnd, nextHalfDay)) add(nextTypeId, item.year, item.days);
+    const balances = await Promise.all([...changes.values()].map(async (change) => ({ change, balance: await this.findBalance(request.employeeId, change.leaveTypeId, change.year, tx) })));
+    for (const { change, balance } of balances) {
+      if (change.delta.isNegative() && balance.pendingDays.lt(change.delta.abs())) throw new ConflictException('Leave balance is inconsistent');
+      if (change.delta.isPositive() && balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays).lt(change.delta)) throw new BadRequestException(`Insufficient leave balance for ${balance.year}`);
     }
-    if (nextBalance && nextBalance.totalDays.minus(nextBalance.usedDays).minus(nextBalance.pendingDays).lt(nextDays)) throw new BadRequestException('Insufficient leave balance');
-    if (previousBalance) await tx.leaveBalance.update({ where: { id: previousBalance.id }, data: { pendingDays: { decrement: request.totalDays } } });
-    if (nextBalance) await tx.leaveBalance.update({ where: { id: nextBalance.id }, data: { pendingDays: { increment: nextDays } } });
+    for (const { change, balance } of balances) {
+      if (change.delta.isPositive()) await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { increment: change.delta } } });
+      else if (change.delta.isNegative()) await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { decrement: change.delta.abs() } } });
+    }
   }
 
   private async ensureEmployee(employeeId: string) {
@@ -834,11 +862,28 @@ export class LeaveService {
     return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
   }
 
+  private leaveAllocation(startDate: Date, endDate: Date, isHalfDay: boolean) {
+    const start = this.leaveDate(startDate);
+    const end = this.leaveDate(endDate);
+    if (end < start) throw new BadRequestException('endDate must be on or after startDate');
+    if (isHalfDay) {
+      if (end.getTime() !== start.getTime()) throw new BadRequestException('Half-day leave must use one date');
+      return [{ year: start.getUTCFullYear(), days: new Prisma.Decimal('0.5') }];
+    }
+    const allocation: Array<{ year: number; days: Prisma.Decimal }> = [];
+    let cursor = start;
+    while (cursor <= end) {
+      const year = cursor.getUTCFullYear();
+      const yearEnd = new Date(Date.UTC(year, 11, 31));
+      const segmentEnd = yearEnd < end ? yearEnd : end;
+      allocation.push({ year, days: new Prisma.Decimal(Math.floor((segmentEnd.getTime() - cursor.getTime()) / 86_400_000) + 1) });
+      cursor = new Date(Date.UTC(year + 1, 0, 1));
+    }
+    return allocation;
+  }
+
   private leaveDuration(startDate: Date, endDate: Date, isHalfDay: boolean) {
-    if (endDate < startDate) throw new BadRequestException('endDate must be on or after startDate');
-    if (startDate.getUTCFullYear() !== endDate.getUTCFullYear()) throw new BadRequestException('Leave cannot span calendar years');
-    if (isHalfDay && endDate.getTime() !== startDate.getTime()) throw new BadRequestException('Half-day leave must use one date');
-    return new Prisma.Decimal(isHalfDay ? '0.5' : String(Math.floor((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1));
+    return this.leaveAllocation(startDate, endDate, isHalfDay).reduce((total, item) => total.plus(item.days), new Prisma.Decimal(0));
   }
 
   private assertBalanceValues(totalValue: number | Prisma.Decimal, usedValue: number | Prisma.Decimal, pendingValue: number | Prisma.Decimal) {

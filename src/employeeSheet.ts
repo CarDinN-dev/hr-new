@@ -15,6 +15,12 @@ export type EmployeeWorkbookImport = {
   errors: string[];
 };
 
+export function validateEmployeeImportCounts(rowCount: number, skipped: number) {
+  if (rowCount > 5_000) throw new Error("Employee imports are limited to 5,000 rows at a time.");
+  if (skipped > 0) throw new Error(`Import aborted: ${skipped} row${skipped === 1 ? "" : "s"} failed employee-code validation. Correct the complete file and try again.`);
+  if (rowCount === 0) throw new Error("No employee rows were found in this file.");
+}
+
 // These labels and their order match the employee workbook supplied by HR.
 // Position matters because that workbook intentionally reuses labels such as "Issue Date".
 export const employeeTemplateColumns: readonly TemplateColumn[] = [

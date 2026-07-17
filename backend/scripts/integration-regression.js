@@ -173,6 +173,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     DOCUMENT_STORAGE_ADAPTER: 'filesystem-test',
     TEST_STORAGE_DIRECTORY: storageDirectory,
     GCS_DOCUMENTS_BUCKET: '',
+    MICROSOFT_LOGIN_ENABLED: 'true',
     MICROSOFT_TENANT_ID: '11111111-1111-4111-8111-111111111111',
     MICROSOFT_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
     MICROSOFT_CLIENT_SECRET: 'integration-client-secret-value',
@@ -236,6 +237,15 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const checker = await login('rbac.checker@example.invalid', checkerPassword);
   assert.deepEqual(checker.user.roles.sort(), ['HR', 'LINE_MANAGER']);
 
+  await prisma.payrollRun.createMany({
+    data: Array.from({ length: 101 }, (_, index) => ({
+      year: 3000 + index, month: 1, status: 'PENDING_APPROVAL', generatedByUserId: sessions.HR.user.id,
+    })),
+  });
+  const largeInbox = await api('/approvals/inbox', {}, checker);
+  assert.equal(largeInbox.status, 200);
+  assert.equal(largeInbox.data.payroll.length, 101);
+
   const leaveTypes = await api('/leave/types?limit=100', {}, sessions.HR);
   assert.equal(leaveTypes.status, 200);
   const annualLeave = leaveTypes.data.find((type) => type.code === 'ANNUAL');
@@ -281,6 +291,31 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.ok(balanceRecord, `Approved balance missing from API response: ${JSON.stringify(balanceAfterApproval.payload)}`);
   assert.equal(String(balanceRecord.usedDays), '2');
   assert.equal(String(balanceRecord.pendingDays), '0');
+
+  const nextYearBalance = await api('/leave/balances', {
+    method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, leaveTypeId: annualLeave.id, year: 2100, totalDays: 30 },
+  }, sessions.HR);
+  assert.equal(nextYearBalance.status, 201, JSON.stringify(nextYearBalance.payload));
+  let crossYearLeave = await mutate('/leave/submit', sessions.EMPLOYEE, {
+    leaveTypeId: annualLeave.id, startDate: '2099-12-31', endDate: '2100-01-02', reason: 'Cross-year allocation integration',
+  });
+  assert.equal(crossYearLeave.status, 201, JSON.stringify(crossYearLeave.payload));
+  for (const role of ['LINE_MANAGER', 'MANAGER', 'HR', 'CPO', 'COO']) {
+    const approved = await mutate(`/leave/${crossYearLeave.data.id}/approve`, sessions[role], { expectedVersion: crossYearLeave.data.version, reason: `${role} cross-year approval` });
+    assert.equal(approved.status, 201, JSON.stringify(approved.payload));
+    crossYearLeave = approved;
+  }
+  const crossYearBalances = await api(`/leave/balances?employeeId=${sessions.EMPLOYEE.user.employeeId}&leaveTypeId=${annualLeave.id}&limit=100`, {}, sessions.HR);
+  const year2099 = crossYearBalances.data.find((record) => record.year === 2099);
+  const year2100 = crossYearBalances.data.find((record) => record.year === 2100);
+  assert.equal(String(year2099.usedDays), '3');
+  assert.equal(String(year2100.usedDays), '2');
+
+  const hrSubmitted = await mutate('/leave/submit', sessions.HR, {
+    employeeId: sessions.EMPLOYEE.user.employeeId, leaveTypeId: annualLeave.id,
+    startDate: '2099-07-10', endDate: '2099-07-10', reason: 'HR submitted on behalf of employee',
+  });
+  assert.equal(hrSubmitted.status, 201, JSON.stringify(hrSubmitted.payload));
 
   const cooLeave = await mutate('/leave/submit', sessions.COO, {
     leaveTypeId: annualLeave.id, startDate: '2099-05-10', endDate: '2099-05-10', reason: 'Protected self approval',
@@ -336,7 +371,122 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const uploadedDocument = await api('/documents/upload', { method: 'POST', body: documentBody }, sessions.EMPLOYEE);
   assert.equal(uploadedDocument.status, 201, JSON.stringify(uploadedDocument.payload));
   assert.doesNotMatch(JSON.stringify(uploadedDocument.data), /objectName|objectGeneration/);
-  assert.equal((await api(`/documents/${uploadedDocument.data.id}/content`, {}, sessions.EMPLOYEE)).status, 200);
+  const downloadedDocument = await api(`/documents/${uploadedDocument.data.id}/content`, {}, sessions.EMPLOYEE);
+  assert.equal(downloadedDocument.status, 200);
+  assert.equal(downloadedDocument.contentType.includes('application/pdf'), true);
+  assert.equal(downloadedDocument.buffer.subarray(0, 4).toString(), '%PDF');
+
+  const managerDocumentBody = new FormData();
+  managerDocumentBody.set('employeeId', sessions.EMPLOYEE.user.employeeId);
+  managerDocumentBody.set('documentType', 'Manager visible document');
+  managerDocumentBody.set('visibility', 'MANAGER_AND_HR');
+  managerDocumentBody.set('file', new Blob([Buffer.from('%PDF-1.4\n%%EOF')], { type: 'application/pdf' }), 'manager-visible.pdf');
+  const managerDocument = await api('/documents/upload', { method: 'POST', body: managerDocumentBody }, sessions.HR);
+  assert.equal(managerDocument.status, 201, JSON.stringify(managerDocument.payload));
+  assert.equal((await api(`/documents/${managerDocument.data.id}`, {}, sessions.LINE_MANAGER)).status, 200);
+  assert.equal((await api(`/documents/${managerDocument.data.id}/content`, {}, sessions.LINE_MANAGER)).status, 200);
+
+  const organizationDocumentBody = new FormData();
+  organizationDocumentBody.set('documentType', 'Attendance register');
+  organizationDocumentBody.set('visibility', 'PUBLIC');
+  organizationDocumentBody.set('file', new Blob([Buffer.from('%PDF-1.4\n%%EOF')], { type: 'application/pdf' }), 'attendance-register.pdf');
+  const organizationDocument = await api('/documents/upload', { method: 'POST', body: organizationDocumentBody }, sessions.HR);
+  assert.equal(organizationDocument.status, 201, JSON.stringify(organizationDocument.payload));
+  assert.equal(organizationDocument.data.employeeId, null);
+  assert.equal(organizationDocument.data.visibility, 'HR_ONLY');
+  assert.equal((await api(`/documents/${organizationDocument.data.id}/content`, {}, sessions.EMPLOYEE)).status, 404);
+  const organizationDocumentDownload = await api(`/documents/${organizationDocument.data.id}/content`, {}, sessions.HR);
+  assert.equal(organizationDocumentDownload.status, 200);
+  assert.equal(organizationDocumentDownload.contentType.includes('application/pdf'), true);
+  assert.equal(organizationDocumentDownload.buffer.subarray(0, 4).toString(), '%PDF');
+
+  const importPayload = {
+    rows: [
+      {
+        sourceId: 'local-manager', employeeCode: 'IMP-MANAGER', firstName: 'Import', lastName: 'Manager',
+        email: 'import.manager@example.invalid', hireDate: '2026-02-01', departmentId: testDepartment.id, photo: 'data:image/png;base64,aGVsbG8=',
+        salaryRecord: { baseSalary: '7000', allowances: '0', housingAllowance: '900', foodAllowance: '200', mobileAllowance: '100', specialAllowance: '50', deductions: '25', bonuses: '0', overtimeAmount: '75', taxRate: '5', effectiveFrom: '2026-02-01' },
+      },
+      {
+        sourceId: 'local-report', employeeCode: 'IMP-REPORT', firstName: 'Import', lastName: 'Report',
+        email: 'import.report@example.invalid', hireDate: '2026-02-01', departmentId: testDepartment.id, managerEmployeeCode: 'IMP-MANAGER',
+      },
+    ],
+  };
+  const importedEmployees = await api('/employees/import', { method: 'POST', body: importPayload }, sessions.HR);
+  assert.equal(importedEmployees.status, 201, JSON.stringify(importedEmployees.payload));
+  assert.equal(importedEmployees.data.imported, 2);
+  assert.equal(importedEmployees.data.idMap.length, 2);
+  const importedManager = importedEmployees.data.data.find((employee) => employee.employeeCode === 'IMP-MANAGER');
+  const importedReport = importedEmployees.data.data.find((employee) => employee.employeeCode === 'IMP-REPORT');
+  assert.equal(importedReport.managerId, importedManager.id);
+  const importedSalary = await prisma.salaryRecord.findFirstOrThrow({ where: { employeeId: importedManager.id, deletedAt: null } });
+  assert.equal(String(importedSalary.housingAllowance), '900');
+  assert.equal(String(importedSalary.foodAllowance), '200');
+  assert.equal(String(importedSalary.mobileAllowance), '100');
+  assert.equal(String(importedSalary.specialAllowance), '50');
+  assert.equal(String(importedSalary.overtimeAmount), '75');
+
+  const employeeCountBeforeRollback = await prisma.employee.count();
+  const rejectedEmployeeImport = await api('/employees/import', { method: 'POST', body: { rows: [
+    { employeeCode: 'IMP-ROLLBACK-OK', firstName: 'Rollback', lastName: 'Valid', email: 'rollback.valid@example.invalid', hireDate: '2026-03-01', departmentId: testDepartment.id },
+    { employeeCode: 'IMP-ROLLBACK-BAD', firstName: 'Rollback', lastName: 'Invalid', email: 'rollback.invalid@example.invalid', hireDate: '2026-03-01', departmentId: randomUUID() },
+  ] } }, sessions.HR);
+  assert.equal(rejectedEmployeeImport.status, 404);
+  assert.equal(await prisma.employee.count(), employeeCountBeforeRollback);
+  assert.equal(await prisma.employee.count({ where: { employeeCode: { startsWith: 'IMP-ROLLBACK-' } } }), 0);
+
+  const attendanceImport = await api('/attendance/import', { method: 'POST', body: { rows: [
+    { employeeId: importedReport.id, attendanceDate: '2096-01-01', status: 'PRESENT', notes: 'Atomic import' },
+  ] } }, sessions.HR);
+  assert.equal(attendanceImport.status, 201, JSON.stringify(attendanceImport.payload));
+  const attendanceUpsert = await api('/attendance/import', { method: 'POST', body: { rows: [
+    { employeeId: importedReport.id, attendanceDate: '2096-01-01', status: 'ABSENT', notes: 'Atomic upsert' },
+  ] } }, sessions.HR);
+  assert.equal(attendanceUpsert.status, 201, JSON.stringify(attendanceUpsert.payload));
+  const importedAttendance = await prisma.attendance.findMany({ where: { employeeId: importedReport.id } });
+  assert.equal(importedAttendance.length, 1);
+  assert.equal(importedAttendance[0].status, 'ABSENT');
+  const attendanceCountBeforeRollback = await prisma.attendance.count();
+  const rejectedAttendanceImport = await api('/attendance/import', { method: 'POST', body: { rows: [
+    { employeeId: importedReport.id, attendanceDate: '2096-01-02', status: 'PRESENT' },
+    { employeeId: randomUUID(), attendanceDate: '2096-01-02', status: 'PRESENT' },
+  ] } }, sessions.HR);
+  assert.equal(rejectedAttendanceImport.status, 404);
+  assert.equal(await prisma.attendance.count(), attendanceCountBeforeRollback);
+
+  const recruitmentJob = await api('/recruitment/jobs', { method: 'POST', body: {
+    title: 'Integration hire', departmentId: testDepartment.id, openings: 1, postedOn: '2026-04-01', description: 'Transactional hire test',
+  } }, sessions.HR);
+  assert.equal(recruitmentJob.status, 201, JSON.stringify(recruitmentJob.payload));
+  let hireCandidate = await api('/recruitment/candidates', { method: 'POST', body: {
+    jobId: recruitmentJob.data.id, name: 'Transactional Hire', email: 'transactional.hire@example.invalid', appliedOn: '2026-04-01',
+  } }, sessions.HR);
+  assert.equal(hireCandidate.status, 201, JSON.stringify(hireCandidate.payload));
+  for (const stage of ['SCREENING', 'INTERVIEW', 'OFFER']) {
+    hireCandidate = await api(`/recruitment/candidates/${hireCandidate.data.id}/stage`, { method: 'PATCH', body: { stage } }, sessions.HR);
+    assert.equal(hireCandidate.status, 200, JSON.stringify(hireCandidate.payload));
+  }
+  const hired = await api(`/recruitment/candidates/${hireCandidate.data.id}/hire`, { method: 'POST', body: {
+    employeeCode: 'HIRE-ATOMIC', firstName: 'Transactional', lastName: 'Hire', email: 'transactional.hire@example.invalid',
+    hireDate: '2026-04-15', departmentId: testDepartment.id,
+  } }, sessions.HR);
+  assert.equal(hired.status, 201, JSON.stringify(hired.payload));
+  assert.equal(hired.data.candidate.stage, 'HIRED');
+  assert.equal(hired.data.candidate.employeeId, hired.data.employee.id);
+
+  const spanningSalary = await api('/payroll/salary-records', { method: 'POST', body: {
+    employeeId: hired.data.employee.id, baseSalary: '5000', housingAllowance: '500', effectiveFrom: '2097-12-15', effectiveTo: '2098-01-15',
+  } }, sessions.HR);
+  assert.equal(spanningSalary.status, 201, JSON.stringify(spanningSalary.payload));
+  const spanningPayroll = await mutate('/payroll/runs', sessions.HR, { year: 2098, month: 1, employeeId: hired.data.employee.id });
+  assert.equal(spanningPayroll.status, 201, JSON.stringify(spanningPayroll.payload));
+  const rejectedSalaryDelete = await api(`/payroll/salary-records/${spanningSalary.data.id}`, { method: 'DELETE' }, sessions.HR);
+  assert.equal(rejectedSalaryDelete.status, 400);
+  const cancelledSpanningPayroll = await mutate(`/payroll/runs/${spanningPayroll.data.id}/cancel`, sessions.HR, {
+    expectedVersion: spanningPayroll.data.version, reason: 'Complete salary overlap integration check',
+  });
+  assert.equal(cancelledSpanningPayroll.status, 201, JSON.stringify(cancelledSpanningPayroll.payload));
 
   const absent = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-02', status: 'ABSENT' } }, sessions.HR);
   const halfDay = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-03', status: 'HALF_DAY' } }, sessions.HR);
@@ -419,6 +569,16 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     method: 'PATCH', body: { isActive: false, expectedAuthorizationVersion: superAdminUser.authorizationVersion, reason: 'Final administrator protection test' },
   }, sessions.ADMIN);
   assert.equal(finalAdminAttempt.status, 400);
+
+  const blockedTermination = await api(`/employees/${blockedUser.employee.id}`, { method: 'DELETE' }, sessions.HR);
+  assert.equal(blockedTermination.status, 200, JSON.stringify(blockedTermination.payload));
+  const archivedEmployee = await prisma.employee.findUniqueOrThrow({ where: { id: blockedUser.employee.id } });
+  const disabledAccount = await prisma.user.findUniqueOrThrow({ where: { id: blockedUser.id } });
+  assert.ok(archivedEmployee.deletedAt);
+  assert.equal(disabledAccount.isActive, false);
+  assert.ok(await prisma.leaveRequest.count({ where: { employeeId: blockedUser.employee.id } }) > 0);
+  assert.ok(await prisma.authSession.count({ where: { userId: blockedUser.id, revokedAt: { not: null } } }) > 0);
+  assert.equal((await api('/auth/me', {}, blocked)).status, 401);
 
   const secondEmployeeSession = await loginRole('EMPLOYEE');
   const currentLogout = await api('/auth/logout', { method: 'POST' }, sessions.EMPLOYEE);

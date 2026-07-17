@@ -11,7 +11,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import {
   CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
-  EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
+  EmployeeScopedQueryDto, HireCandidateDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
   TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
 
@@ -220,42 +220,53 @@ export class OperationsService {
 
   removeCandidate(id: string, user: RequestUser) { this.assertSystemScope(user, 'recruitment.manage', id); return this.softRemove('recruitmentCandidate', 'RecruitmentCandidate', id, user); }
 
+  async hireCandidate(id: string, dto: HireCandidateDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
+    return this.transaction(async (tx) => {
+      const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
+      if (!candidate) throw new NotFoundException('Candidate not found');
+      if (candidate.stage === CandidateStage.HIRED && candidate.employeeId) {
+        const employee = await tx.employee.findFirst({ where: { id: candidate.employeeId, deletedAt: null }, select: employeeSummary });
+        if (employee) return { candidate, employee };
+      }
+      if (candidate.stage !== CandidateStage.OFFER) throw new BadRequestException('Only a candidate at offer stage can be hired');
+      if (dto.email.trim().toLowerCase() !== candidate.email.trim().toLowerCase()) throw new BadRequestException('Employee email must match the candidate email');
+      const [department, position, manager] = await Promise.all([
+        dto.departmentId ? tx.department.findFirst({ where: { id: dto.departmentId, deletedAt: null } }) : null,
+        dto.positionId ? tx.jobPosition.findFirst({ where: { id: dto.positionId, deletedAt: null } }) : null,
+        dto.managerId ? tx.employee.findFirst({ where: { id: dto.managerId, deletedAt: null } }) : null,
+      ]);
+      if (dto.departmentId && !department) throw new NotFoundException('Department not found');
+      if (dto.positionId && !position) throw new NotFoundException('Position not found');
+      if (dto.managerId && !manager) throw new NotFoundException('Manager not found');
+      if (position?.departmentId && dto.departmentId && position.departmentId !== dto.departmentId) throw new BadRequestException('The selected position belongs to a different department');
+      const employee = await tx.employee.create({
+        data: { ...dto, email: dto.email.trim().toLowerCase(), photo: dto.photo || null, salary: ZERO_MONEY },
+        select: employeeSummary,
+      });
+      const hired = await tx.recruitmentCandidate.update({
+        where: { id },
+        data: { stage: CandidateStage.HIRED, employeeId: employee.id, version: { increment: 1 } },
+      });
+      await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Employee', entityId: employee.id, subjectEmployeeId: employee.id, summary: 'Employee created from recruitment candidate' });
+      await this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType: 'RecruitmentCandidate', entityId: id, summary: 'Candidate hired and linked to server-created employee', changes: [{ field: 'stage', previousValue: candidate.stage, nextValue: CandidateStage.HIRED }, { field: 'employeeId', previousValue: null, nextValue: employee.id }] });
+      return { candidate: hired, employee };
+    });
+  }
+
+  async previewEos(dto: CreateEosDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'eos.manage' });
+    return this.transaction((tx) => this.calculateEos(tx, dto));
+  }
+
   async createEos(dto: CreateEosDto, user: RequestUser) {
     await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'eos.manage' });
     return this.transaction(async (tx) => {
-      const employee = await tx.employee.findFirst({ where: { id: dto.employeeId, deletedAt: null } });
-      if (!employee) throw new NotFoundException('Employee not found');
       const asOf = this.day(dto.asOf);
-      if (asOf < this.day(employee.hireDate)) throw new BadRequestException('Settlement date cannot precede hire date');
       const duplicate = await tx.eosRecord.findFirst({ where: { employeeId: dto.employeeId, asOf, status: { in: [EosStatus.DRAFT, EosStatus.APPROVED] }, deletedAt: null } });
       if (duplicate) throw new ConflictException('An open end-of-service record already exists for this date');
-      const salary = await tx.salaryRecord.findFirst({
-        where: { employeeId: dto.employeeId, effectiveFrom: { lte: asOf }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }], deletedAt: null },
-        orderBy: { effectiveFrom: 'desc' },
-      });
-      const basic = nonNegativeMoney(salary?.baseSalary ?? employee.salary, 'baseSalary');
-      const monthlyTotal = sumMoney([basic, salary?.allowances ?? 0, salary?.bonuses ?? 0]);
-      const serviceDays = Math.max(0, Math.floor((asOf.getTime() - this.day(employee.hireDate).getTime()) / 86_400_000));
-      const serviceYears = new Prisma.Decimal(serviceDays).div('365.2425').toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP);
-      const gratuity = serviceYears.gte(1) ? money(basic.div(30).times(21).times(serviceYears), 'gratuity') : ZERO_MONEY;
-      const year = asOf.getUTCFullYear();
-      const balances = await tx.leaveBalance.findMany({ where: { employeeId: dto.employeeId, year, deletedAt: null }, select: { totalDays: true, usedDays: true, pendingDays: true } });
-      const remainingLeave = sumMoney(balances.map((b) => Prisma.Decimal.max(ZERO_MONEY, b.totalDays.minus(b.usedDays).minus(b.pendingDays))));
-      const leaveEncashment = money(basic.div(30).times(remainingLeave), 'leaveEncashment');
-      const attendance = await tx.attendance.findMany({ where: { employeeId: dto.employeeId, attendanceDate: { lte: asOf }, status: { in: [AttendanceStatus.ABSENT, AttendanceStatus.HALF_DAY] }, deletedAt: null }, select: { status: true } });
-      const lopDays = sumMoney(attendance.map((row) => row.status === AttendanceStatus.ABSENT ? 1 : '0.5'));
-      const lopDeduction = money(monthlyTotal.div(30).times(lopDays), 'lopDeduction');
-      const expenses = await tx.employeeExpense.findMany({ where: { employeeId: dto.employeeId, status: ExpenseStatus.APPROVED, deletedAt: null }, select: { amount: true } });
-      const trips = await tx.businessTrip.findMany({ where: { employeeId: dto.employeeId, status: TripStatus.APPROVED, deletedAt: null }, select: { advanceAmount: true } });
-      const expenseReimbursement = sumMoney(expenses.map((row) => row.amount));
-      const tripAdvanceDeduction = sumMoney(trips.map((row) => row.advanceAmount));
-      const netSettlement = money(Prisma.Decimal.max(ZERO_MONEY, gratuity.plus(leaveEncashment).plus(expenseReimbursement).minus(lopDeduction).minus(tripAdvanceDeduction)), 'netSettlement');
-      const settings = await tx.organizationSettings.findUnique({ where: { id: 'default' } });
-      const eos = await tx.eosRecord.create({ data: {
-        employeeId: dto.employeeId, asOf, reason: dto.reason, serviceYears, gratuity, leaveEncashment,
-        lopDeduction, expenseReimbursement, tripAdvanceDeduction, netSettlement,
-        policyVersion: settings?.financialPolicyVersion ?? 1,
-      } });
+      const calculation = await this.calculateEos(tx, dto);
+      const eos = await tx.eosRecord.create({ data: calculation });
       await this.record(tx, user, AuditAction.CREATE, 'EosRecord', eos.id, 'End-of-service calculation created');
       return eos;
     });
@@ -322,6 +333,49 @@ export class OperationsService {
       await this.record(tx, user, previous ? AuditAction.UPDATE : AuditAction.CREATE, 'OrganizationSettings', 'default', 'Organization settings saved');
       return settings;
     });
+  }
+
+  private async calculateEos(tx: Prisma.TransactionClient, dto: CreateEosDto) {
+    const employee = await tx.employee.findFirst({ where: { id: dto.employeeId, deletedAt: null } });
+    if (!employee) throw new NotFoundException('Employee not found');
+    const asOf = this.day(dto.asOf);
+    if (asOf < this.day(employee.hireDate)) throw new BadRequestException('Settlement date cannot precede hire date');
+    const salary = await tx.salaryRecord.findFirst({
+      where: { employeeId: dto.employeeId, effectiveFrom: { lte: asOf }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }], deletedAt: null },
+      orderBy: { effectiveFrom: 'desc' },
+    });
+    const basic = nonNegativeMoney(salary?.baseSalary ?? employee.salary, 'baseSalary');
+    const monthlyTotal = sumMoney([basic, salary?.allowances ?? 0, salary?.bonuses ?? 0]);
+    const serviceDays = Math.max(0, Math.floor((asOf.getTime() - this.day(employee.hireDate).getTime()) / 86_400_000));
+    const serviceYears = new Prisma.Decimal(serviceDays).div('365.2425').toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP);
+    const gratuity = serviceYears.gte(1) ? money(basic.div(30).times(21).times(serviceYears), 'gratuity') : ZERO_MONEY;
+    const balances = await tx.leaveBalance.findMany({ where: { employeeId: dto.employeeId, year: asOf.getUTCFullYear(), deletedAt: null }, select: { totalDays: true, usedDays: true, pendingDays: true } });
+    const remainingLeave = sumMoney(balances.map((balance) => Prisma.Decimal.max(ZERO_MONEY, balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays))));
+    const leaveEncashment = money(basic.div(30).times(remainingLeave), 'leaveEncashment');
+    const attendance = await tx.attendance.findMany({ where: { employeeId: dto.employeeId, attendanceDate: { lte: asOf }, status: { in: [AttendanceStatus.ABSENT, AttendanceStatus.HALF_DAY] }, deletedAt: null }, select: { status: true } });
+    const lopDays = sumMoney(attendance.map((row) => row.status === AttendanceStatus.ABSENT ? 1 : '0.5'));
+    const lopDeduction = money(monthlyTotal.div(30).times(lopDays), 'lopDeduction');
+    const [expenses, trips, settings] = await Promise.all([
+      tx.employeeExpense.findMany({ where: { employeeId: dto.employeeId, status: ExpenseStatus.APPROVED, deletedAt: null }, select: { amount: true } }),
+      tx.businessTrip.findMany({ where: { employeeId: dto.employeeId, status: TripStatus.APPROVED, deletedAt: null }, select: { advanceAmount: true } }),
+      tx.organizationSettings.findUnique({ where: { id: 'default' } }),
+    ]);
+    const expenseReimbursement = sumMoney(expenses.map((row) => row.amount));
+    const tripAdvanceDeduction = sumMoney(trips.map((row) => row.advanceAmount));
+    const netSettlement = money(Prisma.Decimal.max(ZERO_MONEY, gratuity.plus(leaveEncashment).plus(expenseReimbursement).minus(lopDeduction).minus(tripAdvanceDeduction)), 'netSettlement');
+    return {
+      employeeId: dto.employeeId,
+      asOf,
+      reason: dto.reason,
+      serviceYears,
+      gratuity,
+      leaveEncashment,
+      lopDeduction,
+      expenseReimbursement,
+      tripAdvanceDeduction,
+      netSettlement,
+      policyVersion: settings?.financialPolicyVersion ?? 1,
+    };
   }
 
   private async resolveEmployee(requested: string | undefined, user: RequestUser, allPermission: string) {

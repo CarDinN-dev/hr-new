@@ -20,7 +20,7 @@
     "expense.self.read", "expense.self.create", "expense.team.read", "expense.team.approve_manager", "expense.management.read", "expense.management.approve_manager", "expense.hr.read", "expense.hr.approve", "expense.read_all",
     "trip.self.read", "trip.self.create", "trip.team.read", "trip.team.approve_manager", "trip.management.read", "trip.management.approve_manager", "trip.hr.read", "trip.hr.manage", "trip.read_all",
     "loan.self.read", "loan.hr.read", "loan.hr.manage", "loan.audit.read", "loan.read_all",
-    "document.self.read", "document.self.manage", "document.hr.read", "document.hr.manage", "document.read_all", "document.pdf.download_all",
+    "document.self.read", "document.self.manage", "document.team.read", "document.hr.read", "document.hr.manage", "document.read_all", "document.pdf.download_all",
     "contract.self.read", "contract.team.read", "contract.management.read", "contract.hr.manage", "contract.read_all",
     "performance.self.read", "performance.team.read", "performance.team.manage", "performance.management.read", "performance.management.manage", "performance.hr.manage", "performance.read_all",
     "recruitment.read", "recruitment.manage", "eos.read", "eos.manage", "report.read", "report.export", "import.run", "import.read",
@@ -54,7 +54,7 @@
       "inherits": ["EMPLOYEE"],
       "permissions": [
         "employee.team.read", "attendance.team.read", "attendance.team.review", "leave.team.read", "leave.team.approve_line_manager",
-        "expense.team.read", "expense.team.approve_manager", "trip.team.read", "trip.team.approve_manager", "contract.team.read", "performance.team.read", "performance.team.manage"
+        "expense.team.read", "expense.team.approve_manager", "trip.team.read", "trip.team.approve_manager", "document.team.read", "contract.team.read", "performance.team.read", "performance.team.manage"
       ]
     },
     {
@@ -65,7 +65,7 @@
       "inherits": ["EMPLOYEE"],
       "permissions": [
         "employee.management.read", "attendance.management.read", "attendance.management.review", "leave.management.read", "leave.management.approve_manager",
-        "expense.management.read", "expense.management.approve_manager", "trip.management.read", "trip.management.approve_manager", "contract.management.read", "performance.management.read", "performance.management.manage"
+        "expense.management.read", "expense.management.approve_manager", "trip.management.read", "trip.management.approve_manager", "document.team.read", "contract.management.read", "performance.management.read", "performance.management.manage"
       ]
     },
     {
@@ -81,7 +81,7 @@
         "service_request.hr.read", "service_request.hr.create_for_employee", "service_request.hr.generate", "service_request.hr.approve", "service_request.hr.reject", "service_request.hr.publish", "service_request.hr.revoke",
         "payroll.read", "payroll.generate", "payroll.approve", "payroll.publish", "payroll.mark_paid", "payroll.read_compensation", "payroll.read_bank", "payroll.update_bank", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "payroll.configure", "payroll.audit.read",
         "expense.hr.read", "expense.hr.approve", "trip.hr.read", "trip.hr.manage", "loan.hr.read", "loan.hr.manage", "document.hr.read", "document.hr.manage",
-        "contract.hr.manage", "performance.hr.manage", "recruitment.read", "recruitment.manage", "eos.read", "eos.manage", "report.read", "report.export"
+        "contract.hr.manage", "performance.hr.manage", "recruitment.read", "recruitment.manage", "eos.read", "eos.manage", "report.read", "report.export", "import.run", "import.read"
       ]
     },
     {

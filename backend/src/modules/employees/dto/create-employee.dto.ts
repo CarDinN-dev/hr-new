@@ -63,4 +63,10 @@ export class CreateEmployeeDto {
   @IsUUID()
   managerId?: string;
 
+  @ApiPropertyOptional({ description: 'JPEG data URL produced by the employee photo editor' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2_000_000)
+  photo?: string;
+
 }

@@ -60,8 +60,8 @@ import {
   type RecruitmentCandidate,
   type RecruitmentJob
 } from "./data";
-import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
-import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } from "./attendanceSheet";
+import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook, validateEmployeeImportCounts } from "./employeeSheet";
+import { attendanceTemplateHtml, buildAttendanceImportRows, parseAttendanceSheet } from "./attendanceSheet";
 import {
   activeEmployees,
   attendanceDaySummary,
@@ -70,16 +70,11 @@ import {
   clearAttendanceDay,
   companyLoanDeductionCap,
   decideAttendance,
-  createEosRecord,
-  deleteEmployee,
-  documentNumber,
   employeeName,
   employeeSalary,
-  eosSummary,
   expenseTotals,
   formatDate,
   formatMoney,
-  hireCandidateAsEmployee,
   inclusiveDays,
   initials,
   loanBalance,
@@ -96,7 +91,6 @@ import {
   tripTotal,
   upcomingBirthdays,
   upsertEmployee,
-  withNextDocumentSeq
 } from "./domain";
 import {
   backendSessionKey,
@@ -104,19 +98,29 @@ import {
   ApiError,
   apiList,
   apiRequest,
+  type BackendEos,
+  type BackendEmployee,
+  type BackendLeave,
+  type BackendPayroll,
   hasAllPermissions,
   hasAnyPermission,
   hasPermission,
   loadBackendSession,
+  loadAuthProviders,
+  loadBackendAttendancePeriod,
+  loadBackendReportState,
   loadBackendState,
   loginBackend,
   logoutBackend,
   restoreBackendSession,
   startMicrosoftLogin,
+  mapLeave,
+  mapEos,
+  mapPayroll,
   type BackendSession
 } from "./api";
 import { AuthorizationProvider, canAccessRoute, useAuthorization } from "./authorization";
-import { persistNormalizedStateDelta } from "./normalizedSync";
+import { employeeCorePayload, employeeImportRowPayload, persistNormalizedStateDelta } from "./normalizedSync";
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
@@ -131,6 +135,7 @@ import "./styles.css";
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
 type Theme = "light" | "dark";
+type CanonicalMutation = <T>(action: (session: BackendSession) => Promise<T>) => Promise<T>;
 const employeeFieldOptions: Record<string, readonly string[]> = {
   "Employee Category": ["Staff", "Management", "Worker", "Intern"],
   "Work Shift": ["Standard day", "Morning shift", "Evening shift", "Night shift", "Rotating shift"],
@@ -208,6 +213,7 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const providers = useQuery({ queryKey: ["auth-providers"], queryFn: loadAuthProviders, staleTime: 5 * 60_000 });
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -233,10 +239,10 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
           <h1>MedTech HR</h1>
           <p className="muted">Sign in to manage employee records, attendance, leave and payroll.</p>
         </div>
-        <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
+        {providers.data?.microsoft && <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
           <ShieldCheck size={17} /> Sign in with Microsoft
-        </button>
-        <div className="login-divider" aria-hidden="true"><span>or</span></div>
+        </button>}
+        {providers.data?.microsoft && <div className="login-divider" aria-hidden="true"><span>or</span></div>}
         <form className="login-form" onSubmit={submit}>
           <label htmlFor="login-email">Email<input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
           <label htmlFor="login-password">Password<input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
@@ -273,6 +279,7 @@ function App() {
   const stateRef = useRef(state);
   const persistedStateRef = useRef(state);
   const backendSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const attendancePeriodsLoaded = useRef(new Set<string>());
   stateRef.current = state;
   const workspaceQuery = useQuery({
     queryKey: backendSession ? workspaceQueryKey(backendSession) : ["workspace", "signed-out"],
@@ -345,6 +352,8 @@ function App() {
     if (!workspaceQuery.data || hydratedWorkspaceSession.current === sessionMarker) return;
     hydratedWorkspaceSession.current = sessionMarker;
     const hydrated = hydrateState(workspaceQuery.data.state);
+    const now = new Date();
+    attendancePeriodsLoaded.current = new Set([`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`]);
     persistedStateRef.current = hydrated;
     setState(hydrated);
     setBackendSession(prev => prev && workspaceQuery.data.updatedAt ? { ...prev, stateUpdatedAt: workspaceQuery.data.updatedAt } : prev);
@@ -421,33 +430,57 @@ function App() {
     if (!session) return;
     const loaded = await loadBackendState(stateRef.current, session);
     const hydrated = hydrateState(loaded.state);
+    const now = new Date();
+    attendancePeriodsLoaded.current = new Set([`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`]);
     persistedStateRef.current = hydrated;
     stateRef.current = hydrated;
     setState(hydrated);
     queryClient.setQueryData(workspaceQueryKey(session), { state: hydrated });
   }
 
-  function savePdf(file: GeneratedPdf | undefined, template: PdfTemplate, employeeId = "") {
-    if (!file) return;
-    setState(prev => {
-      const number = documentNumber(prev);
-      const next = withNextDocumentSeq(prev);
-      return {
-        ...next,
-        documents: [...next.documents, {
-          id: newId(),
-          employeeId,
-          template,
-          documentNumber: number,
-          generatedOn: todayISO(),
-          status: "Generated",
-          filename: file.filename,
-          dataUrl: file.dataUrl,
-          sizeBytes: file.sizeBytes
-        }]
-      };
+  async function canonicalMutation<T>(action: (session: BackendSession) => Promise<T>) {
+    const session = await saveBackendNow();
+    const result = await action(session);
+    await refreshWorkspace();
+    return result;
+  }
+
+  async function loadAttendancePeriod(year: number, month: number) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    if (attendancePeriodsLoaded.current.has(key)) return;
+    const loaded = await loadBackendAttendancePeriod(year, month);
+    const replacePeriod = (records: HrState["attendance"] | HrState["attendanceApprovals"], incoming: typeof records) => ({
+      ...Object.fromEntries(Object.entries(records).filter(([day]) => !day.startsWith(loaded.prefix))),
+      ...incoming
     });
-    notify(`${file.filename} saved and added to Documents.`);
+    const current = stateRef.current;
+    const next = {
+      ...current,
+      attendance: replacePeriod(current.attendance, loaded.attendance),
+      attendanceApprovals: replacePeriod(current.attendanceApprovals, loaded.approvals)
+    };
+    attendancePeriodsLoaded.current.add(key);
+    persistedStateRef.current = next;
+    stateRef.current = next;
+    setState(next);
+  }
+
+  async function savePdf(file: GeneratedPdf | undefined, template: PdfTemplate, employeeId = "") {
+    if (!file) return;
+    try {
+      const blob = dataUrlBlob(file.dataUrl);
+      await canonicalMutation(async session => {
+        const body = new FormData();
+        if (employeeId) body.set("employeeId", employeeId);
+        body.set("documentType", template);
+        body.set("visibility", "HR_ONLY");
+        body.set("file", new File([blob], file.filename, { type: blob.type || "application/pdf" }));
+        return apiRequest("/documents/upload", { method: "POST", csrfToken: session.csrfToken, body });
+      });
+      notify(`${file.filename} saved and added to Documents.`);
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   }
 
   function toggleTheme() {
@@ -584,16 +617,16 @@ function App() {
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} />}
           {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
-          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} />}
-          {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
+          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canonicalMutation={canonicalMutation} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} />}
+          {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canonicalMutation={canonicalMutation} loadPeriod={loadAttendancePeriod} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
           {nav === "Expenses" && <Expenses state={state} setState={setState} notify={notify} />}
-          {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canOverrideLimit={canManageLoans} />}
+          {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canonicalMutation={canonicalMutation} canOverrideLimit={canManageLoans} />}
           {nav === "Payroll" && <PayrollWorkflowPage session={backendSession} notify={notify} />}
-          {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
-          {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
-          {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
+          {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} canonicalMutation={canonicalMutation} />}
+          {nav === "EOS" && <EOS state={state} notify={notify} savePdf={savePdf} canonicalMutation={canonicalMutation} />}
+          {nav === "Documents" && <Documents state={state} notify={notify} savePdf={savePdf} canonicalMutation={canonicalMutation} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
@@ -892,10 +925,11 @@ function pageDescription(nav: NavItem) {
   return descriptions[nav];
 }
 
-function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean }) {
+function Employees({ state, setState, setModal, notify, close, savePdf, canonicalMutation, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean }) {
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState("");
   const activeCount = state.employees.filter(employee => employee.status === "Active").length;
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
@@ -910,11 +944,18 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
   }
 
-  function remove(employee: EmployeeRecord) {
-    const confirmed = window.confirm(`Delete ${employeeName(employee)}? This also removes linked attendance, leave, payroll, expenses, trips, EOS records and generated documents.`);
+  async function remove(employee: EmployeeRecord) {
+    const confirmed = window.confirm(`Archive ${employeeName(employee)}? The account and sessions will be disabled while attendance, leave, payroll, loans, documents, EOS, and audit history remain preserved.`);
     if (!confirmed) return;
-    setState(prev => deleteEmployee(prev, employee.id));
-    notify("Employee and linked records deleted.");
+    setBusy(employee.id);
+    try {
+      await canonicalMutation(session => apiRequest(`/employees/${employee.id}`, { method: "DELETE", csrfToken: session.csrfToken }));
+      notify("Employee archived and sign-in access disabled.");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
   }
 
   return (
@@ -968,7 +1009,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
                     <button onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canUpdate ? () => edit(employee) : undefined} savePdf={savePdf} canExport={canExport} canViewSalary={canViewSalary} />)}>Open profile</button>
                     {canUpdate && <button onClick={() => edit(employee)}>Edit</button>}
                     {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>PDF</button>}
-                    {canTerminate && <button className="danger-outline" onClick={() => remove(employee)}><Trash2 size={15} /> Delete</button>}
+                    {canTerminate && <button className="danger-outline" disabled={busy === employee.id} onClick={() => void remove(employee)}><Trash2 size={15} /> {busy === employee.id ? "Archiving..." : "Archive"}</button>}
                   </div>
                 </article>
               );
@@ -997,18 +1038,32 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
         ? await parseEmployeeWorkbook(file)
         : { rows: parseEmployeeSheet(await file.text()), skipped: 0 };
 
-      if (parsed.rows.length > 5_000) throw new Error("Employee imports are limited to 5,000 rows at a time.");
-
-      if (!parsed.rows.length) {
-        notify(parsed.skipped ? `No employees were imported. ${parsed.skipped} row${parsed.skipped === 1 ? "" : "s"} need a unique Employee Code.` : "No employee rows were found in this file.");
-        return;
-      }
+      validateEmployeeImportCounts(parsed.rows.length, parsed.skipped);
 
       const result = applyEmployeeRows(state, parsed.rows);
-      setState(result.state);
-      notify(`Employee import complete: ${result.added} added, ${result.updated} updated${parsed.skipped ? `, ${parsed.skipped} skipped` : ""}.`);
+      const importedCodes = new Set(parsed.rows.map(row => row["Employee Code"]?.trim()).filter(Boolean));
+      const importedEmployees = result.state.employees.filter(employee => importedCodes.has(employee.fields["Employee Code"]));
+      const [departments, positions] = await Promise.all([
+        apiList<{ id: string; name: string }>("/departments"),
+        apiList<{ id: string; title: string; departmentId?: string | null }>("/job-positions")
+      ]);
+      const departmentIds = new Map(departments.map(item => [item.name, item.id]));
+      const positionIds = new Map(positions.map(item => [`${item.departmentId || ""}:${item.title}`, item.id]));
+      for (const employee of importedEmployees) {
+        const departmentId = departmentIds.get(employee.fields.Department);
+        if (employee.fields.Department && !departmentId) throw new Error(`Unknown department for ${employee.fields["Employee Code"]}: ${employee.fields.Department}`);
+        if (employee.fields.Designation && !positionIds.has(`${departmentId || ""}:${employee.fields.Designation}`)) throw new Error(`Unknown position for ${employee.fields["Employee Code"]}: ${employee.fields.Designation}`);
+      }
+      setBusy("import");
+      await canonicalMutation(session => apiRequest<{ imported: number }>("/employees/import", {
+        method: "POST", csrfToken: session.csrfToken,
+        body: JSON.stringify({ rows: importedEmployees.map(employee => employeeImportRowPayload(employee, departmentIds, positionIds)) })
+      }));
+      notify(`Employee import complete: ${result.added} added, ${result.updated} updated.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Employee import failed. Use the downloaded .xlsx template or a CSV exported from Excel.");
+    } finally {
+      setBusy("");
     }
   }
 }
@@ -1094,7 +1149,7 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
   );
 }
 
-function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, canViewSalary }: { employee: EmployeeRecord; state: HrState; edit?: () => void; close: () => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; canExport: boolean; canViewSalary: boolean }) {
+function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, canViewSalary }: { employee: EmployeeRecord; state: HrState; edit?: () => void; close: () => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => Promise<void>; canExport: boolean; canViewSalary: boolean }) {
   const salary = employeeSalary(employee);
   return (
     <div className="employee-profile">
@@ -1130,7 +1185,7 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
   );
 }
 
-function Attendance({ state, setState, savePdf, notify, canManage, canExport }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: (message: string) => void; canManage: boolean; canExport: boolean }) {
+function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadPeriod, canManage, canExport }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => Promise<void>; notify: (message: string) => void; canonicalMutation: CanonicalMutation; loadPeriod: (year: number, month: number) => Promise<void>; canManage: boolean; canExport: boolean }) {
   const now = new Date();
   const [date, setDate] = useState(todayISO);
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -1138,6 +1193,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
+  const [importing, setImporting] = useState(false);
   const active = activeEmployees(state.employees).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"]));
   const day = state.attendance[date] || {};
   const stats = attendanceStats(state.employees, state.attendance, year, month);
@@ -1167,6 +1223,15 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
     })
     .filter(group => group.employees.length);
 
+  useEffect(() => {
+    const [selectedYear, selectedMonth] = date.split("-").map(Number);
+    void loadPeriod(selectedYear, selectedMonth).catch(error => notify(errorMessage(error)));
+  }, [date.slice(0, 7)]);
+
+  useEffect(() => {
+    void loadPeriod(year, month).catch(error => notify(errorMessage(error)));
+  }, [year, month]);
+
   function downloadAttendanceTemplate() {
     downloadBlob(new Blob([attendanceTemplateHtml()], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Attendance-Import-Template-${todayISO()}.xls`);
   }
@@ -1177,16 +1242,37 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
       if (file.size > 10_000_000) throw new Error("Attendance imports are limited to 10 MB.");
       const rows = parseAttendanceSheet(await file.text());
       if (rows.length > 50_000) throw new Error("Attendance imports are limited to 50,000 rows at a time.");
-      const result = applyAttendanceRows(state, rows);
-      if (!result.imported) {
-        notify(`No attendance rows imported${result.skipped ? `; ${result.skipped} invalid row(s) were skipped` : ""}.`);
-        return;
-      }
-      setState(result.state);
-      if (result.latestDate) setDate(result.latestDate);
-      notify(`Attendance import complete: ${result.imported} row(s) across ${result.dates} date(s)${result.skipped ? `; ${result.skipped} skipped` : ""}.`);
+      if (!rows.length) throw new Error("No attendance rows were found in this file.");
+      const payloadRows = buildAttendanceImportRows(state, rows);
+      setImporting(true);
+      await canonicalMutation(session => apiRequest<{ imported: number }>("/attendance/import", { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ rows: payloadRows }) }));
+      const dates = [...new Set(payloadRows.map(row => row.attendanceDate))].sort();
+      if (dates.length) setDate(dates.at(-1)!);
+      notify(`Attendance import complete: ${payloadRows.length} row(s) across ${dates.length} date(s).`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Attendance import failed. Use the downloaded template or a CSV exported from Excel.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function downloadAttendancePdf() {
+    try {
+      const loaded = await loadBackendAttendancePeriod(year, month);
+      const reportState: HrState = {
+        ...state,
+        attendance: {
+          ...Object.fromEntries(Object.entries(state.attendance).filter(([dayKey]) => !dayKey.startsWith(loaded.prefix))),
+          ...loaded.attendance
+        },
+        attendanceApprovals: {
+          ...Object.fromEntries(Object.entries(state.attendanceApprovals).filter(([dayKey]) => !dayKey.startsWith(loaded.prefix))),
+          ...loaded.approvals
+        }
+      };
+      await withPdf(pdf => savePdf(pdf.saveReportPdf("attendance_report", reportState, year, month), "attendance_report"));
+    } catch (error) {
+      notify(errorMessage(error));
     }
   }
 
@@ -1200,7 +1286,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
           </div>
           {canManage && <div className="inline-controls">
             <button onClick={downloadAttendanceTemplate}><Download size={16} /> Template</button>
-            <label className="button-like"><Upload size={16} /> Import attendance<input type="file" accept=".xls,.html,.csv,.tsv,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
+            <label className="button-like"><Upload size={16} /> {importing ? "Importing..." : "Import attendance"}<input disabled={importing} type="file" accept=".xls,.html,.csv,.tsv,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
             <button onClick={() => setState(prev => markAllAttendance(prev, date, "P"))}>Mark all present</button>
             <button onClick={() => setState(prev => clearAttendanceDay(prev, date))}>Clear day</button>
           </div>}
@@ -1272,7 +1358,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
           <div className="inline-controls">
             <select id="attendance-month" name="attendance-month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
             <input id="attendance-year" name="attendance-year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
-            {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("attendance_report", state, year, month), "attendance_report"))}>PDF</button>}
+            {canExport && <button onClick={() => void downloadAttendancePdf()}>PDF</button>}
           </div>
         </div>
         <DataTable columns={["Code", "Employee", "Present", "Half-day", "Leave", "Absent", "%"]} rows={stats.map(row => [row.employee.fields["Employee Code"], employeeName(row.employee), row.P, row.H, row.L, row.A, `${row.pct}%`])} />
@@ -1297,7 +1383,7 @@ function AttendanceMetric({ label, value, tone }: { label: string; value: React.
 function BusinessTrips({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
   const authorization = useAuthorization();
   const canCreate = authorization.hasAnyPermission("trip.self.create", "trip.hr.manage");
-  const canReview = authorization.hasAnyPermission("trip.team.approve_manager", "trip.department.approve_manager", "trip.hr.manage");
+  const canReview = authorization.hasAnyPermission("trip.team.approve_manager", "trip.management.approve_manager", "trip.hr.manage");
   const canClose = authorization.hasPermission("trip.hr.manage");
   const employees = activeEmployees(state.employees);
   const eligibleEmployees = authorization.hasPermission("trip.hr.manage")
@@ -1387,7 +1473,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
 function Expenses({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
   const authorization = useAuthorization();
   const canCreate = authorization.hasPermission("expense.self.create");
-  const canReview = authorization.hasAnyPermission("expense.team.approve_manager", "expense.department.approve_manager", "expense.hr.approve");
+  const canReview = authorization.hasAnyPermission("expense.team.approve_manager", "expense.management.approve_manager", "expense.hr.approve");
   const canPay = authorization.hasPermission("expense.hr.approve");
   const employees = activeEmployees(state.employees);
   const eligibleEmployees = employees.filter(employee => employee.id === authorization.scopes.employeeId);
@@ -1461,12 +1547,13 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
   </section>;
 }
 
-function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
+function Loans({ state, setState, setModal, notify, close, canonicalMutation, canOverrideLimit }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   setModal: (content: React.ReactNode) => void;
   notify: (message: string) => void;
   close: () => void;
+  canonicalMutation: CanonicalMutation;
   canOverrideLimit: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -1483,14 +1570,33 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
     return (!query || text.includes(query.toLowerCase())) && (!status || loan.status === status) && (!department || employee?.fields.Department === department);
   });
 
-  function saveLoan(loan: EmployeeLoan) {
-    setState(prev => ({ ...prev, loans: prev.loans.some(item => item.id === loan.id) ? prev.loans.map(item => item.id === loan.id ? loan : item) : [...prev.loans, loan] }));
-    notify(loan.status === "Draft" ? "Loan draft saved." : "Loan activated.");
+  async function saveLoan(loan: EmployeeLoan, existing?: EmployeeLoan) {
+    try {
+      await canonicalMutation(async session => {
+        const payload = loanMutationPayload(loan);
+        if (existing) await apiRequest(`/loans/${existing.id}`, { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify(payload) });
+        else {
+          const created = await apiRequest<{ id: string }>("/loans", { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ employeeId: loan.employeeId, ...payload }) });
+          if (loan.status === "Active") await apiRequest(`/loans/${created.id}/activate`, { method: "PATCH", csrfToken: session.csrfToken });
+        }
+      });
+      notify(loan.status === "Draft" ? "Loan draft saved." : "Loan activated.");
+      close();
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   }
 
-  function updateStatus(loan: EmployeeLoan, nextStatus: EmployeeLoan["status"]) {
-    setState(prev => ({ ...prev, loans: prev.loans.map(item => item.id === loan.id ? { ...item, status: nextStatus } : item) }));
-    notify(`Loan ${nextStatus.toLowerCase()}.`);
+  async function updateStatus(loan: EmployeeLoan, nextStatus: EmployeeLoan["status"]) {
+    const reason = ["Paused", "Cancelled"].includes(nextStatus) ? window.prompt(`Reason for ${nextStatus.toLowerCase()} the loan:`)?.trim() : "";
+    if (["Paused", "Cancelled"].includes(nextStatus) && (!reason || reason.length < 3)) return;
+    try {
+      const path = nextStatus === "Active" ? "activate" : nextStatus === "Paused" ? "pause" : "cancel";
+      await canonicalMutation(session => apiRequest(`/loans/${loan.id}/${path}`, { method: "PATCH", csrfToken: session.csrfToken, body: reason ? JSON.stringify({ reason }) : undefined }));
+      notify(`Loan ${nextStatus.toLowerCase()}.`);
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   }
 
   function openLoanForm(loan?: EmployeeLoan) {
@@ -1530,10 +1636,10 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
           <Badge key="status" value={loan.status} />,
           <div className="row-actions" key="actions">
             <button onClick={() => setModal(<LoanDetails state={state} loan={loan} close={close} />)}>View</button>
-            {canOverrideLimit && loan.status === "Draft" && <><button onClick={() => openLoanForm(loan)}>Edit</button><button className="primary" onClick={() => updateStatus(loan, "Active")}>Activate</button></>}
-            {canOverrideLimit && loan.status === "Active" && <button onClick={() => updateStatus(loan, "Paused")}>Pause</button>}
-            {canOverrideLimit && loan.status === "Paused" && <button onClick={() => updateStatus(loan, "Active")}>Resume</button>}
-            {canOverrideLimit && (loan.status === "Active" || loan.status === "Paused") && <><button onClick={() => setModal(<LoanDeductionForm state={state} loan={loan} setState={setState} notify={notify} close={close} canOverrideLimit={canOverrideLimit} />)}>Set deduction</button><button onClick={() => setModal(<LoanPaymentForm state={state} loan={loan} setState={setState} notify={notify} close={close} />)}>Record payment</button><button className="danger-outline" onClick={() => window.confirm("Cancel this loan? Future payroll deductions will stop.") && updateStatus(loan, "Cancelled")}>Cancel</button></>}
+            {canOverrideLimit && loan.status === "Draft" && <><button onClick={() => openLoanForm(loan)}>Edit</button><button className="primary" onClick={() => void updateStatus(loan, "Active")}>Activate</button></>}
+            {canOverrideLimit && loan.status === "Active" && <button onClick={() => void updateStatus(loan, "Paused")}>Pause</button>}
+            {canOverrideLimit && loan.status === "Paused" && <button onClick={() => void updateStatus(loan, "Active")}>Resume</button>}
+            {canOverrideLimit && (loan.status === "Active" || loan.status === "Paused") && <><button onClick={() => setModal(<LoanDeductionForm state={state} loan={loan} canonicalMutation={canonicalMutation} notify={notify} close={close} canOverrideLimit={canOverrideLimit} />)}>Set deduction</button><button onClick={() => setModal(<LoanPaymentForm state={state} loan={loan} canonicalMutation={canonicalMutation} notify={notify} close={close} />)}>Record payment</button><button className="danger-outline" onClick={() => window.confirm("Cancel this loan? Future payroll deductions will stop.") && void updateStatus(loan, "Cancelled")}>Cancel</button></>}
           </div>
         ];
       })} />
@@ -1541,7 +1647,7 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
   </section>;
 }
 
-function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?: EmployeeLoan; save: (loan: EmployeeLoan) => void; close: () => void; notify: (message: string) => void }) {
+function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?: EmployeeLoan; save: (loan: EmployeeLoan, existing?: EmployeeLoan) => Promise<void>; close: () => void; notify: (message: string) => void }) {
   const employees = activeEmployees(state.employees);
   const [draft, setDraft] = useState<EmployeeLoan>(() => loan ? { ...loan, deductionOverrides: { ...loan.deductionOverrides } } : {
     id: newId(), employeeId: employees[0]?.id || "", type: "Salary advance", principal: 0, disbursementDate: todayISO(), startPeriod: todayISO().slice(0, 7),
@@ -1556,8 +1662,7 @@ function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?:
     if (!draft.employeeId || draft.principal <= 0 || !/^\d{4}-\d{2}$/.test(draft.startPeriod) || !draft.disbursementDate) return notify("Employee, principal, disbursement date and first payroll month are required.");
     if (draft.repaymentMode === "Duration" && (draft.termMonths < 1 || draft.termMonths > 60)) return notify("Duration must be between 1 and 60 months.");
     if (draft.repaymentMode === "Monthly limit" && draft.monthlyLimit <= 0) return notify("Enter a positive monthly deduction limit.");
-    save({ ...draft, principal: Math.round(draft.principal * 100) / 100, termMonths: draft.repaymentMode === "Duration" ? Math.round(draft.termMonths) : 0, monthlyLimit: Math.max(0, Math.round(draft.monthlyLimit * 100) / 100) });
-    close();
+    void save({ ...draft, principal: Math.round(draft.principal * 100) / 100, termMonths: draft.repaymentMode === "Duration" ? Math.round(draft.termMonths) : 1, monthlyLimit: Math.max(0, Math.round(draft.monthlyLimit * 100) / 100) }, loan);
   }
 
   return <div><h2>{loan ? "Edit loan" : "Add loan"}</h2><div className="form-grid compact">
@@ -1575,7 +1680,7 @@ function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?:
   </div><p className="muted">{draft.repaymentMode === "Manual" ? "HR will enter the deduction for each payroll month." : `Planned deduction after current limits: ${formatMoney(effectiveInstallment, state.settings.company.currency)} for about ${projectedMonths || "-"} month(s). The last installment adjusts to the remaining balance.`}</p><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Save loan</button></div></div>;
 }
 
-function LoanDeductionForm({ state, loan, setState, notify, close, canOverrideLimit }: { state: HrState; loan: EmployeeLoan; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; close: () => void; canOverrideLimit: boolean }) {
+function LoanDeductionForm({ state, loan, canonicalMutation, notify, close, canOverrideLimit }: { state: HrState; loan: EmployeeLoan; canonicalMutation: CanonicalMutation; notify: (message: string) => void; close: () => void; canOverrideLimit: boolean }) {
   const defaultPeriod = todayISO().slice(0, 7);
   const [period, setPeriod] = useState(defaultPeriod);
   const [amount, setAmount] = useState(String(loan.deductionOverrides?.[defaultPeriod]?.amount ?? loanScheduledAmount(loan)));
@@ -1585,38 +1690,44 @@ function LoanDeductionForm({ state, loan, setState, notify, close, canOverrideLi
   const normalLimit = Math.min(loan.monthlyLimit > 0 ? loan.monthlyLimit : Number.POSITIVE_INFINITY, companyCap);
   const balance = loanBalance(state, loan.id);
 
-  function saveOverride() {
+  async function saveOverride() {
     const value = Number(amount);
     if (!Number.isFinite(value) || value < 0 || value > balance) return notify("Deduction must be between zero and the remaining balance.");
     if (!reason.trim()) return notify("Enter a reason for the manual deduction.");
     const aboveLimit = value > normalLimit;
     if (aboveLimit && !canOverrideLimit) return notify("You do not have permission to approve a deduction above the configured limit.");
-    setState(prev => setLoanDeductionOverride(prev, loan.id, period, value, reason, aboveLimit));
-    notify(value === 0 ? "Loan deduction skipped for this month." : "Loan deduction saved.");
-    close();
+    try {
+      const [year, month] = period.split("-").map(Number);
+      await canonicalMutation(session => apiRequest(`/loans/${loan.id}/overrides`, { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ year, month, amount: String(value), reason: reason.trim(), approvedAboveLimit: aboveLimit }) }));
+      notify(value === 0 ? "Loan deduction skipped for this month." : "Loan deduction saved.");
+      close();
+    } catch (error) { notify(errorMessage(error)); }
   }
 
   return <div><h2>Set loan deduction</h2><p className="muted">{employeeName(employee)} · Balance {formatMoney(balance, state.settings.company.currency)}</p><div className="form-grid compact">
     <label>Payroll month<input type="month" value={period} onChange={event => { const next = event.target.value; setPeriod(next); setAmount(String(loan.deductionOverrides?.[next]?.amount ?? loanScheduledAmount(loan))); setReason(loan.deductionOverrides?.[next]?.reason ?? ""); }} /></label>
     <label>Deduction amount<input type="number" min="0" max={balance} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></label>
     <label className="wide">Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Required for the audit history" /></label>
-  </div><p className="muted">Normal limit: {Number.isFinite(normalLimit) ? formatMoney(normalLimit, state.settings.company.currency) : "No configured limit"}. Enter 0 to skip the month.{canOverrideLimit ? " Authorized amounts above the limit are recorded as overrides." : ""}</p><div className="modal-actions"><button onClick={() => { setState(prev => setLoanDeductionOverride(prev, loan.id, period, undefined)); notify("Automatic schedule restored."); close(); }}>Use schedule</button><button onClick={close}>Cancel</button><button className="primary" onClick={saveOverride}>Save deduction</button></div></div>;
+  </div><p className="muted">Normal limit: {Number.isFinite(normalLimit) ? formatMoney(normalLimit, state.settings.company.currency) : "No configured limit"}. Enter 0 to skip the month.{canOverrideLimit ? " Authorized amounts above the limit are recorded as overrides." : ""}</p><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={() => void saveOverride()}>Save deduction</button></div></div>;
 }
 
-function LoanPaymentForm({ state, loan, setState, notify, close }: { state: HrState; loan: EmployeeLoan; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; close: () => void }) {
+function LoanPaymentForm({ state, loan, canonicalMutation, notify, close }: { state: HrState; loan: EmployeeLoan; canonicalMutation: CanonicalMutation; notify: (message: string) => void; close: () => void }) {
   const balance = loanBalance(state, loan.id);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState("");
-  function submit() {
+  async function submit() {
     const value = Number(amount);
     if (!Number.isFinite(value) || value <= 0 || value > balance) return notify("Payment must be positive and cannot exceed the remaining balance.");
     if (!note.trim()) return notify("Enter a payment reference or note.");
-    setState(prev => recordManualLoanRepayment(prev, loan.id, value, note, date));
-    notify("Manual loan payment posted.");
-    close();
+    try {
+      const [year, month] = date.slice(0, 7).split("-").map(Number);
+      await canonicalMutation(session => apiRequest(`/loans/${loan.id}/repayments`, { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ year, month, amount: String(value), note: note.trim() }) }));
+      notify("Manual loan payment posted.");
+      close();
+    } catch (error) { notify(errorMessage(error)); }
   }
-  return <div><h2>Record loan payment</h2><p className="muted">Remaining balance: {formatMoney(balance, state.settings.company.currency)}</p><div className="form-grid compact"><label>Amount<input type="number" min="0.01" max={balance} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></label><label>Payment date<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label className="wide">Reference or note<input value={note} onChange={event => setNote(event.target.value)} /></label></div><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Post payment</button></div></div>;
+  return <div><h2>Record loan payment</h2><p className="muted">Remaining balance: {formatMoney(balance, state.settings.company.currency)}</p><div className="form-grid compact"><label>Amount<input type="number" min="0.01" max={balance} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></label><label>Payment date<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label className="wide">Reference or note<input value={note} onChange={event => setNote(event.target.value)} /></label></div><div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={() => void submit()}>Post payment</button></div></div>;
 }
 
 function LoanDetails({ state, loan, close }: { state: HrState; loan: EmployeeLoan; close: () => void }) {
@@ -1630,7 +1741,23 @@ function monthKeyLabel(year: number, month: number) {
   return `${months[month - 1]} ${year}`;
 }
 
-function Recruitment({ state, setState, notify, setNav }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; setNav: (nav: NavItem) => void }) {
+function loanMutationPayload(loan: EmployeeLoan) {
+  const [startYear, startMonth] = loan.startPeriod.split("-").map(Number);
+  return {
+    type: loan.type,
+    principal: String(loan.principal),
+    disbursementDate: loan.disbursementDate,
+    startYear,
+    startMonth,
+    repaymentMode: loan.repaymentMode.toUpperCase().replace(/\s+/g, "_"),
+    termMonths: Math.max(1, loan.termMonths || 1),
+    monthlyLimit: String(loan.monthlyLimit || 0),
+    reference: loan.reference.trim() || undefined,
+    notes: loan.notes.trim() || undefined
+  };
+}
+
+function Recruitment({ state, setState, notify, setNav, canonicalMutation }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; setNav: (nav: NavItem) => void; canonicalMutation: CanonicalMutation }) {
   const authorization = useAuthorization();
   const canManage = authorization.hasPermission("recruitment.manage");
   const canHire = authorization.hasAllPermissions("recruitment.manage", "employee.hr.create");
@@ -1649,6 +1776,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [candidateStage, setCandidateStage] = useState<RecruitmentCandidate["stage"]>("Applied");
   const [candidateRating, setCandidateRating] = useState("0");
   const [candidateNotes, setCandidateNotes] = useState("");
+  const [hiringCandidateId, setHiringCandidateId] = useState("");
   const pipeline = candidatePipeline(state.candidates);
   const openJobs = state.jobs.filter(job => job.status === "Open");
   const openPositions = openJobs.reduce((sum, job) => sum + job.openings, 0);
@@ -1758,17 +1886,43 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   }
 
   function moveCandidate(id: string, stage: RecruitmentCandidate["stage"]) {
+    if (stage === "Hired") return notify("Use Hire as employee so the employee and candidate are committed together.");
     setState(prev => ({
       ...prev,
       candidates: prev.candidates.map(candidate => candidate.id === id ? { ...candidate, stage } : candidate)
     }));
   }
 
-  function addAsEmployee(candidate: RecruitmentCandidate) {
+  async function addAsEmployee(candidate: RecruitmentCandidate) {
     if (candidate.employeeId) return notify("Candidate is already linked to an employee.");
-    setState(prev => hireCandidateAsEmployee(prev, candidate.id));
-    notify(`${candidate.name} added as an employee. Set salary details in Employees.`);
-    setNav("Employees");
+    if (!candidate.email) return notify("Add the candidate email before hiring.");
+    const job = state.jobs.find(item => item.id === candidate.jobId);
+    const names = splitEmployeeName(candidate.name);
+    setHiringCandidateId(candidate.id);
+    try {
+      const departments = await apiList<{ id: string; name: string }>("/departments");
+      const departmentId = departments.find(item => item.name === job?.dept)?.id;
+      if (job?.dept && !departmentId) throw new Error(`The job department ${job.dept} no longer exists.`);
+      await canonicalMutation(session => apiRequest(`/recruitment/candidates/${candidate.id}/hire`, {
+        method: "POST", csrfToken: session.csrfToken,
+        body: JSON.stringify({
+          employeeCode: nextEmployeeCode(state.employees),
+          firstName: names.firstName || candidate.name.trim(),
+          lastName: names.lastName || "-",
+          email: candidate.email.trim().toLowerCase(),
+          phone: candidate.phone || undefined,
+          hireDate: todayISO(),
+          employmentStatus: "ACTIVE",
+          departmentId
+        })
+      }));
+      notify(`${candidate.name} hired and linked to the server-created employee.`);
+      setNav("Employees");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setHiringCandidateId("");
+    }
   }
 
   return <section className="stack recruitment-workspace">
@@ -1839,10 +1993,11 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
                 <div><strong>{candidate.name}</strong><span>{job?.title || "(no job)"}</span></div>
                 <p>{candidate.email || candidate.phone || "No contact added"}</p>
                 {candidate.rating > 0 && <em>Rating: {candidate.rating}/5</em>}
-                {canManage ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
+                {canManage ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.filter(option => option !== "Hired" || candidate.stage === "Hired").map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
                 {candidate.notes && <small>{candidate.notes}</small>}
                 {canManage && <div className="row-actions">
-                  {candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : canHire ? <button className="primary" onClick={() => addAsEmployee(candidate)}>Add as employee</button> : null)}
+                  {candidate.stage === "Hired" && candidate.employeeId && <Badge value="Employee added" />}
+                  {candidate.stage === "Offer" && canHire && <button className="primary" disabled={hiringCandidateId === candidate.id} onClick={() => void addAsEmployee(candidate)}>{hiringCandidateId === candidate.id ? "Hiring..." : "Hire as employee"}</button>}
                   <button onClick={() => editCandidate(candidate)}>Edit</button>
                   <button onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete</button>
                 </div>}
@@ -1855,7 +2010,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   </section>;
 }
 
-function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function EOS({ state, notify, savePdf, canonicalMutation }: { state: HrState; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => Promise<void>; canonicalMutation: CanonicalMutation }) {
   const authorization = useAuthorization();
   const canManage = authorization.hasPermission("eos.manage");
   const canExport = authorization.hasAnyPermission("document.hr.manage", "report.export");
@@ -1864,32 +2019,41 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   const [asOf, setAsOf] = useState(todayISO());
   const [reason, setReason] = useState("End of service");
   const employee = employees.find(item => item.id === employeeId);
-  const summary = employee ? eosSummary(employee, state, asOf) : undefined;
+  const preview = useQuery({
+    queryKey: ["eos-preview", employeeId, asOf, reason],
+    queryFn: () => apiRequest<BackendEos>("/eos/preview", { method: "POST", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ employeeId, asOf, reason: reason.trim() }) }),
+    enabled: canManage && Boolean(employeeId && asOf && reason.trim().length >= 3),
+    staleTime: 30_000
+  });
+  const summary = preview.data ? mapEos(preview.data) : undefined;
 
-  function updateRecord(id: string, patch: Partial<EosRecord>) {
-    setState(prev => ({ ...prev, eosRecords: prev.eosRecords.map(item => item.id === id ? { ...item, ...patch } : item) }));
+  async function updateRecord(id: string, status: EosRecord["status"]) {
+    try {
+      await canonicalMutation(session => apiRequest(`/eos/${id}/status`, { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify({ status: status.toUpperCase() }) }));
+      notify(`EOS record marked ${status.toLowerCase()}.`);
+    } catch (error) { notify(errorMessage(error)); }
   }
 
-  function createRecord() {
-    setState(prev => {
-      const row = prev.employees.find(item => item.id === employeeId);
-      if (prev.eosRecords.some(record => record.employeeId === employeeId && record.asOf === asOf && record.status !== "Paid")) return prev;
-      return row ? { ...prev, eosRecords: [...prev.eosRecords, createEosRecord(prev, row, asOf, reason)] } : prev;
-    });
-    notify(state.eosRecords.some(record => record.employeeId === employeeId && record.asOf === asOf && record.status !== "Paid") ? "Open EOS draft already exists for this employee and date." : "EOS draft created.");
+  async function createRecord() {
+    try {
+      await canonicalMutation(session => apiRequest("/eos", { method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ employeeId, asOf, reason: reason.trim() }) }));
+      notify("EOS draft created from the server calculation.");
+    } catch (error) { notify(errorMessage(error)); }
   }
 
-  function closeEmployee(record: EosRecord) {
-    setState(prev => ({
-      ...prev,
-      employees: prev.employees.map(item => item.id === record.employeeId ? { ...item, status: "Resigned", fields: { ...item.fields, "ESB Date": record.asOf } } : item)
-    }));
-    notify("Employee marked resigned.");
+  async function closeEmployee(record: EosRecord) {
+    if (!window.confirm("Archive this employee after the paid settlement? Historical HR and financial records will be preserved.")) return;
+    try {
+      await canonicalMutation(session => apiRequest(`/employees/${record.employeeId}`, { method: "DELETE", csrfToken: session.csrfToken }));
+      notify("Employee archived after settlement.");
+    } catch (error) { notify(errorMessage(error)); }
   }
 
   return <section className="stack">
     <div className="panel">
       <div className="panel-head"><div><h3>EOS, Gratuity & Settlement</h3><span>Gratuity, leave balance, expenses and outstanding advances.</span></div></div>
+      {preview.isPending && <p className="muted">Calculating settlement from server records...</p>}
+      {preview.isError && <p className="sync-alert" role="alert">{preview.error.message}</p>}
       {employee && summary && <div className="eos-mode-grid">
         <article><span>EOS</span><strong>{formatMoney(summary.netSettlement, state.settings.company.currency)}</strong><p>Final payable after reimbursements and advances.</p></article>
         <article><span>Gratuity</span><strong>{formatMoney(summary.gratuity, state.settings.company.currency)}</strong><p>Basic salary based service benefit estimate.</p></article>
@@ -1899,10 +2063,10 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
         <label>Employee<select id="eos-employee" name="eos-employee" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{employees.map(item => <option key={item.id} value={item.id}>{item.fields["Employee Code"]} - {employeeName(item)}</option>)}</select></label>
         <label>Settlement date<input id="eos-date" name="eos-date" type="date" value={asOf} onChange={event => setAsOf(event.target.value)} /></label>
         <label className="wide">Reason<textarea id="eos-reason" name="eos-reason" value={reason} onChange={event => setReason(event.target.value)} /></label>
-        <button className="primary" disabled={!employee} onClick={createRecord}>Create settlement draft</button>
+        <button className="primary" disabled={!employee || !summary} onClick={() => void createRecord()}>Create settlement draft</button>
       </div>}
       {employee && summary && <div className="settlement-preview">
-        <div><span>Service</span><strong>{summary.years.toFixed(2)} years</strong></div>
+        <div><span>Service</span><strong>{summary.serviceYears.toFixed(2)} years</strong></div>
         <div><span>Gratuity</span><strong>{formatMoney(summary.gratuity, state.settings.company.currency)}</strong></div>
         <div><span>Leave encashment</span><strong>{formatMoney(summary.leaveEncashment, state.settings.company.currency)}</strong></div>
         <div><span>LOP deduction</span><strong>{formatMoney(summary.lopDeduction, state.settings.company.currency)}</strong></div>
@@ -1910,9 +2074,9 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
         <div><span>Open advances</span><strong>{formatMoney(summary.tripAdvanceDeduction, state.settings.company.currency)}</strong></div>
         <div><span>EOS payable</span><strong>{formatMoney(summary.netSettlement, state.settings.company.currency)}</strong></div>
       </div>}
-      {employee && canExport && <div className="form-actions">
-        <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf("gratuity_statement", employee, state, reason), "gratuity_statement", employee.id))}>Gratuity PDF</button>
-        <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf("final_settlement", employee, state, reason), "final_settlement", employee.id))}>Settlement PDF</button>
+      {employee && summary && canExport && <div className="form-actions">
+        <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEosPdf(summary, employee, state.settings), "gratuity_statement", employee.id))}>Gratuity PDF</button>
+        <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEosPdf(summary, employee, state.settings), "final_settlement", employee.id))}>Settlement PDF</button>
       </div>}
     </div>
     <div className="panel">
@@ -1928,11 +2092,11 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
           formatMoney(record.netSettlement, state.settings.company.currency),
           <Badge key="status" value={record.status} />,
           <div className="row-actions" key="actions">
-            {canManage && record.status === "Draft" && <button onClick={() => updateRecord(record.id, { status: "Approved" })}>Approve</button>}
-            {canManage && record.status === "Approved" && <button onClick={() => updateRecord(record.id, { status: "Paid" })}>Mark paid</button>}
-            {canManage && record.status === "Paid" && <button onClick={() => closeEmployee(record)}>Close employee</button>}
+            {canManage && record.status === "Draft" && <button onClick={() => void updateRecord(record.id, "Approved")}>Approve</button>}
+            {canManage && record.status === "Approved" && <button onClick={() => void updateRecord(record.id, "Paid")}>Mark paid</button>}
+            {canManage && record.status === "Paid" && <button onClick={() => void closeEmployee(record)}>Archive employee</button>}
             {canExport && rowEmployee && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEosPdf(record, rowEmployee, state.settings), "final_settlement", rowEmployee.id))}>PDF</button>}
-            {canManage && <button onClick={() => confirmDelete(`EOS record dated ${formatDate(record.asOf)}`) && setState(prev => ({ ...prev, eosRecords: prev.eosRecords.filter(item => item.id !== record.id) }))}>Delete</button>}
+            {canManage && <button onClick={() => { if (!confirmDelete(`EOS record dated ${formatDate(record.asOf)}`)) return; void canonicalMutation(session => apiRequest(`/eos/${record.id}`, { method: "DELETE", csrfToken: session.csrfToken })).then(() => notify("EOS record archived."), error => notify(errorMessage(error))); }}>Delete</button>}
           </div>
         ];
       })} />
@@ -1940,7 +2104,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   </section>;
 }
 
-function Documents({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function Documents({ state, notify, savePdf, canonicalMutation }: { state: HrState; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => Promise<void>; canonicalMutation: CanonicalMutation }) {
   const authorization = useAuthorization();
   const canGenerate = authorization.hasPermission("document.hr.manage");
   const canDelete = authorization.hasAnyPermission("document.self.manage", "document.hr.manage");
@@ -1948,17 +2112,38 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
   const [employeeId, setEmployeeId] = useState(active[0]?.id || "");
   const [template, setTemplate] = useState<PdfTemplate>("offer_letter");
   const [notes, setNotes] = useState("");
+  const [deletingId, setDeletingId] = useState("");
   const employee = state.employees.find(item => item.id === employeeId);
+  const isExitDocument = template === "final_settlement" || template === "gratuity_statement" || template === "clearance_certificate";
+  const exitPreview = useQuery({
+    queryKey: ["document-eos-preview", employeeId, notes],
+    queryFn: () => apiRequest<BackendEos>("/eos/preview", { method: "POST", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ employeeId, asOf: todayISO(), reason: notes.trim() || "End of service document" }) }),
+    enabled: canGenerate && Boolean(employeeId) && isExitDocument,
+    staleTime: 30_000
+  });
+  const exitSummary = exitPreview.data ? mapEos(exitPreview.data) : undefined;
 
   function generate() {
     if (!employee) return notify("Select an employee first.");
+    if (isExitDocument) {
+      if (!exitSummary) return notify(exitPreview.isError ? exitPreview.error.message : "Wait for the server settlement calculation.");
+      void withPdf(pdf => savePdf(pdf.saveEosPdf(exitSummary, employee, state.settings, template), template, employee.id));
+      return;
+    }
     void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf(template, employee, state, notes), template, employee.id));
   }
 
-  function removeDocument(id: string, name: string) {
+  async function removeDocument(id: string, name: string) {
     if (!confirmDelete(name)) return;
-    setState(prev => ({ ...prev, documents: prev.documents.filter(item => item.id !== id) }));
-    notify("Generated document deleted.");
+    setDeletingId(id);
+    try {
+      await canonicalMutation(session => apiRequest(`/documents/${id}`, { method: "DELETE", csrfToken: session.csrfToken }));
+      notify("Generated document archived.");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setDeletingId("");
+    }
   }
 
   return (
@@ -1969,9 +2154,10 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
           <label>Employee<select value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{active.map(item => <option key={item.id} value={item.id}>{item.fields["Employee Code"]} - {employeeName(item)}</option>)}</select></label>
           <label>Template<select value={template} onChange={event => setTemplate(event.target.value as PdfTemplate)}>{pdfTemplates.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
           <label className="wide">Notes / purpose<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bank request, visa processing, warning details, settlement notes..." /></label>
-          <button className="primary" onClick={generate}>Generate PDF</button>
+          <button className="primary" disabled={isExitDocument && !exitSummary} onClick={generate}>{isExitDocument && exitPreview.isPending ? "Calculating…" : "Generate PDF"}</button>
         </div>
-        {employee && ["final_settlement", "gratuity_statement", "clearance_certificate"].includes(template) && <SettlementPreview employee={employee} state={state} />}
+        {employee && isExitDocument && exitPreview.isError && <p className="sync-alert" role="alert">{exitPreview.error.message}</p>}
+        {employee && exitSummary && isExitDocument && <SettlementPreview settlement={exitSummary} currency={state.settings.company.currency} />}
       </div>}
       <div className="panel">
         <div className="panel-head"><h3>Document Templates</h3><span>{pdfTemplates.length} templates</span></div>
@@ -1989,7 +2175,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
             doc.filename || doc.status,
             <div className="row-actions" key="actions">
               {doc.dataUrl ? <><button onClick={() => { try { openDataUrl(doc.dataUrl!); } catch (error) { notify(errorMessage(error)); } }}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : doc.downloadUrl ? <a className="button-like" href={doc.downloadUrl}>Download</a> : <Badge value={doc.status} />}
-              {canDelete && <button className="danger-outline" onClick={() => removeDocument(doc.id, doc.filename || doc.documentNumber)}><Trash2 size={15} /> Delete</button>}
+              {canDelete && <button className="danger-outline" disabled={deletingId === doc.id} onClick={() => void removeDocument(doc.id, doc.filename || doc.documentNumber)}><Trash2 size={15} /> {deletingId === doc.id ? "Archiving..." : "Archive"}</button>}
             </div>
           ];
         })} empty="No documents generated yet." />
@@ -1998,24 +2184,36 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
   );
 }
 
-function SettlementPreview({ employee, state }: { employee: EmployeeRecord; state: HrState }) {
-  const settlement = eosSummary(employee, state);
+function SettlementPreview({ settlement, currency }: { settlement: EosRecord; currency: string }) {
   return <div className="settlement-preview">
-    <div><span>Service</span><strong>{settlement.years.toFixed(2)} years</strong></div>
-    <div><span>Gratuity</span><strong>{formatMoney(settlement.gratuity, state.settings.company.currency)}</strong></div>
-    <div><span>Leave encashment</span><strong>{formatMoney(settlement.leaveEncashment, state.settings.company.currency)}</strong></div>
-    <div><span>LOP deduction</span><strong>{formatMoney(settlement.lopDeduction, state.settings.company.currency)}</strong></div>
-    <div><span>Approved expenses</span><strong>{formatMoney(settlement.expenseReimbursement, state.settings.company.currency)}</strong></div>
-    <div><span>Open advances</span><strong>{formatMoney(settlement.tripAdvanceDeduction, state.settings.company.currency)}</strong></div>
-    <div><span>Net settlement</span><strong>{formatMoney(settlement.netSettlement, state.settings.company.currency)}</strong></div>
+    <div><span>Service</span><strong>{settlement.serviceYears.toFixed(2)} years</strong></div>
+    <div><span>Gratuity</span><strong>{formatMoney(settlement.gratuity, currency)}</strong></div>
+    <div><span>Leave encashment</span><strong>{formatMoney(settlement.leaveEncashment, currency)}</strong></div>
+    <div><span>LOP deduction</span><strong>{formatMoney(settlement.lopDeduction, currency)}</strong></div>
+    <div><span>Approved expenses</span><strong>{formatMoney(settlement.expenseReimbursement, currency)}</strong></div>
+    <div><span>Open advances</span><strong>{formatMoney(settlement.tripAdvanceDeduction, currency)}</strong></div>
+    <div><span>Net settlement</span><strong>{formatMoney(settlement.netSettlement, currency)}</strong></div>
   </div>;
 }
 
-function Reports({ state, savePdf }: { state: HrState; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function Reports({ state, notify, savePdf }: { state: HrState; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => Promise<void> }) {
   const { hasPermission: can } = useAuthorization();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [busy, setBusy] = useState<PdfTemplate | "">("");
+
+  async function downloadReport(template: PdfTemplate) {
+    setBusy(template);
+    try {
+      const reportState = await loadBackendReportState(state, template, year, month);
+      await withPdf(pdf => savePdf(pdf.saveReportPdf(template, reportState, year, month), template));
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setBusy("");
+    }
+  }
   return <section className="report-grid">{reportTemplates.map(report => (
     <div className="report-card" key={report.id}>
       <BarChart3 size={20} />
@@ -2023,7 +2221,7 @@ function Reports({ state, savePdf }: { state: HrState; notify: (message: string)
       <p>{report.description}</p>
       {["attendance_report", "payroll_register"].includes(report.id) && <div className="inline-controls report-controls"><select value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select><input type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
       {report.id === "leave_report" && <div className="inline-controls report-controls"><input type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
-      {can("report.export") ? <button className="primary" onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf(report.id, state, year, month), report.id))}><Download size={16} /> Download PDF</button> : <span className="muted">View only</span>}
+      {can("report.export") ? <button className="primary" disabled={Boolean(busy)} onClick={() => void downloadReport(report.id)}><Download size={16} /> {busy === report.id ? "Preparing..." : "Download PDF"}</button> : <span className="muted">View only</span>}
     </div>
   ))}</section>;
 }
@@ -2090,7 +2288,7 @@ function SettingsPage({
     </div>}
     {canConfigureSystem && <div className="panel">
       <div className="panel-head"><h3>Data Protection</h3><span>Managed on Google Cloud</span></div>
-      <p className="muted">The database and private document bucket are backed up by the server schedule. Restore operations are restricted to administrators with server access.</p>
+      <p className="muted">Backup and restore are operator procedures. Use verified PostgreSQL dumps and GCS bucket versioning/retention; this application does not create snapshots or perform rollbacks.</p>
     </div>}
     {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Company Profile</h3></div><div className="form-grid compact">
       {(["name", "legalName", "tagline", "address", "phone", "email", "website", "currency", "wpsEmployerEid", "wpsPayerEid", "wpsPayerQid", "wpsPayerBank", "wpsPayerIban"] as const).map(key => {
@@ -2123,7 +2321,8 @@ type CommonProps = {
   setModal: (node: React.ReactNode) => void;
   notify: (message: string) => void;
   close: () => void;
-  savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void;
+  savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => Promise<void>;
+  canonicalMutation: CanonicalMutation;
 };
 
 function fieldType(field: string) {

@@ -4,9 +4,10 @@ import { Type } from 'class-transformer';
 import { IsDate, IsEnum, IsOptional, IsString, IsUrl, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateDocumentDto {
-  @ApiProperty()
+  @ApiPropertyOptional({ description: 'Omit for an organization-level HR document' })
+  @IsOptional()
   @IsUUID()
-  employeeId: string;
+  employeeId?: string;
 
   @ApiProperty({ example: 'Passport' })
   @IsString()

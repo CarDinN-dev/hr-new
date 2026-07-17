@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessScopeType, AttendanceStatus, AuditAction, PayrollRunStatus, Prisma } from '@prisma/client';
+import { AccessScopeType, AttendanceApprovalStatus, AttendanceStatus, AuditAction, PayrollRunStatus, Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -7,6 +8,7 @@ import { CheckAttendanceDto } from './dto/check-attendance.dto';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
 import { QueryAttendanceDto } from './dto/query-attendance.dto';
 import { UpdateAttendanceDto } from './dto/update-attendance.dto';
+import { ImportAttendanceDto } from './dto/import-attendance.dto';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 
@@ -53,6 +55,56 @@ export class AttendanceService {
       const attendance = await created;
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Attendance', entityId: attendance.id, summary: 'Attendance recorded' });
       return attendance;
+    });
+  }
+
+  async importAttendance(dto: ImportAttendanceDto, user: RequestUser) {
+    if (!this.authorization.permissionAllowedForScope(user, 'import.run', AccessScopeType.ALL_SYSTEM)) throw new ForbiddenException('Insufficient permission');
+    const prepared = dto.rows.map((row) => this.manualAttendanceData(row, this.dayStart(row.attendanceDate)));
+    const keys = new Set<string>();
+    for (const row of prepared) {
+      const key = `${row.employeeId}:${row.attendanceDate.toISOString().slice(0, 10)}`;
+      if (keys.has(key)) throw new BadRequestException(`Duplicate attendance row for ${key}`);
+      keys.add(key);
+    }
+    const employeeIds = [...new Set(prepared.map((row) => row.employeeId))];
+    for (const employeeId of employeeIds) {
+      if (!this.authorization.permissionAllowedForScope(user, 'attendance.hr.manage', AccessScopeType.ALL_EMPLOYEES, employeeId)) throw new NotFoundException('Employee not found');
+    }
+    const employees = await this.prisma.employee.findMany({ where: { id: { in: employeeIds }, deletedAt: null }, select: { id: true } });
+    if (employees.length !== employeeIds.length) throw new NotFoundException('One or more employees were not found');
+    const years = [...new Set(prepared.map((row) => row.attendanceDate.getUTCFullYear()))];
+    const closedPayrolls = await this.prisma.payroll.findMany({
+      where: { employeeId: { in: employeeIds }, year: { in: years }, payrollRun: { status: { in: [PayrollRunStatus.APPROVED, PayrollRunStatus.PUBLISHED, PayrollRunStatus.PAID] } } },
+      select: { employeeId: true, year: true, month: true },
+    });
+    const closedKeys = new Set(closedPayrolls.map((payroll) => `${payroll.employeeId}:${payroll.year}:${payroll.month}`));
+    const blocked = prepared.find((row) => closedKeys.has(`${row.employeeId}:${row.attendanceDate.getUTCFullYear()}:${row.attendanceDate.getUTCMonth() + 1}`));
+    if (blocked) throw new BadRequestException('Attendance cannot change after payroll is approved or paid');
+
+    return this.attendanceTransaction(async (tx) => {
+      for (let offset = 0; offset < prepared.length; offset += 2_000) {
+        const chunk = prepared.slice(offset, offset + 2_000);
+        const values = chunk.map((row) => Prisma.sql`(
+          ${randomUUID()}, ${row.employeeId}, ${row.attendanceDate}, ${row.checkIn ?? null}, ${row.checkOut ?? null},
+          ${row.isLate}, ${row.lateMinutes}, ${new Prisma.Decimal(row.workingHours)},
+          ${row.status}::"AttendanceStatus", ${row.approvalStatus ?? AttendanceApprovalStatus.NOT_APPROVED}::"AttendanceApprovalStatus",
+          ${row.notes ?? null}, 1, NOW(), NOW(), NULL
+        )`);
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO "Attendance" (
+            "id", "employeeId", "attendanceDate", "checkIn", "checkOut", "isLate", "lateMinutes", "workingHours",
+            "status", "approvalStatus", "notes", "version", "createdAt", "updatedAt", "deletedAt"
+          ) VALUES ${Prisma.join(values)}
+          ON CONFLICT ("employeeId", "attendanceDate") DO UPDATE SET
+            "checkIn" = EXCLUDED."checkIn", "checkOut" = EXCLUDED."checkOut", "isLate" = EXCLUDED."isLate",
+            "lateMinutes" = EXCLUDED."lateMinutes", "workingHours" = EXCLUDED."workingHours", "status" = EXCLUDED."status",
+            "approvalStatus" = EXCLUDED."approvalStatus", "notes" = EXCLUDED."notes", "deletedAt" = NULL,
+            "version" = "Attendance"."version" + 1, "updatedAt" = NOW()
+        `);
+      }
+      await this.audit.record(tx, user, { action: AuditAction.IMPORT, entityType: 'Attendance', summary: 'Atomic attendance import completed', metadata: { rowCount: prepared.length, employeeCount: employeeIds.length } });
+      return { imported: prepared.length, employeeCount: employeeIds.length };
     });
   }
 

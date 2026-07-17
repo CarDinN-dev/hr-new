@@ -12,8 +12,8 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   app.set('trust proxy', 1);
-  app.use(json({ limit: '1mb' }));
-  app.use(urlencoded({ extended: true, limit: '1mb' }));
+  app.use(json({ limit: '20mb' }));
+  app.use(urlencoded({ extended: true, limit: '20mb' }));
   const configService = app.get(ConfigService);
   const isProduction = configService.get<string>('NODE_ENV') === 'production';
   const allowedOrigins = configService

@@ -15,7 +15,7 @@ import { LeaveService } from './leave.service';
 export class LeaveWorkflowController {
   constructor(private readonly leave: LeaveService) {}
 
-  @Permissions('leave.self.create') @Post('submit') submit(@Body() dto: CreateLeaveRequestDto, @Headers('idempotency-key') key: string | undefined, @CurrentUser() user: RequestUser) { return this.leave.createRequest(dto, key, user); }
+  @AnyPermission('leave.self.create', 'leave.hr.manage') @Post('submit') submit(@Body() dto: CreateLeaveRequestDto, @Headers('idempotency-key') key: string | undefined, @CurrentUser() user: RequestUser) { return this.leave.createRequest(dto, key, user); }
   @Permissions('leave.self.read') @Get('mine') mine(@Query() query: QueryLeaveRequestsDto, @CurrentUser() user: RequestUser) { return this.leave.listMine(query, user); }
   @AnyPermission('leave.team.approve_line_manager', 'leave.management.approve_manager', 'leave.hr.approve', 'leave.executive.approve_cpo', 'leave.executive.approve_coo', 'leave.executive.self_approve_coo')
   @Get('inbox') inbox(@Query() query: QueryLeaveRequestsDto, @CurrentUser() user: RequestUser) { return this.leave.inbox(query, user); }

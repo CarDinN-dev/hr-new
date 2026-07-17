@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const test = require('node:test');
+const bcrypt = require('bcrypt');
 const { plainToInstance } = require('class-transformer');
 const { validateSync } = require('class-validator');
 const {
@@ -8,6 +9,7 @@ const {
   AttendanceStatus,
   DocumentVisibility,
   PermissionOverrideEffect,
+  Prisma,
   RoleProtection,
 } = require('@prisma/client');
 const { HttpExceptionFilter } = require('../dist/common/filters/http-exception.filter');
@@ -16,6 +18,7 @@ const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto'
 const { PermissionsGuard } = require('../dist/modules/authorization/permissions.guard');
 const { AuthorizationService } = require('../dist/modules/authorization/authorization.service');
 const { AttendanceService } = require('../dist/modules/attendance/attendance.service');
+const { AuditService } = require('../dist/modules/audit/audit.service');
 const { AuthService, sessionTokenFromRequest } = require('../dist/modules/auth/auth.service');
 const { JwtStrategy } = require('../dist/modules/auth/strategies/jwt.strategy');
 const { MicrosoftAuthService } = require('../dist/modules/auth/microsoft-auth.service');
@@ -252,6 +255,31 @@ test('attendance dates, lateness, and hours are derived by the server', () => {
   assert.equal(attendance.companyDay(new Date('2026-07-13T21:30:00Z')).toISOString(), '2026-07-14T00:00:00.000Z');
 });
 
+test('backend payroll and audit CSV exports neutralize spreadsheet formulas', async () => {
+  const auditCsv = Object.create(AuditService.prototype).auditCsv([{
+    sequence: 1n, occurredAtUtc: new Date('2026-07-17T00:00:00Z'), actorEmailSnapshot: '=HYPERLINK("bad")',
+    action: 'EXPORT', outcome: 'SUCCESS', module: 'audit', resourceType: 'AuditEvent', resourceId: '+SUM(1,1)', reason: '@command',
+  }]).buffer.toString('utf8');
+  assert.match(auditCsv, /"'=HYPERLINK/);
+  assert.match(auditCsv, /"'\+SUM/);
+  assert.match(auditCsv, /"'@command/);
+
+  const decimal = (value) => ({ toFixed: () => value });
+  const payroll = new PayrollService({
+    payrollRun: { findUnique: async () => ({
+      id: 'run-1', year: 2026, month: 7, status: 'PAID', payrolls: [{
+        employee: { employeeCode: '=CMD', firstName: '+First', lastName: '@Last', department: { name: '-Dept' } },
+        baseSalary: decimal('1.00'), allowances: decimal('0.00'), bonuses: decimal('0.00'), deductions: decimal('0.00'),
+        taxAmount: decimal('0.00'), grossPay: decimal('1.00'), netPay: decimal('1.00'),
+      }],
+    }) },
+  }, {}, audit, {}, { permissionAllowedForScope: () => true });
+  const payrollCsv = (await payroll.exportRun('run-1', undefined, user())).buffer.toString('utf8');
+  assert.match(payrollCsv, /"'=CMD"/);
+  assert.match(payrollCsv, /"'\+First @Last"/);
+  assert.match(payrollCsv, /"'-Dept"/);
+});
+
 test('unexpected backend errors are masked from API responses', () => {
   let responseBody;
   new HttpExceptionFilter().catch(new Error('INTERNAL_DETAIL_MARKER'), {
@@ -300,6 +328,41 @@ test('database throttling survives service recreation and session cookies remain
   assert.equal('accessToken' in first.browserSession({ user: user(), accessToken: 'secret', csrfToken: 'csrf' }), false);
 });
 
+test('local step-up locks after five failures per account/session and clears failures after success', async () => {
+  const throttles = new Map();
+  const prisma = {
+    authThrottle: {
+      findUnique: async ({ where }) => throttles.get(where.key) ?? null,
+      deleteMany: async ({ where }) => {
+        if (where.key) throttles.delete(where.key);
+        if (where.resetAt?.lte) for (const [key, value] of throttles) if (value.resetAt <= where.resetAt.lte) throttles.delete(key);
+      },
+    },
+    authSession: { updateMany: async () => ({ count: 1 }) },
+    $executeRaw: async (_strings, key, resetAt, now) => {
+      const current = throttles.get(key);
+      throttles.set(key, current && current.resetAt > now ? { ...current, count: current.count + 1 } : { key, count: 1, resetAt });
+      return 1;
+    },
+    $transaction: async (callback) => callback(prisma),
+  };
+  const passwordHash = await bcrypt.hash('CorrectPass123!', 10);
+  const users = { findById: async () => ({ id: 'user-1', isActive: true, deletedAt: null, localLoginEnabled: true, passwordHash }) };
+  const config = { get: (key, fallback) => key === 'BCRYPT_SALT_ROUNDS' ? 10 : fallback, getOrThrow: () => 'x'.repeat(64) };
+  const service = new AuthService(users, {}, config, prisma, {}, audit);
+  const lockedActor = user({ sessionId: 'locked-session' });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await assert.rejects(service.stepUpLocal({ password: 'WrongPass123!' }, lockedActor), /could not be verified/);
+  }
+  await assert.rejects(service.stepUpLocal({ password: 'CorrectPass123!' }, lockedActor), /Too many authentication attempts/);
+
+  const recoverableActor = user({ sessionId: 'recoverable-session' });
+  await assert.rejects(service.stepUpLocal({ password: 'WrongPass123!' }, recoverableActor), /could not be verified/);
+  assert.equal(throttles.size, 2);
+  await service.stepUpLocal({ password: 'CorrectPass123!' }, recoverableActor);
+  assert.equal(throttles.size, 1);
+});
+
 test('JWT validation rejects revoked, expired, altered, and legacy sessions', async () => {
   const token = 'test-token';
   const session = {
@@ -329,6 +392,7 @@ test('Microsoft identity validates the tenant token and defers application acces
   const tenantId = '11111111-1111-4111-8111-111111111111';
   const clientId = '22222222-2222-4222-8222-222222222222';
   const values = {
+    MICROSOFT_LOGIN_ENABLED: 'true',
     MICROSOFT_TENANT_ID: tenantId,
     MICROSOFT_CLIENT_ID: clientId,
     MICROSOFT_CLIENT_SECRET: 'test-client-secret-value',
@@ -354,6 +418,14 @@ test('Microsoft identity validates the tenant token and defers application acces
   assert.throws(() => service.decryptTransaction(tampered.toString('base64url')), /invalid or expired/);
 });
 
+test('Microsoft login can be disabled without credentials', async () => {
+  const values = { MICROSOFT_LOGIN_ENABLED: 'false', JWT_SECRET: 'x'.repeat(64), NODE_ENV: 'production' };
+  const config = { getOrThrow: (key) => values[key], get: (key, fallback) => values[key] ?? fallback };
+  const service = new MicrosoftAuthService(config, {}, {});
+  assert.equal(service.isEnabled(), false);
+  await assert.rejects(service.begin({}, {}), /Microsoft login is disabled/);
+});
+
 test('self escalation and removal of the final Super Administrator are rejected', async () => {
   const auth = authorizationStub();
   const actor = user({ permissions: ['role.assign', 'role.assign_protected'], reauthenticatedAt: new Date() });
@@ -371,4 +443,20 @@ test('self escalation and removal of the final Super Administrator are rejected'
     }),
     /final active Super Administrator/,
   );
+});
+
+test('multi-page payslips repeat headers and reserve totals and footer space', () => {
+  const service = new PayrollService({}, {}, audit, {}, authorizationStub());
+  const money = (value) => new Prisma.Decimal(value);
+  const pdf = service.payslipPdf({
+    employee: { employeeCode: 'EMP-MULTI', firstName: 'Multi', lastName: 'Page', department: { name: 'Finance' } },
+    lineItems: Array.from({ length: 80 }, (_, index) => ({ description: `Line item ${index + 1}`, amount: money('1.00') })),
+    grossPay: money('80.00'),
+    deductions: money('1.00'),
+    taxAmount: money('2.00'),
+    netPay: money('77.00'),
+  }, { year: 2026, month: 7, revision: 1 });
+  const content = pdf.toString('latin1');
+  assert.ok((content.match(/\/Type \/Page\b/g) || []).length >= 2);
+  assert.ok(pdf.length > 5_000);
 });

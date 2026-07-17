@@ -8,6 +8,7 @@ import { CheckAttendanceDto } from './dto/check-attendance.dto';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
 import { QueryAttendanceDto } from './dto/query-attendance.dto';
 import { UpdateAttendanceDto } from './dto/update-attendance.dto';
+import { ImportAttendanceDto } from './dto/import-attendance.dto';
 
 @ApiTags('Attendance')
 @ApiBearerAuth()
@@ -19,6 +20,12 @@ export class AttendanceController {
   @Post()
   create(@Body() dto: CreateAttendanceDto, @CurrentUser() user: RequestUser) {
     return this.attendanceService.create(dto, user);
+  }
+
+  @Permissions('import.run')
+  @Post('import')
+  importAttendance(@Body() dto: ImportAttendanceDto, @CurrentUser() user: RequestUser) {
+    return this.attendanceService.importAttendance(dto, user);
   }
 
   @Permissions('attendance.self.create')

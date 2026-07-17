@@ -19,6 +19,9 @@ export class DocumentStorageService {
       throw new Error('The filesystem-test document storage adapter is restricted to NODE_ENV=test');
     }
     if (testAdapter && !configuredDirectory) throw new Error('TEST_STORAGE_DIRECTORY is required for filesystem-test storage');
+    if (config.get<string>('NODE_ENV') === 'production' && !testAdapter && !this.bucketName) {
+      throw new Error('GCS_DOCUMENTS_BUCKET is required in production');
+    }
     this.testStorageDirectory = testAdapter ? resolve(configuredDirectory) : null;
   }
 

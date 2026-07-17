@@ -6,6 +6,7 @@ import { RequestUser } from '../../common/types/request-user.type';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { ImportEmployeesDto } from './dto/import-employees.dto';
 import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 import { EmployeesService } from './employees.service';
 
@@ -19,6 +20,12 @@ export class EmployeesController {
   @Post()
   create(@Body() dto: CreateEmployeeDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.create(dto, user);
+  }
+
+  @Permissions('import.run')
+  @Post('import')
+  importEmployees(@Body() dto: ImportEmployeesDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.importEmployees(dto, user);
   }
 
   @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')

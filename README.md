@@ -2,14 +2,26 @@
 
 Production-oriented HR-only ERP built from the supplied MedTech HR references.
 
-## Run locally
+## Local development
 
 ```powershell
+# Terminal 1: PostgreSQL and backend
+docker compose up -d postgres
+cd backend
+npm install
+Copy-Item .env.example .env
+# Set DATABASE_URL to localhost:5434 and provide development secrets.
+npm run prisma:generate
+npm run prisma:deploy
+npm run start:dev
+
+# Terminal 2: Vite frontend
+cd ..
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5173`. Vite proxies `/api` to `http://127.0.0.1:3000`, and frontend requests include credentials for both same-origin and explicitly configured cross-origin development. If a different backend origin is required, set `VITE_API_URL` and include the frontend origin in backend `CORS_ORIGIN`.
 
 ## Docker
 
@@ -61,10 +73,46 @@ Changing bootstrap password variables does not rotate an existing account. Rotat
 - Restrict SSH to the administrator IP and do not add public ingress rules for `3000`, `3100`, `5432`, `5434`, `8080` or `8443`.
 - Rebuild the existing Compose project with `docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml up -d --build`; do not start a second stack.
 - Check `docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml ps` and both `/healthz` and `/api/v1/health` after deployment.
-- The backend keeps up to 90 workspace snapshots, runs one every eight hours, and supports manual backup and rollback from Settings.
-- Copy encrypted PostgreSQL disaster-recovery dumps and uploaded-document backups to a private, versioned Google Cloud Storage bucket; application snapshots in the same database do not protect against disk or VM loss.
+- Set `MICROSOFT_LOGIN_ENABLED=false` for local-only authentication. When it is `true`, all Microsoft tenant, client, secret, and redirect variables are mandatory and startup fails if any are missing.
+- Set `GCS_DOCUMENTS_BUCKET` to a private bucket. Production startup fails if the bucket name is missing.
 - Keep `CORS_ORIGIN` empty when the frontend proxies `/api/v1` from the same domain.
 - Do not restart the Cloudflare tunnel during an application-only deployment; a Quick Tunnel URL can change when its process restarts.
+
+## Backup and restore operator procedure
+
+The application has no snapshot, scheduled-backup, rollback, or restore control. Before every production migration, an operator must create a PostgreSQL custom-format dump from the existing Compose project and record its SHA-256 digest:
+
+```sh
+cd /opt/medtech-hr-erp
+mkdir -p backups
+docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
+  pg_dump -U postgres -d hr_erp -Fc > "backups/hr_erp-$(date -u +%Y%m%dT%H%M%SZ).dump"
+sha256sum backups/hr_erp-*.dump > backups/SHA256SUMS
+sha256sum --check backups/SHA256SUMS
+```
+
+Copy the dump and checksum to an access-controlled backup location outside the VM. Never commit either file. Verify the private document bucket has object versioning and an appropriate retention policy before deployment:
+
+```sh
+gcloud storage buckets update "gs://$GCS_DOCUMENTS_BUCKET" --versioning
+gcloud storage buckets update "gs://$GCS_DOCUMENTS_BUCKET" --retention-period=30d
+gcloud storage buckets describe "gs://$GCS_DOCUMENTS_BUCKET"
+```
+
+Retention is a governance decision; use the organization-approved duration instead of `30d` where required. Test each dump in an isolated database, never over the production database:
+
+```sh
+docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
+  createdb -U postgres hr_erp_restore_test
+docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
+  pg_restore -U postgres -d hr_erp_restore_test --clean --if-exists < backups/hr_erp-YYYYMMDDTHHMMSSZ.dump
+docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
+  psql -U postgres -d hr_erp_restore_test -c 'SELECT COUNT(*) FROM "Employee";'
+docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml exec -T postgres \
+  dropdb -U postgres hr_erp_restore_test
+```
+
+For an actual recovery, stop application writes, verify the dump checksum, restore into a newly created database, validate migrations and record counts, then switch the API only after the restore test succeeds. Recover document objects from GCS generations according to the bucket retention policy.
 
 ## Checks
 
@@ -80,4 +128,4 @@ cd ..
 docker compose config
 ```
 
-The app saves HR data to PostgreSQL through the backend. Browser JSON import/export is intentionally disabled; use the protected Settings backup controls.
+The app saves HR data to PostgreSQL through the backend. Browser JSON import/export is intentionally disabled; backup and restore remain infrastructure-operator responsibilities.

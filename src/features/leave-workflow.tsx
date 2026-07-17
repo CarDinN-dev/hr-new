@@ -33,6 +33,7 @@ export type LeaveRecord = {
   decisions?: Array<{ id: string; decisionType: string; stage?: string | null; fromStatus: string; toStatus: string; reason?: string | null; createdAt: string; actor: { email: string } }>;
 };
 type LeaveTypeRecord = { id: string; name: string; annualAllowanceDays: string };
+type EmployeeOption = { id: string; employeeCode: string; firstName: string; lastName: string };
 type EligibleAssignee = { id: string; email: string; employee?: { firstName: string; lastName: string } | null };
 type DecisionAction = "approve" | "self-approve" | "reject" | "return" | "cancel" | "reassign" | "override" | "correct-resubmit";
 type Decision = { request: LeaveRecord; action: DecisionAction; reasonRequired: boolean };
@@ -44,7 +45,9 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   const records = useQuery({ queryKey: workflowKey(session, "leave-records", broad), queryFn: () => apiList<LeaveRecord>(broad ? "/leave/requests" : "/leave/mine") });
   const inbox = useQuery({ queryKey: workflowKey(session, "leave-inbox"), queryFn: () => apiList<LeaveRecord>("/leave/inbox"), enabled: canInbox });
   const leaveTypes = useQuery({ queryKey: workflowKey(session, "leave-types"), queryFn: () => apiList<LeaveTypeRecord>("/leave/types") });
-  const [form, setForm] = useState({ leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false, reason: "" });
+  const canHrSubmit = hasPermission(session, "leave.hr.manage");
+  const employees = useQuery({ queryKey: workflowKey(session, "leave-submit-employees"), queryFn: () => apiList<EmployeeOption>("/employees"), enabled: canHrSubmit });
+  const [form, setForm] = useState({ employeeId: session.employeeId || "", leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false, reason: "" });
   const [decision, setDecision] = useState<Decision | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
   const [decisionPassword, setDecisionPassword] = useState("");
@@ -60,7 +63,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
     client.invalidateQueries({ queryKey: workflowKey(session, "approval-inbox") }),
   ]);
   const submit = useMutation({
-    mutationFn: () => apiRequest<LeaveRecord>("/leave/submit", { method: "POST", csrfToken: session.csrfToken, headers: idempotencyHeaders(), body: JSON.stringify({ ...form, leaveTypeId: form.leaveTypeId || leaveTypes.data?.[0]?.id }) }),
+    mutationFn: () => apiRequest<LeaveRecord>("/leave/submit", { method: "POST", csrfToken: session.csrfToken, headers: idempotencyHeaders(), body: JSON.stringify({ ...form, employeeId: canHrSubmit ? form.employeeId : undefined, leaveTypeId: form.leaveTypeId || leaveTypes.data?.[0]?.id }) }),
     onSuccess: async () => { await invalidate(); setForm(previous => ({ ...previous, reason: "" })); notify("Leave request submitted."); },
   });
   const decide = useMutation({
@@ -93,7 +96,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   }
 
   return <section className="stack">
-    {Boolean(session.employeeId) && hasPermission(session, "leave.self.create") && <div className="panel"><div className="panel-head"><div><h3>Request leave</h3><span>Approval routing is assigned by the server.</span></div></div><div className="form-grid compact"><label>Leave type<select value={form.leaveTypeId} onChange={event => setForm(previous => ({ ...previous, leaveTypeId: event.target.value }))}>{leaveTypes.data?.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>From<input type="date" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value }))} /></label><label>To<input type="date" value={form.endDate} onChange={event => setForm(previous => ({ ...previous, endDate: event.target.value }))} /></label><label>Duration<select value={form.isHalfDay ? "half" : "full"} onChange={event => setForm(previous => ({ ...previous, isHalfDay: event.target.value === "half" }))}><option value="full">Full day(s)</option><option value="half">Half day</option></select></label><label className="wide">Reason<textarea maxLength={2000} value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))} /></label></div><div className="form-actions"><button className="primary" disabled={submit.isPending || !leaveTypes.data?.length} onClick={() => submit.mutate()}>{submit.isPending ? "Submitting…" : "Submit request"}</button></div>{submit.isError && <p className="sync-alert" role="alert">{submit.error.message}</p>}</div>}
+    {(canHrSubmit || (Boolean(session.employeeId) && hasPermission(session, "leave.self.create"))) && <div className="panel"><div className="panel-head"><div><h3>Request leave</h3><span>Approval routing is assigned by the server.</span></div></div><div className="form-grid compact">{canHrSubmit && <label>Employee<select value={form.employeeId} onChange={event => setForm(previous => ({ ...previous, employeeId: event.target.value }))}><option value="">Select employee</option>{employees.data?.map(item => <option value={item.id} key={item.id}>{item.employeeCode} · {item.firstName} {item.lastName}</option>)}</select></label>}<label>Leave type<select value={form.leaveTypeId} onChange={event => setForm(previous => ({ ...previous, leaveTypeId: event.target.value }))}>{leaveTypes.data?.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>From<input type="date" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value }))} /></label><label>To<input type="date" value={form.endDate} onChange={event => setForm(previous => ({ ...previous, endDate: event.target.value }))} /></label><label>Duration<select value={form.isHalfDay ? "half" : "full"} onChange={event => setForm(previous => ({ ...previous, isHalfDay: event.target.value === "half" }))}><option value="full">Full day(s)</option><option value="half">Half day</option></select></label><label className="wide">Reason<textarea maxLength={2000} value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))} /></label></div><div className="form-actions"><button className="primary" disabled={submit.isPending || !leaveTypes.data?.length || (canHrSubmit && !form.employeeId)} onClick={() => submit.mutate()}>{submit.isPending ? "Submitting…" : "Submit request"}</button></div>{submit.isError && <p className="sync-alert" role="alert">{submit.error.message}</p>}</div>}
     <div className="panel"><div className="panel-head"><div><h3>Leave requests</h3><span>{inbox.data?.length ?? 0} assigned to you</span></div></div>{records.isPending || inbox.isPending ? <p className="muted">Loading leave requests…</p> : records.isError ? <p className="sync-alert">{records.error.message}</p> : <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Leave</th><th>Dates</th><th>Status</th><th>Actions</th></tr></thead><tbody>{all.map(request => {
       const own = request.employeeId === session.employeeId;
       const assigned = inboxIds.has(request.id);

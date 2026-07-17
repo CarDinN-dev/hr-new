@@ -145,7 +145,10 @@ export class ServiceRequestsService {
       const duplicate = await this.idempotent(tx, user, 'service-request.cancel', key, { id, dto }); if (duplicate) return duplicate;
       const request = await tx.serviceRequest.findUnique({ where: { id } }); if (!request) throw new NotFoundException('Service request not found'); this.assertVersion(request.version, dto.expectedVersion);
       const own = request.subjectEmployeeId === user.employeeId || request.requesterUserId === user.id;
-      if (!own && !this.authorization.has(user, 'service_request.hr.reject')) throw new NotFoundException('Service request not found');
+      const selfAllowed = own && request.subjectEmployeeId === user.employeeId
+        && this.authorization.permissionAllowedForScope(user, 'service_request.self.cancel', AccessScopeType.SELF, request.subjectEmployeeId);
+      const hrAllowed = this.authorization.permissionAllowedForScope(user, 'service_request.hr.reject', AccessScopeType.ASSIGNED_APPROVALS, request.id);
+      if (!selfAllowed && !hrAllowed) throw new NotFoundException('Service request not found');
       if (([ServiceRequestStatus.PUBLISHED, ServiceRequestStatus.REJECTED, ServiceRequestStatus.CANCELLED, ServiceRequestStatus.REVOKED] as ServiceRequestStatus[]).includes(request.status)) throw new BadRequestException('This request cannot be cancelled');
       await this.updateStatus(tx, request, user, ServiceRequestStatus.CANCELLED, ServiceRequestEventType.CANCELLED, dto.reason);
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'ServiceRequest', resourceId: id, workflowId: id, workflowStatus: ServiceRequestStatus.CANCELLED, requestType: request.requestType, summary: 'Certificate request cancelled', reason: dto.reason, subjectEmployeeId: request.subjectEmployeeId });

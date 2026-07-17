@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { LoanRepaymentMode, LoanStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -81,6 +81,15 @@ export class CreateLoanDto {
   @IsString()
   @Length(1, 1000)
   notes?: string;
+}
+
+export class UpdateLoanDto extends PartialType(OmitType(CreateLoanDto, ['employeeId'] as const)) {}
+
+export class LoanStatusTransitionDto {
+  @ApiProperty()
+  @IsString()
+  @Length(3, 500)
+  reason: string;
 }
 
 export class QueryLoansDto extends PaginationQueryDto {

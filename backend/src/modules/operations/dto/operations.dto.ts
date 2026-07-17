@@ -3,6 +3,7 @@ import { CandidateStage, EosStatus, ExpenseStatus, RecruitmentJobStatus, TripSta
 import { Transform, Type } from 'class-transformer';
 import { IsDate, IsDecimal, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import { CreateEmployeeDto } from '../../employees/dto/create-employee.dto';
 
 const asDecimal = ({ value }: { value: unknown }) => String(value);
 const emptyToNull = ({ value }: { value: unknown }) => value === '' ? null : value;
@@ -63,6 +64,8 @@ export class TransitionCandidateDto {
   @ApiProperty({ enum: CandidateStage }) @IsEnum(CandidateStage) stage: CandidateStage;
   @ApiPropertyOptional() @IsOptional() @IsUUID() employeeId?: string;
 }
+
+export class HireCandidateDto extends CreateEmployeeDto {}
 
 export class QueryRecruitmentDto extends PaginationQueryDto {
   @IsOptional() @IsUUID() jobId?: string;

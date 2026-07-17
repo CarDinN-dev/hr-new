@@ -16,7 +16,7 @@ const routePermissions: Record<NavItem, string[]> = {
   Payroll: ["payroll.self.read_payslip", "payroll.read", "payroll.audit.read"],
   Recruitment: ["recruitment.read"],
   EOS: ["eos.read"],
-  Documents: ["document.self.read", "document.hr.read", "document.read_all"],
+  Documents: ["document.self.read", "document.team.read", "document.hr.read", "document.read_all"],
   Reports: ["report.read"],
   Audit: ["audit.read"],
   System: ["user.read", "role.read", "permission.read", "session.manage", "system.configure"],

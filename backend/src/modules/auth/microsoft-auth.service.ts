@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { Request, Response } from 'express';
@@ -25,6 +25,7 @@ type Transaction = {
 
 @Injectable()
 export class MicrosoftAuthService {
+  private readonly enabled: boolean;
   private readonly tenantId: string;
   private readonly clientId: string;
   private readonly clientSecret: string;
@@ -39,13 +40,26 @@ export class MicrosoftAuthService {
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
   ) {
+    this.enabled = this.configService.get<string>('MICROSOFT_LOGIN_ENABLED', 'false').toLowerCase() === 'true';
+    this.production = this.configService.get<string>('NODE_ENV') === 'production';
+    this.transactionKey = createHash('sha256')
+      .update(this.configService.getOrThrow<string>('JWT_SECRET'))
+      .update('\0medtech-microsoft-oidc-transaction-v1')
+      .digest();
+    if (!this.enabled) {
+      this.tenantId = '';
+      this.clientId = '';
+      this.clientSecret = '';
+      this.redirectUri = '';
+      this.applicationOrigin = '';
+      return;
+    }
     this.tenantId = this.requiredGuid('MICROSOFT_TENANT_ID');
     this.clientId = this.requiredGuid('MICROSOFT_CLIENT_ID');
     this.clientSecret = this.configService.getOrThrow<string>('MICROSOFT_CLIENT_SECRET');
     if (this.clientSecret.length < 16) throw new Error('MICROSOFT_CLIENT_SECRET is invalid.');
 
     const redirect = new URL(this.configService.getOrThrow<string>('MICROSOFT_REDIRECT_URI'));
-    this.production = this.configService.get<string>('NODE_ENV') === 'production';
     if (redirect.pathname !== callbackPath || redirect.search || redirect.hash) {
       throw new Error(`MICROSOFT_REDIRECT_URI must end with ${callbackPath} and contain no query or fragment.`);
     }
@@ -54,10 +68,14 @@ export class MicrosoftAuthService {
     }
     this.redirectUri = redirect.href;
     this.applicationOrigin = redirect.origin;
-    this.transactionKey = createHash('sha256')
-      .update(this.configService.getOrThrow<string>('JWT_SECRET'))
-      .update('\0medtech-microsoft-oidc-transaction-v1')
-      .digest();
+  }
+
+  isEnabled() {
+    return this.enabled;
+  }
+
+  assertEnabled() {
+    if (!this.enabled) throw new NotFoundException('Microsoft login is disabled');
   }
 
   async begin(request: Request, response: Response) {
@@ -69,6 +87,7 @@ export class MicrosoftAuthService {
   }
 
   private async beginTransaction(request: Request, response: Response, mode: 'login' | 'step-up', user?: RequestUser) {
+    this.assertEnabled();
     await this.authService.consumeMicrosoftLoginStart(request.ip);
     const configuration = await this.configuration();
     const transaction: Transaction = {
@@ -104,6 +123,7 @@ export class MicrosoftAuthService {
   }
 
   async complete(request: Request, response: Response): Promise<IssuedSession> {
+    this.assertEnabled();
     const encryptedTransaction = this.cookie(request, this.transactionCookieName());
     this.clearTransactionCookie(response);
     const transaction = this.decryptTransaction(encryptedTransaction);

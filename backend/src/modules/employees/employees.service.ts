@@ -1,5 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessScopeType, AuditAction, Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AccessScopeType, AuditAction, EmploymentStatus, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -7,9 +7,11 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { AuditService } from '../audit/audit.service';
-import { nonNegativeMoney, ZERO_MONEY } from '../../common/money';
+import { nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { randomUUID } from 'crypto';
+import { ImportEmployeesDto, ImportSalaryRecordDto } from './dto/import-employees.dto';
 
 const managerSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
@@ -18,7 +20,7 @@ const managerSummarySelect = {
 const employeeSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
   phone: true, hireDate: true, employmentStatus: true, departmentId: true, positionId: true,
-  managerId: true, version: true, createdAt: true, updatedAt: true,
+  managerId: true, photo: true, version: true, createdAt: true, updatedAt: true,
   department: { select: { id: true, name: true, code: true } },
   position: { select: { id: true, title: true, code: true, level: true } },
   manager: {
@@ -31,15 +33,139 @@ export class EmployeesService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly authorization: AuthorizationService) {}
 
   async create(dto: CreateEmployeeDto, user: RequestUser) {
+    if (!this.authorization.permissionAllowedForScope(user, 'employee.hr.create', AccessScopeType.ALL_EMPLOYEES)) {
+      throw new ForbiddenException('Insufficient permission');
+    }
     await this.validateRelations(dto);
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.create({
-        data: { ...dto, salary: ZERO_MONEY },
+        data: { ...dto, photo: dto.photo || null, salary: ZERO_MONEY },
         select: this.projection(user, false),
       });
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Employee', entityId: employee.id, summary: 'Employee created' });
       return employee;
     });
+  }
+
+  async importEmployees(dto: ImportEmployeesDto, user: RequestUser) {
+    if (!this.authorization.permissionAllowedForScope(user, 'import.run', AccessScopeType.ALL_SYSTEM)) throw new ForbiddenException('Insufficient permission');
+    if (!this.authorization.permissionAllowedForScope(user, 'employee.hr.create', AccessScopeType.ALL_EMPLOYEES)) throw new ForbiddenException('Insufficient permission');
+    const rows = dto.rows.map((row) => ({ ...row, employeeCode: row.employeeCode.trim(), email: row.email.trim().toLowerCase() }));
+    const codes = rows.map((row) => row.employeeCode);
+    const emails = rows.map((row) => row.email);
+    if (new Set(codes).size !== codes.length) throw new BadRequestException('Employee codes must be unique within an import');
+    if (new Set(emails).size !== emails.length) throw new BadRequestException('Employee emails must be unique within an import');
+    const managerCodes = rows.map((row) => row.managerEmployeeCode?.trim()).filter((code): code is string => Boolean(code));
+    const existing = await this.prisma.employee.findMany({
+      where: { OR: [{ employeeCode: { in: [...new Set([...codes, ...managerCodes])] } }, { email: { in: emails } }] },
+      select: { id: true, employeeCode: true, email: true, managerId: true, deletedAt: true },
+    });
+    const existingByCode = new Map(existing.map((employee) => [employee.employeeCode, employee]));
+    for (const employee of existing) {
+      const importing = rows.find((row) => row.employeeCode === employee.employeeCode);
+      if (emails.includes(employee.email.toLowerCase()) && importing?.email !== employee.email.toLowerCase()) throw new ConflictException('An imported email belongs to a different employee code');
+    }
+    const prepared = rows.map((row) => ({ ...row, id: existingByCode.get(row.employeeCode)?.id ?? randomUUID() }));
+    const preparedByCode = new Map(prepared.map((row) => [row.employeeCode, row]));
+    for (const row of prepared) {
+      if (row.managerEmployeeCode) {
+        const manager = preparedByCode.get(row.managerEmployeeCode.trim()) ?? existingByCode.get(row.managerEmployeeCode.trim());
+        if (!manager || ('deletedAt' in manager && manager.deletedAt)) throw new NotFoundException(`Manager ${row.managerEmployeeCode} was not found`);
+        row.managerId = manager.id;
+      }
+    }
+    const departmentIds = [...new Set(prepared.map((row) => row.departmentId).filter((id): id is string => Boolean(id)))];
+    const positionIds = [...new Set(prepared.map((row) => row.positionId).filter((id): id is string => Boolean(id)))];
+    const managerIds = [...new Set(prepared.map((row) => row.managerId).filter((id): id is string => Boolean(id)))];
+    const [departments, positions, employees] = await Promise.all([
+      this.prisma.department.findMany({ where: { id: { in: departmentIds }, deletedAt: null }, select: { id: true } }),
+      this.prisma.jobPosition.findMany({ where: { id: { in: positionIds }, deletedAt: null }, select: { id: true, departmentId: true } }),
+      this.prisma.employee.findMany({ where: { deletedAt: null }, select: { id: true, managerId: true } }),
+    ]);
+    if (departments.length !== departmentIds.length) throw new NotFoundException('One or more departments were not found');
+    if (positions.length !== positionIds.length) throw new NotFoundException('One or more positions were not found');
+    const activeEmployeeIds = new Set([...employees.map((employee) => employee.id), ...prepared.map((row) => row.id)]);
+    if (managerIds.some((id) => !activeEmployeeIds.has(id))) throw new NotFoundException('One or more managers were not found');
+    const positionById = new Map(positions.map((position) => [position.id, position]));
+    for (const row of prepared) {
+      const position = row.positionId ? positionById.get(row.positionId) : undefined;
+      if (position?.departmentId && row.departmentId && position.departmentId !== row.departmentId) throw new BadRequestException(`Position and department do not match for ${row.employeeCode}`);
+    }
+    const managerById = new Map(employees.map((employee) => [employee.id, employee.managerId]));
+    for (const row of prepared) managerById.set(row.id, row.managerId ?? null);
+    for (const row of prepared) {
+      const visited = new Set<string>([row.id]);
+      let managerId = row.managerId ?? null;
+      for (let depth = 0; managerId && depth < 32; depth += 1) {
+        if (visited.has(managerId)) throw new BadRequestException(`Reporting line cycle found for ${row.employeeCode}`);
+        visited.add(managerId);
+        managerId = managerById.get(managerId) ?? null;
+      }
+      if (managerId) throw new BadRequestException(`Reporting line is too deep for ${row.employeeCode}`);
+    }
+
+    const salaryRecords = await this.prisma.salaryRecord.findMany({ where: { employeeId: { in: prepared.map((row) => row.id) }, deletedAt: null } });
+    const salaryByEmployee = new Map<string, typeof salaryRecords>();
+    for (const record of salaryRecords) salaryByEmployee.set(record.employeeId, [...(salaryByEmployee.get(record.employeeId) ?? []), record]);
+    const salaryData = new Map<string, ReturnType<EmployeesService['importSalaryData']> & { id?: string }>();
+    for (const row of prepared) if (row.salaryRecord) {
+      const data = this.importSalaryData(row.salaryRecord);
+      const sameStart = (salaryByEmployee.get(row.id) ?? []).find((record) => record.effectiveFrom.getTime() === data.effectiveFrom.getTime());
+      const overlap = (salaryByEmployee.get(row.id) ?? []).find((record) => record.id !== sameStart?.id && record.effectiveFrom <= (data.effectiveTo ?? new Date(8_640_000_000_000_000)) && (!record.effectiveTo || record.effectiveTo >= data.effectiveFrom));
+      if (overlap) throw new ConflictException(`Salary dates overlap for ${row.employeeCode}`);
+      salaryData.set(row.id, { ...data, id: sameStart?.id });
+    }
+    const credentialIds = prepared.flatMap((row) => row.details?.credentials?.map((credential) => credential.id).filter((id): id is string => Boolean(id)) ?? []);
+    const educationIds = prepared.flatMap((row) => row.details?.education?.map((education) => education.id).filter((id): id is string => Boolean(id)) ?? []);
+    const [credentials, education] = await Promise.all([
+      this.prisma.employeeCredential.findMany({ where: { id: { in: credentialIds } }, select: { id: true, employeeId: true } }),
+      this.prisma.employeeEducation.findMany({ where: { id: { in: educationIds } }, select: { id: true, employeeId: true } }),
+    ]);
+    const credentialOwner = new Map(credentials.map((record) => [record.id, record.employeeId]));
+    const educationOwner = new Map(education.map((record) => [record.id, record.employeeId]));
+    for (const row of prepared) {
+      const types = row.details?.credentials?.map((credential) => credential.type.trim()) ?? [];
+      if (new Set(types).size !== types.length) throw new BadRequestException(`Credential types must be unique for ${row.employeeCode}`);
+      if (row.details?.credentials?.some((credential) => credential.id && credentialOwner.get(credential.id) !== row.id)) throw new BadRequestException(`Credential ownership mismatch for ${row.employeeCode}`);
+      if (row.details?.education?.some((item) => item.id && educationOwner.get(item.id) !== row.id)) throw new BadRequestException(`Education ownership mismatch for ${row.employeeCode}`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      for (let offset = 0; offset < prepared.length; offset += 4_000) {
+        const chunk = prepared.slice(offset, offset + 4_000);
+        const values = chunk.map((row) => Prisma.sql`(
+          ${row.id}, ${row.employeeCode}, ${row.firstName.trim()}, ${row.lastName.trim()}, ${row.email}, ${row.phone ?? null},
+          ${row.hireDate}, ${row.employmentStatus ?? EmploymentStatus.ACTIVE}::"EmploymentStatus",
+          ${row.departmentId ?? null}, ${row.positionId ?? null}, ${row.managerId ?? null}, ${row.photo || null},
+          ${ZERO_MONEY}, 1, NOW(), NOW(), NULL
+        )`);
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO "Employee" (
+            "id", "employeeCode", "firstName", "lastName", "email", "phone", "hireDate", "employmentStatus",
+            "departmentId", "positionId", "managerId", "photo", "salary", "version", "createdAt", "updatedAt", "deletedAt"
+          ) VALUES ${Prisma.join(values)}
+          ON CONFLICT ("employeeCode") DO UPDATE SET
+            "firstName" = EXCLUDED."firstName", "lastName" = EXCLUDED."lastName", "email" = EXCLUDED."email",
+            "phone" = EXCLUDED."phone", "hireDate" = EXCLUDED."hireDate", "employmentStatus" = EXCLUDED."employmentStatus",
+            "departmentId" = EXCLUDED."departmentId", "positionId" = EXCLUDED."positionId", "managerId" = EXCLUDED."managerId",
+            "photo" = EXCLUDED."photo", "deletedAt" = NULL, "version" = "Employee"."version" + 1, "updatedAt" = NOW()
+        `);
+      }
+      for (const row of prepared) {
+        if (row.details) await this.writeDetails(tx, row.id, row.details);
+        if (row.bank) await tx.employeeBankAccount.upsert({ where: { employeeId: row.id }, create: { employeeId: row.id, ...row.bank }, update: { ...row.bank, version: { increment: 1 } } });
+        const salary = salaryData.get(row.id);
+        if (salary) {
+          const { id: salaryId, ...data } = salary;
+          if (salaryId) await tx.salaryRecord.update({ where: { id: salaryId }, data: { ...data, deletedAt: null, version: { increment: 1 } } });
+          else await tx.salaryRecord.create({ data: { employeeId: row.id, ...data } });
+        }
+      }
+      await this.audit.record(tx, user, { action: AuditAction.IMPORT, entityType: 'Employee', summary: 'Atomic employee import completed', metadata: { rowCount: prepared.length } });
+      const imported = await tx.employee.findMany({ where: { id: { in: prepared.map((row) => row.id) } }, select: employeeSummarySelect });
+      const sourceIds = new Map(prepared.filter((row) => row.sourceId).map((row) => [row.id, row.sourceId!]));
+      return { imported: imported.length, data: imported, idMap: imported.filter((employee) => sourceIds.has(employee.id)).map((employee) => ({ sourceId: sourceIds.get(employee.id), id: employee.id })) };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async list(query: QueryEmployeesDto, user: RequestUser) {
@@ -100,6 +226,7 @@ export class EmployeesService {
 
   async updateSelfBasic(dto: UpdateSelfBasicProfileDto, user: RequestUser) {
     if (!user.employeeId) throw new NotFoundException('No employee profile is linked to this user');
+    if (!this.authorization.permissionAllowedForScope(user, 'employee.self.update_basic', AccessScopeType.SELF, user.employeeId)) throw new NotFoundException('Employee not found');
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.employee.update({
         where: { id: user.employeeId! },
@@ -113,6 +240,7 @@ export class EmployeesService {
 
   async updateSelfBank(dto: UpdateSelfBankDto, user: RequestUser) {
     if (!user.employeeId) throw new NotFoundException('No employee profile is linked to this user');
+    if (!this.authorization.permissionAllowedForScope(user, 'employee.self.update_bank', AccessScopeType.SELF, user.employeeId)) throw new NotFoundException('Employee not found');
     return this.prisma.$transaction(async (tx) => {
       const bank = await tx.employeeBankAccount.upsert({
         where: { employeeId: user.employeeId! },
@@ -126,6 +254,7 @@ export class EmployeesService {
   }
 
   async updatePayrollBank(id: string, dto: UpdatePayrollBankDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, id, { all: 'payroll.update_bank' });
     await this.ensureExists(id);
     return this.prisma.$transaction(async (tx) => {
       const bank = await tx.employeeBankAccount.upsert({
@@ -140,12 +269,13 @@ export class EmployeesService {
   }
 
   async update(id: string, dto: UpdateEmployeeDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, id, { all: 'employee.hr.update' });
     const employee = await this.ensureExists(id);
     await this.validateRelations(dto, id, employee);
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.employee.update({
         where: { id },
-        data: { ...dto, version: { increment: 1 } },
+        data: { ...dto, photo: dto.photo === undefined ? undefined : dto.photo || null, version: { increment: 1 } },
         select: this.projection(user, id === user.employeeId, id),
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: id, summary: 'Employee updated' });
@@ -154,6 +284,7 @@ export class EmployeesService {
   }
 
   async remove(id: string, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, id, { all: 'employee.hr.terminate' });
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findFirst({ where: { id, deletedAt: null } });
       if (!employee) throw new NotFoundException('Employee not found');
@@ -167,7 +298,7 @@ export class EmployeesService {
 
       const removed = await tx.employee.update({
         where: { id },
-        data: { deletedAt: new Date() },
+        data: { employmentStatus: EmploymentStatus.TERMINATED, deletedAt: new Date(), version: { increment: 1 } },
       });
       if (employee.userId) {
         await tx.user.update({
@@ -182,70 +313,106 @@ export class EmployeesService {
   }
 
   async updateDetails(id: string, dto: UpdateHrSensitiveDetailsDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, id, { all: 'employee.hr.update' });
     await this.ensureExists(id);
     return this.prisma.$transaction(async (tx) => {
-      const sensitive = dto;
-      if (
-        sensitive.dateOfBirth !== undefined || sensitive.gender !== undefined || sensitive.address !== undefined
-        || sensitive.emergencyContactName !== undefined || sensitive.emergencyContactPhone !== undefined
-      ) {
-        await tx.employee.update({
-          where: { id },
-          data: {
-            dateOfBirth: sensitive.dateOfBirth,
-            gender: sensitive.gender,
-            address: sensitive.address,
-            emergencyContactName: sensitive.emergencyContactName,
-            emergencyContactPhone: sensitive.emergencyContactPhone,
-            version: { increment: 1 },
-          },
-        });
-      }
-      if (dto.profile) {
-        const source = dto.profile;
-        const profile = {
-          employeeCategory: this.text(source.employeeCategory), workShift: this.text(source.workShift), company: this.text(source.company),
-          sponsorName: this.text(source.sponsorName), wpsSponsor: this.text(source.wpsSponsor), gradeBand: this.text(source.gradeBand), familyStatus: this.text(source.familyStatus),
-          leavePolicy: this.text(source.leavePolicy), lastRejoinDate: this.date(source.lastRejoinDate), businessUnit: this.text(source.businessUnit),
-          workingCompanyName: this.text(source.workingCompanyName), costCentre: this.text(source.costCentre), nationality: this.text(source.nationality),
-          residenceProfession: this.text(source.residenceProfession), visaType: this.text(source.visaType), hireType: this.text(source.hireType),
-          confirmationDate: this.date(source.confirmationDate), esbDate: this.date(source.esbDate), maritalStatus: this.text(source.maritalStatus),
-          officeMobile: this.text(source.officeMobile), personalMobile: this.text(source.personalMobile), dependents: this.integer(source.dependents), bloodGroup: this.text(source.bloodGroup),
-          localBuilding: this.text(source.localBuilding), localStreet: this.text(source.localStreet), localZone: this.text(source.localZone),
-          internationalApartment: this.text(source.internationalApartment), internationalBuilding: this.text(source.internationalBuilding), internationalFloor: this.text(source.internationalFloor),
-          internationalStreet: this.text(source.internationalStreet), internationalState: this.text(source.internationalState), internationalCountry: this.text(source.internationalCountry), internationalZipCode: this.text(source.internationalZipCode),
-          emergencyRelationship: this.text(source.emergencyRelationship), salaryPayType: this.text(source.salaryPayType), officeFileNumber: this.text(source.officeFileNumber), accessCardNumber: this.text(source.accessCardNumber),
-        };
-        await tx.employeeProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...profile }, update: { ...profile, version: { increment: 1 } } });
-      }
-      if (dto.benefits) {
-        const source = dto.benefits;
-        const benefits = {
-          travelSector: this.text(source.travelSector), travelCost: nonNegativeMoney(this.decimalInput(source.travelCost), 'travelCost'),
-          employeeTicketsPerYear: this.integer(source.employeeTicketsPerYear) ?? 0, ticketBalancePercent: nonNegativeMoney(this.decimalInput(source.ticketBalancePercent), 'ticketBalancePercent'),
-          familyTickets: this.integer(source.familyTickets) ?? 0, companyAccommodation: Boolean(source.companyAccommodation), companyTransportation: Boolean(source.companyTransportation),
-          overtimeEligible: Boolean(source.overtimeEligible), companyFood: Boolean(source.companyFood), companyFuelCard: Boolean(source.companyFuelCard),
-        };
-        await tx.employeeBenefitProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...benefits }, update: { ...benefits, version: { increment: 1 } } });
-      }
-      for (const raw of dto.credentials ?? []) {
-        const type = this.text(raw.type);
-        if (!type) continue;
-        await tx.employeeCredential.upsert({
-          where: { employeeId_type: { employeeId: id, type } },
-          create: { employeeId: id, type, number: this.text(raw.number), profession: this.text(raw.profession), placeOfIssue: this.text(raw.placeOfIssue), issueDate: this.date(raw.issueDate), expiryDate: this.date(raw.expiryDate) },
-          update: { number: this.text(raw.number), profession: this.text(raw.profession), placeOfIssue: this.text(raw.placeOfIssue), issueDate: this.date(raw.issueDate), expiryDate: this.date(raw.expiryDate), deletedAt: null },
-        });
-      }
-      for (const raw of dto.education ?? []) {
-        const qualification = this.text(raw.qualification);
-        if (!qualification) continue;
-        const existing = await tx.employeeEducation.findFirst({ where: { employeeId: id, qualification, deletedAt: null } });
-        if (!existing) await tx.employeeEducation.create({ data: { employeeId: id, qualification, yearOfPassing: this.integer(raw.yearOfPassing) } });
-      }
+      await this.writeDetails(tx, id, dto);
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeDetails', entityId: id, summary: 'Employee profile details updated' });
       return tx.employee.findUniqueOrThrow({ where: { id }, select: this.projection(user, id === user.employeeId, id) });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private async writeDetails(tx: Prisma.TransactionClient, id: string, dto: UpdateHrSensitiveDetailsDto) {
+    if (dto.dateOfBirth !== undefined || dto.gender !== undefined || dto.address !== undefined || dto.emergencyContactName !== undefined || dto.emergencyContactPhone !== undefined) {
+      await tx.employee.update({
+        where: { id },
+        data: {
+          dateOfBirth: dto.dateOfBirth,
+          gender: dto.gender,
+          address: dto.address,
+          emergencyContactName: dto.emergencyContactName,
+          emergencyContactPhone: dto.emergencyContactPhone,
+          version: { increment: 1 },
+        },
+      });
+    }
+    if (dto.profile) {
+      const profile = { ...dto.profile };
+      await tx.employeeProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...profile }, update: { ...profile, version: { increment: 1 } } });
+    }
+    if (dto.benefits) {
+      const benefits = {
+        ...dto.benefits,
+        travelCost: dto.benefits.travelCost === undefined ? undefined : nonNegativeMoney(dto.benefits.travelCost, 'travelCost'),
+        ticketBalancePercent: dto.benefits.ticketBalancePercent === undefined ? undefined : nonNegativeMoney(dto.benefits.ticketBalancePercent, 'ticketBalancePercent'),
+      };
+      await tx.employeeBenefitProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...benefits }, update: { ...benefits, version: { increment: 1 } } });
+    }
+    if (dto.credentials !== undefined) {
+      const types = dto.credentials.map((credential) => credential.type.trim());
+      if (new Set(types).size !== types.length) throw new BadRequestException('Credential types must be unique');
+      await tx.employeeCredential.updateMany({ where: { employeeId: id, type: { notIn: types }, deletedAt: null }, data: { deletedAt: new Date() } });
+      for (const credential of dto.credentials) {
+        const { id: credentialId, type: rawType, ...data } = credential;
+        const type = rawType.trim();
+        if (credentialId) {
+          const matching = await tx.employeeCredential.findFirst({ where: { id: credentialId, employeeId: id } });
+          if (!matching || matching.type !== type) throw new BadRequestException('Credential identity and type do not match');
+        }
+        await tx.employeeCredential.upsert({ where: { employeeId_type: { employeeId: id, type } }, create: { employeeId: id, type, ...data }, update: { ...data, deletedAt: null } });
+      }
+    }
+    if (dto.education !== undefined) {
+      const retainedIds = new Set<string>();
+      for (const education of dto.education) {
+        const qualification = education.qualification.trim();
+        if (education.id) {
+          const updated = await tx.employeeEducation.updateMany({ where: { id: education.id, employeeId: id }, data: { qualification, yearOfPassing: education.yearOfPassing, deletedAt: null } });
+          if (updated.count !== 1) throw new BadRequestException('Education record does not belong to this employee');
+          retainedIds.add(education.id);
+        } else {
+          const created = await tx.employeeEducation.create({ data: { employeeId: id, qualification, yearOfPassing: education.yearOfPassing } });
+          retainedIds.add(created.id);
+        }
+      }
+      await tx.employeeEducation.updateMany({ where: { employeeId: id, id: { notIn: [...retainedIds] }, deletedAt: null }, data: { deletedAt: new Date() } });
+    }
+  }
+
+  private importSalaryData(dto: ImportSalaryRecordDto) {
+    if (dto.effectiveTo && dto.effectiveTo < dto.effectiveFrom) {
+      throw new BadRequestException('Salary effectiveTo must not be before effectiveFrom');
+    }
+    const componentSupplied = [dto.housingAllowance, dto.foodAllowance, dto.mobileAllowance, dto.specialAllowance]
+      .some((value) => value !== undefined);
+    const component = (value: string | undefined, field: string) =>
+      nonNegativeMoney(value ?? 0, field, '1000000000');
+    let housingAllowance = component(dto.housingAllowance, 'housingAllowance');
+    let foodAllowance = component(dto.foodAllowance, 'foodAllowance');
+    let mobileAllowance = component(dto.mobileAllowance, 'mobileAllowance');
+    let specialAllowance = component(dto.specialAllowance, 'specialAllowance');
+    if (dto.allowances !== undefined && !componentSupplied) {
+      housingAllowance = nonNegativeMoney(dto.allowances, 'allowances', '1000000000');
+      foodAllowance = ZERO_MONEY;
+      mobileAllowance = ZERO_MONEY;
+      specialAllowance = ZERO_MONEY;
+    }
+    const allowances = sumMoney([housingAllowance, foodAllowance, mobileAllowance, specialAllowance]);
+    const overtimeAmount = nonNegativeMoney(dto.overtimeAmount ?? dto.bonuses ?? 0, 'overtimeAmount', '1000000000');
+    return {
+      baseSalary: nonNegativeMoney(dto.baseSalary, 'baseSalary', '1000000000'),
+      allowances,
+      housingAllowance,
+      foodAllowance,
+      mobileAllowance,
+      specialAllowance,
+      deductions: nonNegativeMoney(dto.deductions ?? 0, 'deductions', '1000000000'),
+      bonuses: nonNegativeMoney(dto.bonuses ?? overtimeAmount, 'bonuses', '1000000000'),
+      overtimeAmount,
+      taxRate: nonNegativeMoney(dto.taxRate ?? 0, 'taxRate', '100'),
+      effectiveFrom: dto.effectiveFrom,
+      effectiveTo: dto.effectiveTo,
+    };
   }
 
   async ensureExists(id: string) {
@@ -354,8 +521,4 @@ export class EmployeesService {
     }
   }
 
-  private text(value: unknown) { const result = value == null ? '' : String(value).trim(); return result || undefined; }
-  private date(value: unknown) { const text = this.text(value); if (!text) return undefined; const parsed = new Date(`${text.slice(0, 10)}T00:00:00.000Z`); return Number.isNaN(parsed.getTime()) ? undefined : parsed; }
-  private integer(value: unknown) { if (value === '' || value == null) return undefined; const parsed = Number(value); return Number.isInteger(parsed) ? parsed : undefined; }
-  private decimalInput(value: unknown) { return value == null || value === '' ? '0' : String(value); }
 }

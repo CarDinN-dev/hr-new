@@ -320,7 +320,11 @@ export class AuditService {
   }
 
   private auditCsv(events: Array<Prisma.AuditEventGetPayload<Record<string, never>>>) {
-    const q = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const q = (value: unknown) => {
+      const text = String(value ?? '');
+      const safe = '=+-@'.includes(text.trimStart().charAt(0)) ? `'${text}` : text;
+      return `"${safe.replaceAll('"', '""')}"`;
+    };
     const rows = [['Sequence', 'Occurred At UTC', 'Actor', 'Action', 'Outcome', 'Module', 'Resource Type', 'Resource ID', 'Reason'], ...events.map((event) => [event.sequence.toString(), event.occurredAtUtc.toISOString(), event.actorEmailSnapshot ?? '', event.action, event.outcome, event.module, event.resourceType, event.resourceId ?? '', event.reason ?? ''])];
     return { buffer: Buffer.from(`\uFEFF${rows.map((row) => row.map(q).join(',')).join('\r\n')}`, 'utf8'), contentType: 'text/csv; charset=utf-8', extension: 'csv' };
   }
