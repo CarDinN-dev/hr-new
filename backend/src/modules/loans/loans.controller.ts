@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
-import { CreateLoanDto, LoanOverrideDto, ManualRepaymentDto, QueryLoansDto } from './dto/loan.dto';
+import { CreateLoanDto, LoanOverrideDto, LoanStatusTransitionDto, ManualRepaymentDto, QueryLoansDto, UpdateLoanDto } from './dto/loan.dto';
 import { LoansService } from './loans.service';
 
 @ApiTags('Loans')
@@ -16,6 +16,12 @@ export class LoansController {
   @Post()
   create(@Body() dto: CreateLoanDto, @CurrentUser() user: RequestUser) {
     return this.loans.create(dto, user);
+  }
+
+  @Permissions('loan.hr.manage')
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateLoanDto, @CurrentUser() user: RequestUser) {
+    return this.loans.update(id, dto, user);
   }
 
   @AnyPermission('loan.self.read', 'loan.hr.read', 'loan.audit.read', 'loan.read_all')
@@ -34,6 +40,18 @@ export class LoansController {
   @Patch(':id/activate')
   activate(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.loans.activate(id, user);
+  }
+
+  @Permissions('loan.hr.manage')
+  @Patch(':id/pause')
+  pause(@Param('id') id: string, @Body() dto: LoanStatusTransitionDto, @CurrentUser() user: RequestUser) {
+    return this.loans.pause(id, dto, user);
+  }
+
+  @Permissions('loan.hr.manage')
+  @Patch(':id/cancel')
+  cancel(@Param('id') id: string, @Body() dto: LoanStatusTransitionDto, @CurrentUser() user: RequestUser) {
+    return this.loans.cancel(id, dto, user);
   }
 
   @Permissions('loan.hr.manage')

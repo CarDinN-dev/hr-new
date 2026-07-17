@@ -8,6 +8,7 @@ export async function persistNormalizedStateDelta(before: HrState, after: HrStat
   const request = <T>(path: string, method: string, body?: unknown) => apiRequest<T>(path, {
     method, csrfToken, body: body === undefined ? undefined : JSON.stringify(body)
   });
+  const needsEmployees = hasAnyPermission(session, "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "payroll.configure", "payroll.update_bank");
   const needsDepartments = hasAnyPermission(session, "department.manage", "employee.hr.create", "employee.hr.update", "recruitment.manage");
   const needsLeaveTypes = hasAnyPermission(session, "leave.configure", "leave.self.create", "leave.hr.manage");
   const [existingDepartments, existingLeaveTypes] = await Promise.all([
@@ -15,26 +16,33 @@ export async function persistNormalizedStateDelta(before: HrState, after: HrStat
     needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([])
   ]);
   await syncSettings(before, after, existingDepartments, existingLeaveTypes, request, session);
-  const [departments, leaveTypes] = await Promise.all([
+  const [departments, leaveTypes, positions, backendEmployees] = await Promise.all([
     needsDepartments ? apiList<BackendRecord>("/departments") : Promise.resolve([]),
-    needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([])
+    needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([]),
+    needsEmployees && hasPermission(session, "position.read") ? apiList<BackendRecord>("/job-positions") : Promise.resolve([]),
+    needsEmployees && hasAnyPermission(session, "employee.hr.read", "employee.read_all") ? apiList<BackendRecord>("/employees") : Promise.resolve([])
   ]);
   const departmentIds = new Map(departments.map(row => [String(row.name), String(row.id)]));
-  if (hasAnyPermission(session, "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "payroll.configure", "payroll.update_bank")) {
-    await syncEmployees(before, after, departmentIds, request, session);
+  const positionIds = new Map(positions.map(row => [`${String(row.departmentId || "")}:${String(row.title)}`, String(row.id)]));
+  const managerIds = new Map(backendEmployees.map(row => [String(row.employeeCode), String(row.id)]));
+  let synchronizedAfter = after;
+  if (needsEmployees) {
+    const employeeIdMap = await syncEmployees(before, after, departmentIds, positionIds, managerIds, request, session);
+    synchronizedAfter = remapEmployeeIds(after, employeeIdMap);
   }
-  if (hasPermission(session, "attendance.hr.manage")) await syncAttendance(before, after, request);
-  if (hasAnyPermission(session, "trip.self.create", "trip.team.approve_manager", "trip.management.approve_manager", "trip.hr.manage")) await syncTrips(before, after, request);
-  if (hasAnyPermission(session, "expense.self.create", "expense.team.approve_manager", "expense.management.approve_manager", "expense.hr.approve")) await syncExpenses(before, after, request);
-  if (hasPermission(session, "loan.hr.manage")) await syncLoans(before, after, request);
-  if (hasPermission(session, "recruitment.manage")) await syncRecruitment(before, after, departmentIds, request);
-  if (hasPermission(session, "eos.manage")) await syncEos(before, after, request);
-  if (hasAnyPermission(session, "document.self.manage", "document.hr.manage")) await syncDocuments(before, after, session);
+  if (hasPermission(session, "attendance.hr.manage")) await syncAttendance(before, synchronizedAfter, request);
+  if (hasAnyPermission(session, "trip.self.create", "trip.team.approve_manager", "trip.management.approve_manager", "trip.hr.manage")) await syncTrips(before, synchronizedAfter, request);
+  if (hasAnyPermission(session, "expense.self.create", "expense.team.approve_manager", "expense.management.approve_manager", "expense.hr.approve")) await syncExpenses(before, synchronizedAfter, request);
+  if (hasPermission(session, "loan.hr.manage")) await syncLoans(before, synchronizedAfter, request);
+  if (hasPermission(session, "recruitment.manage")) await syncRecruitment(before, synchronizedAfter, departmentIds, request);
+  if (hasPermission(session, "eos.manage")) await syncEos(before, synchronizedAfter, request);
+  if (hasAnyPermission(session, "document.self.manage", "document.hr.manage")) await syncDocuments(before, synchronizedAfter, session);
 }
 
 type RequestFn = <T>(path: string, method: string, body?: unknown) => Promise<T>;
 
-async function syncEmployees(before: HrState, after: HrState, departmentIds: Map<string, string>, request: RequestFn, session: BackendSession) {
+async function syncEmployees(before: HrState, after: HrState, departmentIds: Map<string, string>, positionIds: Map<string, string>, managerIds: Map<string, string>, request: RequestFn, session: BackendSession) {
+  const idMap = new Map<string, string>();
   const previous = byId(before.employees);
   const current = byId(after.employees);
   const canCreate = hasPermission(session, "employee.hr.create");
@@ -46,14 +54,16 @@ async function syncEmployees(before: HrState, after: HrState, departmentIds: Map
   for (const employee of after.employees) {
     const old = previous.get(employee.id);
     if (!old && canCreate) {
-      const created = await request<BackendRecord>("/employees", "POST", employeePayload(employee, departmentIds));
+      const created = await request<BackendRecord>("/employees", "POST", employeeCorePayload(employee, departmentIds, positionIds, managerIds));
       const employeeId = String(created.id);
+      idMap.set(employee.id, employeeId);
+      managerIds.set(employee.fields["Employee Code"], employeeId);
       if (canUpdateSensitive) await request(`/employees/${employeeId}/details`, "PATCH", employeeDetailsPayload(employee));
       if (canUpdateBank) await request(`/employees/${employeeId}/bank`, "PATCH", employeeBankPayload(employee));
       if (canConfigureSalary) await request("/payroll/salary-records", "POST", salaryRecordPayload(employeeId, employee));
     } else if (old) {
-      if (canUpdate && !same(employeePayload(old, departmentIds), employeePayload(employee, departmentIds))) {
-        await request(`/employees/${employee.id}`, "PATCH", employeePayload(employee, departmentIds));
+      if (canUpdate && !same(employeeCorePayload(old, departmentIds, positionIds, managerIds), employeeCorePayload(employee, departmentIds, positionIds, managerIds))) {
+        await request(`/employees/${employee.id}`, "PATCH", employeeCorePayload(employee, departmentIds, positionIds, managerIds));
       }
       if (canUpdateSensitive && !same(employeeDetailsPayload(old), employeeDetailsPayload(employee))) {
         await request(`/employees/${employee.id}/details`, "PATCH", employeeDetailsPayload(employee));
@@ -70,13 +80,21 @@ async function syncEmployees(before: HrState, after: HrState, departmentIds: Map
     }
   }
   if (canTerminate) for (const employee of before.employees) if (!current.has(employee.id)) await request(`/employees/${employee.id}`, "DELETE");
+  return idMap;
 }
 
-function employeeDetailsPayload(employee: EmployeeRecord) {
+export function employeeDetailsPayload(employee: EmployeeRecord) {
   const f = employee.fields;
   const yes = (field: string) => f[field] === "Yes";
-  const credential = (type: string, number: string, profession?: string, placeOfIssue?: string, issueDate?: string, expiryDate?: string) => ({ type, number: f[number], profession: profession ? f[profession] : undefined, placeOfIssue: placeOfIssue ? f[placeOfIssue] : undefined, issueDate: issueDate ? f[issueDate] : undefined, expiryDate: expiryDate ? f[expiryDate] : undefined });
-  return {
+  const credential = (type: string, number: string, profession?: string, placeOfIssue?: string, issueDate?: string, expiryDate?: string) => deepCompact({ type, number: f[number], profession: profession ? f[profession] : undefined, placeOfIssue: placeOfIssue ? f[placeOfIssue] : undefined, issueDate: issueDate ? f[issueDate] : undefined, expiryDate: expiryDate ? f[expiryDate] : undefined });
+  const credentials = [
+    credential("QID", "RP/ID Number", "RP/ID Profession", undefined, undefined, "QID Expiry Date"),
+    credential("WORK_PERMIT", "Work Permit No.", undefined, undefined, "Work Permit Issue Date", "Work Permit Expiry Date"),
+    credential("PASSPORT", "Passport No.", undefined, "Passport Place of Issue", "Passport Issue Date", "Passport Expiry Date"),
+    credential("DRIVING_LICENSE", "Driving License No.", "License Type", undefined, undefined, "Driving License Expiry Date"),
+    credential("INSURANCE", "Insurance Card No.", undefined, undefined, "Insurance Issue Date", "Insurance Expiry Date")
+  ].filter(item => Object.keys(item).some(key => key !== "type"));
+  return deepCompact({
     dateOfBirth: f["Date of Birth"] || undefined,
     gender: ({ Male: "MALE", Female: "FEMALE", Other: "OTHER" } as const)[f.Gender as "Male" | "Female" | "Other"],
     emergencyContactName: f["Emergency Contact Name"] || undefined,
@@ -86,7 +104,7 @@ function employeeDetailsPayload(employee: EmployeeRecord) {
       gradeBand: f["Grade/Band"], familyStatus: f["Family Status (Yes/No)"], leavePolicy: f["Leave Policy"], lastRejoinDate: f["Last Rejoin Date"],
       businessUnit: f["Business Unit"], workingCompanyName: f["Working Company Name"], costCentre: f["Cost Centre"], nationality: f.Nationality,
       residenceProfession: f["RP/ID Profession"], visaType: f["Visa Type"], hireType: f["Hire Type"], confirmationDate: f["Confirmation Date"], esbDate: f["ESB Date"],
-      maritalStatus: f["Marital Status"], officeMobile: f["Office Mobile No."], personalMobile: f["Personal Mobile No."], dependents: f["No. of Dependents"], bloodGroup: f["Blood Group"],
+      maritalStatus: f["Marital Status"], officeMobile: f["Office Mobile No."], personalMobile: f["Personal Mobile No."], dependents: Number(f["No. of Dependents"] || 0), bloodGroup: f["Blood Group"],
       localBuilding: f["Local Building/Villa #"], localStreet: f["Local Street #"], localZone: f["Local Zone #"], internationalApartment: f["International Apartment"],
       internationalBuilding: f["International Building"], internationalFloor: f["International Floor"], internationalStreet: f["International Street"], internationalState: f["International State"],
       internationalCountry: f["International Country"], internationalZipCode: f["International Zip Code"], emergencyRelationship: f["Emergency Contact Relationship"],
@@ -97,58 +115,75 @@ function employeeDetailsPayload(employee: EmployeeRecord) {
       ticketBalancePercent: money(f["Ticket Balance (%)"]), familyTickets: Number(f["No. of Tickets - Family"] || 0), companyAccommodation: yes("Company Accommodation"),
       companyTransportation: yes("Company Transportation"), overtimeEligible: yes("Overtime Eligible"), companyFood: yes("Company Food"), companyFuelCard: yes("Company Fuel Card")
     },
-    credentials: [
-      credential("QID", "RP/ID Number", "RP/ID Profession", undefined, undefined, "QID Expiry Date"),
-      credential("WORK_PERMIT", "Work Permit No.", undefined, undefined, "Work Permit Issue Date", "Work Permit Expiry Date"),
-      credential("PASSPORT", "Passport No.", undefined, "Passport Place of Issue", "Passport Issue Date", "Passport Expiry Date"),
-      credential("DRIVING_LICENSE", "Driving License No.", "License Type", undefined, undefined, "Driving License Expiry Date"),
-      credential("INSURANCE", "Insurance Card No.", undefined, undefined, "Insurance Issue Date", "Insurance Expiry Date")
-    ],
+    credentials,
     education: f["Highest Education Qualification"] ? [{ qualification: f["Highest Education Qualification"], yearOfPassing: Number(f["Year of Passing"] || 0) || undefined }] : []
-  };
-}
-
-function employeePayload(employee: EmployeeRecord, departmentIds: Map<string, string>) {
-  const f = employee.fields;
-  const status = ({ Active: "ACTIVE", "On Leave": "ON_LEAVE", Resigned: "RESIGNED", Terminated: "TERMINATED" } as const)[employee.status];
-  return compact({
-    employeeCode: f["Employee Code"], firstName: f["First Name"], lastName: f["Last Name"],
-    email: f["E-Mail ID (Work)"] || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
-    hireDate: f["Joining Date"], employmentStatus: status, departmentId: departmentIds.get(f.Department)
   });
 }
 
-function employeeBankPayload(employee: EmployeeRecord) {
+export function employeeCorePayload(employee: EmployeeRecord, departmentIds: Map<string, string>, positionIds = new Map<string, string>(), managerIds = new Map<string, string>()) {
+  const f = employee.fields;
+  const status = ({ Active: "ACTIVE", "On Leave": "ON_LEAVE", Resigned: "RESIGNED", Terminated: "TERMINATED" } as const)[employee.status];
+  const departmentId = departmentIds.get(f.Department);
+  const managerCode = managerEmployeeCode(employee);
+  return compact({
+    employeeCode: f["Employee Code"], firstName: f["First Name"], lastName: f["Last Name"],
+    email: f["E-Mail ID (Work)"] || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
+    hireDate: f["Joining Date"], employmentStatus: status, departmentId,
+    positionId: positionIds.get(`${departmentId ?? ""}:${f.Designation}`), managerId: managerCode ? managerIds.get(managerCode) : undefined,
+    photo: employee.photo || undefined
+  });
+}
+
+export function employeeBankPayload(employee: EmployeeRecord) {
   const fields = employee.fields;
   return compact({ bankCode: fields["Bank Code"], iban: fields["IBAN No."], accountNumber: fields["Account No."] });
 }
 
-function employeeSalaryPayload(employee: EmployeeRecord) {
+export function employeeSalaryPayload(employee: EmployeeRecord) {
   const fields = employee.fields;
   return {
     baseSalary: money(fields.Basic),
     allowances: money(fields.HRA) + money(fields["Food Allowance"]) + money(fields["Mobile Allowance"]) + money(fields["Special Allowance"]),
+    housingAllowance: money(fields.HRA), foodAllowance: money(fields["Food Allowance"]), mobileAllowance: money(fields["Mobile Allowance"]),
+    specialAllowance: money(fields["Special Allowance"]), overtimeAmount: money(fields["Overtime Amount"]),
     bonuses: money(fields["Overtime Amount"]),
     deductions: 0,
     taxRate: 0
   };
 }
 
-function salaryRecordPayload(employeeId: string, employee: EmployeeRecord) {
+export function salaryRecordPayload(employeeId: string, employee: EmployeeRecord) {
   return { employeeId, ...employeeSalaryPayload(employee), effectiveFrom: employee.fields["Joining Date"] || new Date().toISOString().slice(0, 10) };
 }
 
+export function employeeImportRowPayload(employee: EmployeeRecord, departmentIds: Map<string, string>, positionIds: Map<string, string>) {
+  const core = employeeCorePayload(employee, departmentIds, positionIds);
+  delete (core as Record<string, unknown>).managerId;
+  return {
+    ...core,
+    sourceId: employee.id,
+    managerEmployeeCode: managerEmployeeCode(employee) || undefined,
+    details: employeeDetailsPayload(employee),
+    bank: employeeBankPayload(employee),
+    salaryRecord: { ...employeeSalaryPayload(employee), effectiveFrom: employee.fields["Joining Date"] || new Date().toISOString().slice(0, 10) }
+  };
+}
+
 async function syncAttendance(before: HrState, after: HrState, request: RequestFn) {
-  const backend = await apiList<BackendRecord>("/attendance");
-  const records = new Map(backend.map(row => [`${dateOnly(row.attendanceDate)}:${row.employeeId}`, row]));
   const keys = new Set([...attendanceKeys(before), ...attendanceKeys(after)]);
-  for (const key of keys) {
+  const changes = [...keys].map(key => {
     const [day, employeeId] = splitAttendanceKey(key);
     const oldCode = before.attendance[day]?.[employeeId];
     const nextCode = after.attendance[day]?.[employeeId];
     const oldApproval = before.attendanceApprovals[day]?.[employeeId];
     const nextApproval = after.attendanceApprovals[day]?.[employeeId];
-    if (oldCode === nextCode && oldApproval === nextApproval) continue;
+    return { key, day, employeeId, nextCode, nextApproval, changed: oldCode !== nextCode || oldApproval !== nextApproval };
+  }).filter(change => change.changed);
+  if (!changes.length) return;
+  const days = [...new Set(changes.map(change => change.day))];
+  const backend = (await Promise.all(days.map(day => apiList<BackendRecord>(`/attendance?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`)))).flat();
+  const records = new Map(backend.map(row => [`${dateOnly(row.attendanceDate)}:${row.employeeId}`, row]));
+  for (const { key, day, employeeId, nextCode, nextApproval } of changes) {
     const existing = records.get(key);
     if (!nextCode) {
       if (existing) await request(`/attendance/${existing.id}`, "DELETE");
@@ -156,7 +191,9 @@ async function syncAttendance(before: HrState, after: HrState, request: RequestF
     }
     const payload = {
       employeeId, attendanceDate: day, status: attendanceStatus(nextCode),
-      approvalStatus: nextApproval === "Approved" ? "APPROVED" : "NOT_APPROVED",
+      approvalStatus: nextCode === "H" || nextCode === "A"
+        ? nextApproval === "Approved" ? "APPROVED" : nextApproval === "Not approved" ? "NOT_APPROVED" : "PENDING"
+        : "APPROVED",
       correctionReason: existing ? "Attendance updated in HR console" : undefined
     };
     if (existing) await request(`/attendance/${existing.id}`, "PATCH", payload);
@@ -290,6 +327,37 @@ async function syncDocuments(before: HrState, after: HrState, session: BackendSe
 function byId<T extends { id: string }>(items: T[]) { return new Map(items.map(item => [item.id, item])); }
 function same(a: unknown, b: unknown) { return JSON.stringify(a) === JSON.stringify(b); }
 function compact<T extends Record<string, unknown>>(record: T) { return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== undefined && value !== null)); }
+function deepCompact(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
+    if (item === "" || item === undefined || item === null) return [];
+    if (Array.isArray(item)) return [[key, item.map(entry => entry && typeof entry === "object" ? deepCompact(entry as Record<string, unknown>) : entry)]];
+    if (typeof item === "object" && !(item instanceof Date)) return [[key, deepCompact(item as Record<string, unknown>)]];
+    return [[key, item]];
+  }));
+}
+function managerEmployeeCode(employee: EmployeeRecord) {
+  const value = employee.fields["Reporting Manager Employee Code/Name"].trim();
+  return value ? value.split(/\s+-\s+|\s+/u)[0] : "";
+}
+export function remapEmployeeIds(state: HrState, ids: Map<string, string>): HrState {
+  if (!ids.size) return state;
+  const employeeId = (id: string) => ids.get(id) ?? id;
+  const recordMap = <T>(records: Record<string, T>) => Object.fromEntries(Object.entries(records).map(([id, value]) => [employeeId(id), value]));
+  return {
+    ...state,
+    employees: state.employees.map(employee => ({ ...employee, id: employeeId(employee.id) })),
+    attendance: Object.fromEntries(Object.entries(state.attendance).map(([day, records]) => [day, recordMap(records)])),
+    attendanceApprovals: Object.fromEntries(Object.entries(state.attendanceApprovals).map(([day, records]) => [day, recordMap(records)])),
+    leaves: state.leaves.map(item => ({ ...item, employeeId: employeeId(item.employeeId) })),
+    payroll: state.payroll.map(item => ({ ...item, employeeId: employeeId(item.employeeId) })),
+    businessTrips: state.businessTrips.map(item => ({ ...item, employeeId: employeeId(item.employeeId) })),
+    expenses: state.expenses.map(item => ({ ...item, employeeId: employeeId(item.employeeId) })),
+    loans: state.loans.map(item => ({ ...item, employeeId: employeeId(item.employeeId) })),
+    candidates: state.candidates.map(item => ({ ...item, employeeId: item.employeeId ? employeeId(item.employeeId) : undefined })),
+    eosRecords: state.eosRecords.map(item => ({ ...item, employeeId: employeeId(item.employeeId) })),
+    documents: state.documents.map(item => ({ ...item, employeeId: item.employeeId ? employeeId(item.employeeId) : "" }))
+  };
+}
 function enumValue(value: string) { return value.toUpperCase().replace(/[\s-]+/g, "_"); }
 function money(value: string) { const parsed = Number(String(value || 0).replace(/[^\d.-]/g, "")); return Number.isFinite(parsed) ? parsed : 0; }
 function dateOnly(value: unknown) { return String(value || "").slice(0, 10); }

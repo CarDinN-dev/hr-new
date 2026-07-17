@@ -33,6 +33,12 @@ export class AuthController {
   }
 
   @Public()
+  @Get('providers')
+  providers() {
+    return { local: true, microsoft: this.microsoftAuthService.isEnabled() };
+  }
+
+  @Public()
   @Get('microsoft/start')
   async microsoftStart(@Req() request: Request, @Res() response: Response) {
     response.setHeader('Cache-Control', 'no-store');
@@ -42,6 +48,7 @@ export class AuthController {
   @Public()
   @Get('microsoft/callback')
   async microsoftCallback(@Req() request: Request, @Res() response: Response) {
+    this.microsoftAuthService.assertEnabled();
     response.setHeader('Cache-Control', 'no-store');
     try {
       const session = await this.microsoftAuthService.complete(request, response);

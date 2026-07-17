@@ -125,7 +125,8 @@ test('public bypass is restricted to health and authentication entry points', ()
   }
   assert.deepEqual(publicUses.sort(), ['health.controller.ts', 'modules/auth/auth.controller.ts']);
   const auth = fs.readFileSync(path.join(backendSource, 'modules/auth/auth.controller.ts'), 'utf8');
-  assert.equal((auth.match(/@Public\(\)/gu) ?? []).length, 3);
+  assert.equal((auth.match(/@Public\(\)/gu) ?? []).length, 4);
+  assert.match(auth, /@Public\(\)\s*@Get\('providers'\)/u);
   assert.doesNotMatch(auth, /register/iu);
 });
 
@@ -139,9 +140,23 @@ test('runtime and frontend contain no legacy role gates or undeclared permission
   const unknown = new Set();
   for (const file of walk(frontendSource, (name) => /\.(ts|tsx)$/u.test(name))) {
     const source = fs.readFileSync(file, 'utf8');
-    for (const match of source.matchAll(/(?:hasPermission|hasAnyPermission|hasAllPermissions)\([^)]*?['"]([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)['"]/gu)) {
-      if (!declared.has(match[1])) unknown.add(match[1]);
-    }
+    const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const inspect = (node) => {
+      const callName = ts.isCallExpression(node)
+        ? ts.isIdentifier(node.expression)
+          ? node.expression.text
+          : ts.isPropertyAccessExpression(node.expression)
+            ? node.expression.name.text
+            : null
+        : null;
+      if (ts.isCallExpression(node) && callName && ['hasPermission', 'hasAnyPermission', 'hasAllPermissions', 'can'].includes(callName)) {
+        for (const argument of node.arguments) {
+          if (ts.isStringLiteralLike(argument) && /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u.test(argument.text) && !declared.has(argument.text)) unknown.add(argument.text);
+        }
+      }
+      ts.forEachChild(node, inspect);
+    };
+    inspect(sourceFile);
   }
   assert.deepEqual([...unknown].sort(), []);
 });

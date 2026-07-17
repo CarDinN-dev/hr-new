@@ -3,7 +3,7 @@ import autoTable from "jspdf-autotable";
 import type { RowInput } from "jspdf-autotable";
 import type { EmployeeRecord, EosRecord, HrSettings, HrState, PdfTemplate, PayrollSlip } from "./data";
 import { months, pdfTemplates, reportTemplates } from "./data";
-import { attendanceStats, employeeName, employeeSalary, eosSummary, formatDate, formatMoney, moneyValue } from "./domain";
+import { attendanceStats, employeeName, employeeSalary, formatDate, formatMoney, moneyValue } from "./domain";
 
 type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
 export type GeneratedPdf = { filename: string; dataUrl: string; sizeBytes: number };
@@ -93,24 +93,7 @@ export function saveEmployeeDocumentPdf(template: PdfTemplate, employee: Employe
     return finish(doc, settings, `${safe(label)}-${safe(employee.fields["Employee Code"])}.pdf`);
   }
 
-  if (template === "final_settlement" || template === "gratuity_statement" || template === "clearance_certificate") {
-    const settlement = eosSummary(employee, state);
-    nextY = table(doc, nextY, [["Settlement Field", "Value"]], [
-      ["Employee", employeeName(employee)],
-      ["Settlement Date", formatDate(settlement.asOf)],
-      ["Completed Service", `${settlement.years.toFixed(2)} years`],
-      ["Basic Salary", money(settlement.basic, settings)],
-      ["Estimated Gratuity", money(settlement.gratuity, settings)],
-      ["Leave Encashment", money(settlement.leaveEncashment, settings)],
-      ["LOP Deduction", money(settlement.lopDeduction, settings)],
-      ["Approved Expense Reimbursement", money(settlement.expenseReimbursement, settings)],
-      ["Open Trip Advance Deduction", money(settlement.tripAdvanceDeduction, settings)],
-      ["Net Settlement", money(settlement.netSettlement, settings)],
-      ["Clearance", template === "clearance_certificate" ? "Pending department clearances" : "Subject to final approval"]
-    ]);
-    paragraph(doc, nextY + 6, notes || "Values are draft HR estimates based on basic salary, recorded leave balance and LOP days, pending finance validation and management approval.");
-    return finish(doc, settings, `${safe(label)}-${safe(employee.fields["Employee Code"])}.pdf`);
-  }
+  if (template === "final_settlement" || template === "gratuity_statement" || template === "clearance_certificate") throw new Error("Exit documents require a server EOS preview");
 
   const salary = employeeSalary(employee);
   const paragraphs = documentParagraphs(template, employee, settings, notes);
@@ -127,8 +110,9 @@ export function saveEmployeeDocumentPdf(template: PdfTemplate, employee: Employe
   return finish(doc, settings, `${safe(label)}-${safe(employee.fields["Employee Code"])}.pdf`);
 }
 
-export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings: HrSettings) {
-  const { doc, y } = brandedDoc(settings, "EOS Settlement", `${employee.fields["Employee Code"]} - ${employeeName(employee)}`);
+export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings: HrSettings, template: "final_settlement" | "gratuity_statement" | "clearance_certificate" = "final_settlement") {
+  const title = template === "gratuity_statement" ? "Gratuity Statement" : template === "clearance_certificate" ? "Clearance Certificate" : "Final Settlement";
+  const { doc, y } = brandedDoc(settings, title, `${employee.fields["Employee Code"]} - ${employeeName(employee)}`);
   table(doc, y, [["Field", "Value"]], [
     ["Employee", employeeName(employee)],
     ["Employee Code", employee.fields["Employee Code"]],
@@ -143,7 +127,7 @@ export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings
     ["Net EOS Payable", money(record.netSettlement, settings)],
     ["Status", record.status]
   ]);
-  return finish(doc, settings, `EOS-${safe(employee.fields["Employee Code"])}-${record.asOf}.pdf`);
+  return finish(doc, settings, `${safe(title)}-${safe(employee.fields["Employee Code"])}-${record.asOf}.pdf`);
 }
 
 function employeeDirectory(state: HrState, settings: HrSettings) {

@@ -4,7 +4,7 @@ import { Type } from 'class-transformer';
 import { IsDate, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class UploadDocumentDto {
-  @ApiProperty() @IsUUID() employeeId: string;
+  @ApiPropertyOptional({ description: 'Omit for an organization-level HR document' }) @IsOptional() @IsUUID() employeeId?: string;
   @ApiProperty({ example: 'Passport' }) @IsString() @MaxLength(100) documentType: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() uploadedById?: string;
   @ApiPropertyOptional({ example: '2030-01-01' }) @IsOptional() @Type(() => Date) @IsDate() expiryDate?: Date;

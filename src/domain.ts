@@ -1,4 +1,4 @@
-import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeLoan, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollLoanDeduction, PayrollSlip, RecruitmentCandidate } from "./data";
+import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeLoan, EmployeeRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollLoanDeduction, PayrollSlip, RecruitmentCandidate } from "./data";
 import { candidateStages, createEmptyEmployee, months, normalizeEmployee } from "./data";
 import { newId } from "./id";
 
@@ -487,41 +487,6 @@ export function hireCandidateAsEmployee(state: HrState, candidateId: string) {
           notes: item.notes ? `${item.notes}\nHired via recruitment pipeline` : "Hired via recruitment pipeline"
         }
       : item)
-  };
-}
-
-export function eosSummary(employee: EmployeeRecord, state: HrState, asOf = todayISO()) {
-  const settlement = settlementSummary(employee, state, asOf);
-  const expenseReimbursement = roundMoney((state.expenses ?? [])
-    .filter(item => item.employeeId === employee.id && item.status === "Approved")
-    .reduce((sum, item) => sum + item.amount, 0));
-  const tripAdvanceDeduction = roundMoney((state.businessTrips ?? [])
-    .filter(item => item.employeeId === employee.id && item.status === "Approved")
-    .reduce((sum, item) => sum + item.advanceAmount, 0));
-  return {
-    ...settlement,
-    expenseReimbursement,
-    tripAdvanceDeduction,
-    netSettlement: roundMoney(settlement.netSettlement + expenseReimbursement - tripAdvanceDeduction)
-  };
-}
-
-export function createEosRecord(state: HrState, employee: EmployeeRecord, asOf: string, reason: string): EosRecord {
-  const summary = eosSummary(employee, state, asOf);
-  return {
-    id: newId(),
-    employeeId: employee.id,
-    asOf,
-    reason,
-    serviceYears: summary.years,
-    gratuity: summary.gratuity,
-    leaveEncashment: summary.leaveEncashment,
-    lopDeduction: summary.lopDeduction,
-    expenseReimbursement: summary.expenseReimbursement,
-    tripAdvanceDeduction: summary.tripAdvanceDeduction,
-    netSettlement: summary.netSettlement,
-    status: "Draft",
-    createdOn: todayISO()
   };
 }
 

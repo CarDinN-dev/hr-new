@@ -57,6 +57,22 @@ export function applyAttendanceRows(state: HrState, rows: Array<Record<string, s
   };
 }
 
+export function buildAttendanceImportRows(state: HrState, rows: Array<Record<string, string>>) {
+  const employees = new Map(state.employees.map(employee => [employee.fields["Employee Code"].trim().toLowerCase(), employee]));
+  return rows.map((row, index) => {
+    const attendanceDate = normalizeDate(row.Date || row["Attendance Date"]);
+    const employee = employees.get((row["Employee Code"] || "").trim().toLowerCase());
+    const code = normalizeStatus(row.Status || row["Attendance Status"]);
+    if (!attendanceDate || !employee || !code) throw new Error(`Attendance row ${index + 2} has an invalid date, employee code, or status.`);
+    return {
+      employeeId: employee.id,
+      attendanceDate,
+      status: ({ P: "PRESENT", H: "HALF_DAY", L: "ON_LEAVE", A: "ABSENT" } as const)[code],
+      notes: (row.Notes || row.Note || "").trim() || undefined
+    };
+  });
+}
+
 function normalizeStatus(value?: string) {
   return statusCodes[(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "")];
 }

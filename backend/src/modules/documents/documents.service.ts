@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessScopeType, AuditAction, DocumentVisibility, Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { AccessScopeType, AuditAction, DocumentScanStatus, DocumentVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
@@ -11,6 +11,8 @@ import { UploadDocumentDto } from './dto/upload-document.dto';
 import { DocumentStorageService } from './document-storage.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { assertDocumentFile } from './document-file-validation';
+import { DocumentMalwareScannerService } from './document-malware-scanner.service';
 
 const documentInclude = {
   employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true } },
@@ -30,6 +32,9 @@ const documentSelect = {
   uploadedById: true,
   expiryDate: true,
   visibility: true,
+  scanStatus: true,
+  scannedAt: true,
+  scanResultCode: true,
   version: true,
   createdAt: true,
   updatedAt: true,
@@ -44,10 +49,11 @@ export class DocumentsService {
     private readonly storage: DocumentStorageService,
     private readonly audit: AuditService,
     private readonly authorization: AuthorizationService,
+    private readonly scanner: DocumentMalwareScannerService,
   ) {}
 
   async create(dto: CreateDocumentDto, user: RequestUser) {
-    await this.ensureEmployee(dto.employeeId);
+    if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
     const manageAll = this.authorization.permissionAllowedForScope(user, 'document.hr.manage', AccessScopeType.ALL_EMPLOYEES, dto.employeeId);
     this.assertCanManageEmployeeDocument(user, dto.employeeId, manageAll);
     const uploadedById = user.employeeId;
@@ -55,11 +61,11 @@ export class DocumentsService {
     if (dto.uploadedById && dto.uploadedById !== uploadedById) {
       throw new ForbiddenException('The document uploader must be the authenticated employee');
     }
-    this.assertVisibility(dto.visibility, manageAll);
+    const visibility = this.documentVisibility(dto.employeeId, dto.visibility, manageAll);
 
     return this.documentTransaction(async (tx) => {
       const document = await tx.employeeDocument.create({
-        data: { ...dto, uploadedById },
+        data: { ...dto, visibility, uploadedById, scanStatus: DocumentScanStatus.CLEAN },
         select: documentSelect,
       });
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'EmployeeDocument', entityId: document.id, summary: 'Document metadata created', subjectEmployeeId: dto.employeeId });
@@ -69,7 +75,8 @@ export class DocumentsService {
 
   async upload(dto: UploadDocumentDto, file: Express.Multer.File | undefined, user: RequestUser) {
     if (!file?.buffer?.length) throw new BadRequestException('A document file is required');
-    await this.ensureEmployee(dto.employeeId);
+    assertDocumentFile(file);
+    if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
     const manageAll = this.authorization.permissionAllowedForScope(user, 'document.hr.manage', AccessScopeType.ALL_EMPLOYEES, dto.employeeId);
     this.assertCanManageEmployeeDocument(user, dto.employeeId, manageAll);
     const uploadedById = user.employeeId;
@@ -77,12 +84,20 @@ export class DocumentsService {
     if (dto.uploadedById && dto.uploadedById !== uploadedById) {
       throw new ForbiddenException('The document uploader must be the authenticated employee');
     }
-    this.assertVisibility(dto.visibility, manageAll);
+    const visibility = this.documentVisibility(dto.employeeId, dto.visibility, manageAll);
 
-    const stored = await this.storage.upload(dto.employeeId, file);
+    const stored = dto.employeeId
+      ? await this.storage.upload(dto.employeeId, file)
+      : await this.storage.uploadPrivate(
+        `organization/reports/${new Date().getUTCFullYear()}`,
+        `${randomUUID()}-${file.originalname}`,
+        file.mimetype,
+        file.buffer,
+        { ownerType: 'organization', originalName: file.originalname },
+      );
     const id = randomUUID();
     try {
-      return await this.documentTransaction(async (tx) => {
+      const document = await this.documentTransaction(async (tx) => {
         const sequence = await tx.documentSequence.upsert({
           where: { key: 'employee_document' },
           create: { key: 'employee_document', value: 1 },
@@ -103,7 +118,8 @@ export class DocumentsService {
             sha256: stored.sha256,
             uploadedById,
             expiryDate: dto.expiryDate,
-            visibility: dto.visibility,
+            visibility,
+            scanStatus: this.scanner.initialStatus(),
           },
           select: documentSelect,
         });
@@ -116,6 +132,8 @@ export class DocumentsService {
         });
         return document;
       });
+      this.scanner.wake();
+      return document;
     } catch (error) {
       await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
       throw error;
@@ -131,12 +149,15 @@ export class DocumentsService {
         contentType: true,
         objectName: true,
         objectGeneration: true,
+        scanStatus: true,
       },
     });
     if (!document) throw new NotFoundException('Document not found');
     if (!document.objectName) throw new NotFoundException('Stored document content is not available');
+    if (document.scanStatus === DocumentScanStatus.REJECTED) throw new NotFoundException('Document not found');
+    if (document.scanStatus !== DocumentScanStatus.CLEAN) throw new ServiceUnavailableException('Document is unavailable until malware scanning succeeds');
     const buffer = await this.storage.download(document.objectName, document.objectGeneration);
-    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'EmployeeDocument', entityId: id, summary: 'Document content downloaded', subjectEmployeeId: document.employeeId });
+    await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'EmployeeDocument', entityId: id, summary: 'Document content downloaded', subjectEmployeeId: document.employeeId ?? undefined });
     return { buffer, fileName: document.fileName, contentType: document.contentType ?? 'application/octet-stream' };
   }
 
@@ -188,7 +209,7 @@ export class DocumentsService {
     if (dto.employeeId) await this.ensureEmployee(dto.employeeId);
     return this.documentTransaction(async (tx) => {
       const updated = await tx.employeeDocument.update({ where: { id }, data: { ...dto, uploadedById: undefined, version: { increment: 1 } }, select: documentSelect });
-      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeDocument', entityId: id, summary: 'Document metadata updated', subjectEmployeeId: dto.employeeId ?? document.employeeId });
+      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeDocument', entityId: id, summary: 'Document metadata updated', subjectEmployeeId: dto.employeeId ?? document.employeeId ?? undefined });
       return updated;
     });
   }
@@ -199,7 +220,7 @@ export class DocumentsService {
     this.assertCanManageEmployeeDocument(user, document.employeeId, manageAll);
     return this.documentTransaction(async (tx) => {
       const removed = await tx.employeeDocument.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } }, select: documentSelect });
-      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'EmployeeDocument', entityId: id, summary: 'Document archived', subjectEmployeeId: document.employeeId });
+      await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'EmployeeDocument', entityId: id, summary: 'Document archived', subjectEmployeeId: document.employeeId ?? undefined });
       return removed;
     });
   }
@@ -222,14 +243,30 @@ export class DocumentsService {
         visibility: { in: [DocumentVisibility.EMPLOYEE_ONLY, DocumentVisibility.MANAGER_AND_HR, DocumentVisibility.PUBLIC] },
       });
     }
+    if (user.employeeId && this.authorization.has(user, 'document.team.read')) {
+      const directReports = await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } });
+      const ids = directReports
+        .map((employee) => employee.id)
+        .filter((id) => this.authorization.permissionAllowedForScope(user, 'document.team.read', AccessScopeType.DIRECT_REPORTS, id));
+      if (ids.length) scopes.push({ employeeId: { in: ids }, visibility: { in: [DocumentVisibility.MANAGER_AND_HR, DocumentVisibility.PUBLIC] } });
+    }
     return scopes.length ? { OR: scopes } : { employeeId: '__no_document_scope__' };
   }
 
-  private assertCanManageEmployeeDocument(user: RequestUser, employeeId: string, manageAll?: boolean) {
+  private assertCanManageEmployeeDocument(user: RequestUser, employeeId: string | null | undefined, manageAll?: boolean) {
     if (manageAll ?? this.authorization.permissionAllowedForScope(user, 'document.hr.manage', AccessScopeType.ALL_EMPLOYEES, employeeId)) return;
-    if (employeeId === user.employeeId
+    if (employeeId && employeeId === user.employeeId
       && this.authorization.permissionAllowedForScope(user, 'document.self.manage', AccessScopeType.SELF, employeeId)) return;
     throw new NotFoundException('Document not found');
+  }
+
+  private documentVisibility(employeeId: string | null | undefined, visibility: DocumentVisibility | undefined, manageAll: boolean) {
+    if (!employeeId) {
+      if (!manageAll) throw new NotFoundException('Document not found');
+      return DocumentVisibility.HR_ONLY;
+    }
+    this.assertVisibility(visibility, manageAll);
+    return visibility;
   }
 
   private assertVisibility(visibility: DocumentVisibility | undefined, manageAll: boolean) {

@@ -212,9 +212,22 @@ export class AuthService {
   }
 
   async stepUpLocal(dto: StepUpDto, user: RequestUser) {
+    const throttleKey = this.stepUpKey(user);
+    const throttle = await this.prisma.authThrottle.findUnique({ where: { key: throttleKey } });
+    if (throttle && throttle.resetAt > new Date() && throttle.count >= 5) {
+      throw new HttpException('Too many authentication attempts. Try again later.', HttpStatus.TOO_MANY_REQUESTS);
+    }
     const account = await this.usersService.findById(user.id);
     const passwordMatches = await bcrypt.compare(dto.password, account?.passwordHash ?? (await this.dummyPasswordHash));
     if (!account || !account.isActive || account.deletedAt || !account.localLoginEnabled || !account.passwordHash || !passwordMatches) {
+      await this.incrementLoginAttempt(throttleKey);
+      await this.audit.record(this.prisma, user, {
+        action: AuditAction.LOGIN,
+        outcome: AuditOutcome.FAILED,
+        resourceType: 'AuthSession',
+        resourceId: user.sessionId,
+        summary: 'Local step-up authentication failed',
+      });
       throw new UnauthorizedException('Authentication could not be verified');
     }
     const reauthenticatedAt = new Date();
@@ -222,6 +235,7 @@ export class AuthService {
       const updated = await tx.authSession.updateMany({ where: { id: user.sessionId, userId: user.id, revokedAt: null, expiresAt: { gt: reauthenticatedAt } }, data: { reauthenticatedAt } });
       if (updated.count !== 1) throw new UnauthorizedException('Session is invalid or expired');
       await this.audit.record(tx, { ...user, reauthenticatedAt }, { action: AuditAction.LOGIN, resourceType: 'AuthSession', resourceId: user.sessionId, summary: 'Local step-up authentication completed' });
+      await tx.authThrottle.deleteMany({ where: { key: throttleKey } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { reauthenticatedAt };
   }
@@ -313,6 +327,10 @@ export class AuthService {
 
   private accountLoginKey(email: string) {
     return this.throttleKey('account', email.toLowerCase());
+  }
+
+  private stepUpKey(user: RequestUser) {
+    return this.throttleKey('step-up-account-session', `${user.id}\0${user.sessionId}`);
   }
 
   private throttleKey(kind: string, value: string) {

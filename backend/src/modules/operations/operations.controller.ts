@@ -5,7 +5,7 @@ import { AnyPermission, Permissions } from '../../common/decorators/permissions.
 import { RequestUser } from '../../common/types/request-user.type';
 import {
   CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
-  EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
+  EmployeeScopedQueryDto, HireCandidateDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
   TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
 import { OperationsService } from './operations.service';
@@ -51,8 +51,12 @@ export class OperationsController {
   @Permissions('recruitment.manage')
   @Patch('recruitment/candidates/:id/stage') candidateStage(@Param('id') id: string, @Body() dto: TransitionCandidateDto, @CurrentUser() user: RequestUser) { return this.operations.transitionCandidate(id, dto, user); }
   @Permissions('recruitment.manage')
+  @Post('recruitment/candidates/:id/hire') hireCandidate(@Param('id') id: string, @Body() dto: HireCandidateDto, @CurrentUser() user: RequestUser) { return this.operations.hireCandidate(id, dto, user); }
+  @Permissions('recruitment.manage')
   @Delete('recruitment/candidates/:id') removeCandidate(@Param('id') id: string, @CurrentUser() user: RequestUser) { return this.operations.removeCandidate(id, user); }
 
+  @Permissions('eos.manage')
+  @Post('eos/preview') previewEos(@Body() dto: CreateEosDto, @CurrentUser() user: RequestUser) { return this.operations.previewEos(dto, user); }
   @Permissions('eos.manage')
   @Post('eos') createEos(@Body() dto: CreateEosDto, @CurrentUser() user: RequestUser) { return this.operations.createEos(dto, user); }
   @Permissions('eos.read')

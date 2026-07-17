@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, finalizePayrollSlip, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, loanBalance, markAllAttendance, recordManualLoanRepayment, serviceYears, setAttendance, setLoanDeductionOverride, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
+import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, expenseTotals, finalizePayrollSlip, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, loanBalance, markAllAttendance, recordManualLoanRepayment, serviceYears, setAttendance, setLoanDeductionOverride, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
 import { type EmployeeLoan } from "./data";
 import { testState } from "./testState";
 
@@ -246,7 +246,7 @@ describe("HR domain", () => {
       .toEqual({ total: 2, marked: 1, unmarked: 1, P: 0, H: 0, L: 0, A: 1 });
   });
 
-  it("rolls business trip advances and approved expenses into EOS", () => {
+  it("summarizes business trips and approved expenses", () => {
     const state = testState();
     const employee = state.employees[0];
     employee.fields["Annual Leave Balance"] = "5";
@@ -269,15 +269,8 @@ describe("HR domain", () => {
       { id: "EX-2", employeeId: employee.id, category: "Meal", date: "2026-07-03", amount: 75, description: "Dinner", status: "Paid", createdOn: "2026-07-04" }
     ];
 
-    const summary = eosSummary(employee, state, "2026-07-31");
-    const eos = createEosRecord(state, employee, "2026-07-31", "Resignation");
-
     expect(tripTotal(state.businessTrips[0])).toBe(1600);
     expect(expenseTotals(state.expenses)).toMatchObject({ approved: 300, paid: 75 });
-    expect(summary.expenseReimbursement).toBe(300);
-    expect(summary.tripAdvanceDeduction).toBe(500);
-    expect(eos.netSettlement).toBe(summary.netSettlement);
-    expect(eos.status).toBe("Draft");
   });
 
   it("moves hired recruitment candidates into employees once", () => {

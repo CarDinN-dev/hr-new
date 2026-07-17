@@ -21,11 +21,32 @@ async function main() {
     loanRepayment: { findMany: async () => posted.map((amount) => ({ amount: new Prisma.Decimal(amount) })) },
   };
   const loans = new LoansService({}, {}, {});
-  const first = await loans.preparePayrollDeductions('employee-1', 2026, 1, tx);
+  const noCompanyCap = { type: 'AMOUNT', value: new Prisma.Decimal(0) };
+  const first = await loans.preparePayrollDeductions('employee-1', 2026, 1, new Prisma.Decimal('99999'), loan.principal, noCompanyCap, tx);
   assert.equal(first.total.toFixed(2), '1714.29');
   posted.push('1714.29', '1714.29', '1714.29', '1714.29', '1714.29', '1714.29');
-  const final = await loans.preparePayrollDeductions('employee-1', 2026, 7, tx);
+  const final = await loans.preparePayrollDeductions('employee-1', 2026, 7, new Prisma.Decimal('99999'), loan.principal, noCompanyCap, tx);
   assert.equal(final.total.toFixed(2), '1714.26');
+
+  posted.length = 0;
+  const capped = await loans.preparePayrollDeductions('employee-1', 2026, 9, new Prisma.Decimal('600'), new Prisma.Decimal('5000'), { type: 'PERCENT', value: new Prisma.Decimal('10') }, tx);
+  assert.equal(capped.total.toFixed(2), '500.00');
+  posted.push('500', '500', '500', '500', '500', '500', '500');
+  const beyondNominalTerm = await loans.preparePayrollDeductions('employee-1', 2026, 10, new Prisma.Decimal('600'), new Prisma.Decimal('5000'), { type: 'AMOUNT', value: new Prisma.Decimal('500') }, tx);
+  assert.equal(beyondNominalTerm.total.toFixed(2), '500.00');
+
+  const oldest = { ...loan, id: 'loan-oldest', type: 'Oldest', principal: new Prisma.Decimal('1000'), termMonths: 1, createdAt: new Date('2025-01-01') };
+  const newest = { ...loan, id: 'loan-newest', type: 'Newest', principal: new Prisma.Decimal('1000'), termMonths: 1, createdAt: new Date('2025-02-01') };
+  tx.employeeLoan.findMany = async () => [oldest, newest];
+  tx.loanRepayment.findMany = async () => [];
+  const ordered = await loans.preparePayrollDeductions('employee-1', 2026, 1, new Prisma.Decimal('750'), new Prisma.Decimal('5000'), { type: 'AMOUNT', value: new Prisma.Decimal('750') }, tx);
+  assert.deepEqual(ordered.deductions.map((item) => [item.loanId, item.amount.toFixed(2)]), [['loan-oldest', '750.00']]);
+
+  oldest.monthlyLimit = new Prisma.Decimal('100');
+  oldest.overrides = [{ amount: new Prisma.Decimal('800'), approvedAboveLimit: true }];
+  tx.employeeLoan.findMany = async () => [oldest];
+  const override = await loans.preparePayrollDeductions('employee-1', 2026, 1, new Prisma.Decimal('650'), new Prisma.Decimal('5000'), { type: 'AMOUNT', value: new Prisma.Decimal('200') }, tx);
+  assert.equal(override.total.toFixed(2), '650.00');
 
   const payroll = new PayrollService({}, loans, {}, {}, {});
   const grossPay = sumMoney(['3000', '200', '50']);

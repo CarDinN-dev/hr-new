@@ -1,21 +1,27 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import {
-  AssignUserRolesDto, ChangeUserStatusDto, CreateRoleDto, CreateSystemUserDto, QuerySystemSessionsDto, QuerySystemUsersDto,
+  AssignRoleFlowDto, AssignUserRolesDto, ChangeUserStatusDto, CreateRoleDto, CreateSystemUserDto, QuerySystemSessionsDto, QuerySystemUsersDto,
   CreatePermissionOverrideDto, CreateWorkflowDelegationDto, ReplaceRolePermissionsDto,
   RevokePermissionOverrideDto, RevokeSystemSessionDto, RevokeWorkflowDelegationDto,
   SystemMutationDto, UpdateRoleDto, UpdateSystemUserDto, UpdateWorkflowPolicyDto,
+  ApplyOrganizationRemediationDto, PreviewOrganizationRemediationDto,
 } from './dto/system.dto';
 import { SystemService } from './system.service';
+import { OrganizationReadinessService } from './organization-readiness.service';
 
 @ApiTags('System administration')
 @ApiBearerAuth()
 @Controller('system')
 export class SystemController {
-  constructor(private readonly system: SystemService) {}
+  constructor(private readonly system: SystemService, private readonly organizationReadiness: OrganizationReadinessService) {}
+
+  @Permissions('system.read') @Get('organization-readiness') readiness(@CurrentUser() user: RequestUser) { return this.organizationReadiness.report(user); }
+  @Permissions('system.configure', 'role.assign') @Post('organization-remediation/preview') previewRemediation(@Body() dto: PreviewOrganizationRemediationDto, @CurrentUser() user: RequestUser) { return this.organizationReadiness.preview(dto, user); }
+  @Permissions('system.configure', 'role.assign') @Post('organization-remediation/apply') applyRemediation(@Body() dto: ApplyOrganizationRemediationDto, @Headers('idempotency-key') key: string | undefined, @CurrentUser() user: RequestUser) { return this.organizationReadiness.apply(dto, key, user); }
 
   @Permissions('user.read') @Get('users') users(@Query() query: QuerySystemUsersDto, @CurrentUser() user: RequestUser) { return this.system.listUsers(query, user); }
   @Permissions('user.manage') @Post('users') createUser(@Body() dto: CreateSystemUserDto, @CurrentUser() user: RequestUser) { return this.system.createUser(dto, user); }
@@ -23,6 +29,7 @@ export class SystemController {
   @Permissions('user.manage') @Patch('users/:id') updateUser(@Param('id') id: string, @Body() dto: UpdateSystemUserDto, @CurrentUser() user: RequestUser) { return this.system.updateUser(id, dto, user); }
   @Permissions('user.deactivate') @Patch('users/:id/status') status(@Param('id') id: string, @Body() dto: ChangeUserStatusDto, @CurrentUser() user: RequestUser) { return this.system.changeUserStatus(id, dto, user); }
   @Permissions('user.delete_soft') @Delete('users/:id') deleteUser(@Param('id') id: string, @Body() dto: SystemMutationDto, @CurrentUser() user: RequestUser) { return this.system.softDeleteUser(id, dto, user); }
+  @Permissions('role.assign') @Put('users/:id/role-flow') roleFlow(@Param('id') id: string, @Body() dto: AssignRoleFlowDto, @CurrentUser() user: RequestUser) { return this.system.assignRoleFlow(id, dto, user); }
   @Permissions('role.assign') @Put('users/:id/roles') roles(@Param('id') id: string, @Body() dto: AssignUserRolesDto, @CurrentUser() user: RequestUser) { return this.system.assignRoles(id, dto, user); }
   @Permissions('permission.assign') @Post('users/:id/overrides') createOverride(@Param('id') id: string, @Body() dto: CreatePermissionOverrideDto, @CurrentUser() user: RequestUser) { return this.system.createOverride(id, dto, user); }
   @Permissions('permission.assign') @Post('users/:id/overrides/:overrideId/revoke') revokeOverride(@Param('id') id: string, @Param('overrideId') overrideId: string, @Body() dto: RevokePermissionOverrideDto, @CurrentUser() user: RequestUser) { return this.system.revokeOverride(id, overrideId, dto, user); }

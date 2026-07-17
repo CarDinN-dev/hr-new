@@ -66,6 +66,7 @@ enum AttendanceStatus {
 }
 
 enum AttendanceApprovalStatus {
+  PENDING
   APPROVED
   NOT_APPROVED
 }
@@ -179,6 +180,13 @@ enum DocumentVisibility {
   MANAGER_AND_HR
   HR_ONLY
   PUBLIC
+}
+
+enum DocumentScanStatus {
+  PENDING
+  CLEAN
+  REJECTED
+  FAILED
 }
 
 enum TripStatus {
@@ -494,6 +502,7 @@ model Employee {
   salary                Decimal          @db.Decimal(12, 2)
   emergencyContactName  String?
   emergencyContactPhone String?
+  photo                 String?
   version               Int              @default(1)
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
@@ -607,7 +616,7 @@ model Attendance {
   lateMinutes    Int                      @default(0)
   workingHours   Decimal                  @default(0) @db.Decimal(5, 2)
   status         AttendanceStatus         @default(PRESENT)
-  approvalStatus AttendanceApprovalStatus @default(NOT_APPROVED)
+  approvalStatus AttendanceApprovalStatus @default(PENDING)
   notes          String?
   version        Int                      @default(1)
   createdAt      DateTime                 @default(now())
@@ -833,8 +842,13 @@ model SalaryRecord {
   employeeId    String
   baseSalary    Decimal   @db.Decimal(12, 2)
   allowances    Decimal   @default(0) @db.Decimal(12, 2)
+  housingAllowance Decimal @default(0) @db.Decimal(12, 2)
+  foodAllowance    Decimal @default(0) @db.Decimal(12, 2)
+  mobileAllowance  Decimal @default(0) @db.Decimal(12, 2)
+  specialAllowance Decimal @default(0) @db.Decimal(12, 2)
   deductions    Decimal   @default(0) @db.Decimal(12, 2)
   bonuses       Decimal   @default(0) @db.Decimal(12, 2)
+  overtimeAmount Decimal  @default(0) @db.Decimal(12, 2)
   taxRate       Decimal   @default(0) @db.Decimal(5, 2)
   effectiveFrom DateTime
   effectiveTo   DateTime?
@@ -951,7 +965,7 @@ model PerformanceReview {
 
 model EmployeeDocument {
   id               String             @id @default(uuid())
-  employeeId       String
+  employeeId       String?
   documentType     String
   fileName         String
   fileUrl          String             @default("")
@@ -964,18 +978,23 @@ model EmployeeDocument {
   uploadedById     String
   expiryDate       DateTime?
   visibility       DocumentVisibility @default(MANAGER_AND_HR)
+  scanStatus       DocumentScanStatus @default(PENDING)
+  scannedAt        DateTime?
+  scanResultCode   String?            @db.VarChar(200)
+  quarantineReference String?
   version          Int                @default(1)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   deletedAt        DateTime?
 
-  employee   Employee @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
+  employee   Employee? @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
   uploadedBy Employee @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
 
   @@index([employeeId])
   @@index([uploadedById])
   @@index([documentType])
   @@index([expiryDate])
+  @@index([scanStatus, createdAt])
   @@index([deletedAt])
 }
 

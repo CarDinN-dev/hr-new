@@ -61,13 +61,13 @@ export class PayrollService {
     this.assertDateRange(dto.effectiveFrom, dto.effectiveTo, 'effectiveTo');
     return this.payrollTransaction(async (tx) => {
       await this.assertSalaryPeriodAvailable(dto.employeeId, dto.effectiveFrom, dto.effectiveTo, undefined, tx);
+      const amounts = this.salaryAmounts(dto);
       const record = await tx.salaryRecord.create({
         data: {
           ...dto,
           baseSalary: nonNegativeMoney(dto.baseSalary, 'baseSalary', '1000000000'),
-          allowances: nonNegativeMoney(dto.allowances ?? 0, 'allowances', '1000000000'),
+          ...amounts,
           deductions: nonNegativeMoney(dto.deductions ?? 0, 'deductions', '1000000000'),
-          bonuses: nonNegativeMoney(dto.bonuses ?? 0, 'bonuses', '1000000000'),
           taxRate: nonNegativeMoney(dto.taxRate ?? 0, 'taxRate', '100'),
         }, include: salaryRecordInclude,
       });
@@ -101,14 +101,14 @@ export class PayrollService {
       const effectiveTo = dto.effectiveTo ?? record.effectiveTo ?? undefined;
       this.assertDateRange(effectiveFrom, effectiveTo, 'effectiveTo');
       await this.assertSalaryPeriodAvailable(record.employeeId, effectiveFrom, effectiveTo, id, tx);
+      const amounts = this.salaryAmounts(dto, record);
       const updated = await tx.salaryRecord.update({
         where: { id },
         data: {
           ...dto,
           baseSalary: dto.baseSalary === undefined ? undefined : nonNegativeMoney(dto.baseSalary, 'baseSalary', '1000000000'),
-          allowances: dto.allowances === undefined ? undefined : nonNegativeMoney(dto.allowances, 'allowances', '1000000000'),
+          ...amounts,
           deductions: dto.deductions === undefined ? undefined : nonNegativeMoney(dto.deductions, 'deductions', '1000000000'),
-          bonuses: dto.bonuses === undefined ? undefined : nonNegativeMoney(dto.bonuses, 'bonuses', '1000000000'),
           taxRate: dto.taxRate === undefined ? undefined : nonNegativeMoney(dto.taxRate, 'taxRate', '100'),
           version: { increment: 1 },
         }, include: salaryRecordInclude,
@@ -122,7 +122,15 @@ export class PayrollService {
     return this.payrollTransaction(async (tx) => {
       const record = await this.ensureSalaryRecord(id, tx);
       await this.authorization.assertEmployeeScope(user, record.employeeId, { all: 'payroll.configure' });
-      const used = await tx.payroll.findFirst({ where: { employeeId: record.employeeId, year: record.effectiveFrom.getUTCFullYear(), payrollRun: { status: { not: PayrollRunStatus.CANCELLED } } }, select: { id: true } });
+      const payrolls = await tx.payroll.findMany({
+        where: { employeeId: record.employeeId, year: { gte: record.effectiveFrom.getUTCFullYear() }, payrollRun: { status: { not: PayrollRunStatus.CANCELLED } } },
+        select: { id: true, year: true, month: true },
+      });
+      const used = payrolls.find((payroll) => {
+        const periodStart = new Date(Date.UTC(payroll.year, payroll.month - 1, 1));
+        const periodEnd = new Date(Date.UTC(payroll.year, payroll.month, 0, 23, 59, 59, 999));
+        return periodEnd >= record.effectiveFrom && (!record.effectiveTo || periodStart <= record.effectiveTo);
+      });
       if (used) throw new BadRequestException('Salary records used by payroll history cannot be archived');
       const removed = await tx.salaryRecord.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } }, include: salaryRecordInclude });
       await this.audit.record(tx, user, { action: AuditAction.DELETE, resourceType: 'SalaryRecord', resourceId: id, summary: 'Salary record archived', subjectEmployeeId: record.employeeId });
@@ -143,17 +151,29 @@ export class PayrollService {
       if (duplicate) return duplicate;
       const existing = await tx.payrollRun.findFirst({ where: { year: dto.year, month: dto.month, status: { not: PayrollRunStatus.CANCELLED } }, orderBy: { revision: 'desc' } });
       if (existing && existing.id !== correctionOfId) throw new ConflictException('An active payroll run already exists for this period');
+      const earlierUnpaid = await tx.payrollRun.findFirst({
+        where: {
+          status: { notIn: [PayrollRunStatus.PAID, PayrollRunStatus.CANCELLED] },
+          OR: [{ year: { lt: dto.year } }, { year: dto.year, month: { lt: dto.month } }],
+        },
+        select: { year: true, month: true },
+        orderBy: [{ year: 'asc' }, { month: 'asc' }],
+      });
+      if (earlierUnpaid) throw new ConflictException(`Complete or cancel payroll ${this.payrollPeriod(earlierUnpaid)} before generating a later period`);
       let correctionSource: Prisma.PayrollRunGetPayload<{ include: { payrolls: true } }> | null = null;
       if (correctionOfId) {
         correctionSource = await tx.payrollRun.findUnique({ where: { id: correctionOfId }, include: { payrolls: true } });
         if (!correctionSource) throw new NotFoundException('Payroll run not found');
         if (correctionSource.year !== dto.year || correctionSource.month !== dto.month) throw new BadRequestException('Correction period does not match the source run');
+        const repaymentLoans = await tx.loanRepayment.findMany({ where: { payrollId: { in: correctionSource.payrolls.map((item) => item.id) }, status: LoanRepaymentStatus.POSTED }, select: { loanId: true } });
         await tx.loanRepayment.updateMany({ where: { payrollId: { in: correctionSource.payrolls.map((item) => item.id) }, status: LoanRepaymentStatus.POSTED }, data: { status: LoanRepaymentStatus.REVERSED, reversedAt: new Date() } });
+        await this.loans.refreshLoanStatuses(repaymentLoans.map((item) => item.loanId), tx);
         await tx.payroll.updateMany({ where: { runId: correctionSource.id, revokedAt: null }, data: { revokedAt: new Date(), revokedByUserId: user.id, revocationReason: correctionReason } });
         await tx.payrollRun.update({ where: { id: correctionSource.id }, data: { status: PayrollRunStatus.CANCELLED, cancelledByUserId: user.id, cancelledAt: new Date(), cancellationReason: correctionReason, version: { increment: 1 } } });
       }
       const latestRevision = await tx.payrollRun.aggregate({ where: { year: dto.year, month: dto.month }, _max: { revision: true } });
       const run = await tx.payrollRun.create({ data: { year: dto.year, month: dto.month, revision: (latestRevision._max.revision ?? 0) + 1, generatedByUserId: user.id, correctionOfId } });
+      const settings = await tx.organizationSettings.findUnique({ where: { id: 'default' }, select: { loanCapType: true, loanCapValue: true } });
       const employees = await tx.employee.findMany({
         where: { deletedAt: null, employmentStatus: { in: [EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE, EmploymentStatus.PROBATION] }, id: dto.employeeId },
       });
@@ -171,7 +191,16 @@ export class PayrollService {
         const taxAmount = percentageMoney(grossPay, taxRate);
         const lopDays = await this.payrollLopDays(employee.id, monthStart, monthEnd, tx);
         const lopAmount = money(baseSalary.div(30).times(lopDays), 'loss of pay');
-        const loanPlan = await this.loans.preparePayrollDeductions(employee.id, dto.year, dto.month, tx);
+        const availablePay = Prisma.Decimal.max(ZERO_MONEY, grossPay.minus(fixedDeductions).minus(lopAmount).minus(taxAmount));
+        const loanPlan = await this.loans.preparePayrollDeductions(
+          employee.id,
+          dto.year,
+          dto.month,
+          availablePay,
+          grossPay,
+          { type: settings?.loanCapType ?? 'AMOUNT', value: settings?.loanCapValue ?? ZERO_MONEY },
+          tx,
+        );
         const deductions = sumMoney([fixedDeductions, lopAmount, loanPlan.total]);
         const netPay = Prisma.Decimal.max(ZERO_MONEY, grossPay.minus(deductions).minus(taxAmount)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
         const record = await tx.payroll.create({ data: { runId: run.id, employeeId: employee.id, year: dto.year, month: dto.month, baseSalary, allowances, deductions, bonuses, taxAmount, grossPay, netPay } });
@@ -184,7 +213,7 @@ export class PayrollService {
           { kind: PayrollLineKind.TAX, description: 'Tax deduction', amount: taxAmount },
         ].filter((line) => !line.amount.isZero());
         if (lines.length) await tx.payrollLineItem.createMany({ data: lines.map((line) => ({ payrollId: record.id, ...line })) });
-        await this.loans.postPayrollDeductions(record.id, dto.year, dto.month, loanPlan.deductions, tx);
+        await this.loans.replacePayrollDeductionLines(record.id, loanPlan.deductions, tx);
       }
       await this.audit.record(tx, user, {
         action: correctionOfId ? AuditAction.OVERRIDE : AuditAction.CREATE,
@@ -269,6 +298,8 @@ export class PayrollService {
       const duplicate = await this.idempotentRun(tx, user, 'payroll.mark-paid', key, { id, dto }); if (duplicate) return duplicate;
       const run = await this.ensureRun(id, tx); this.assertVersion(run.version, dto.expectedVersion);
       if (run.status !== PayrollRunStatus.PUBLISHED) throw new BadRequestException('Only published payroll can be marked paid');
+      const payrolls = await tx.payroll.findMany({ where: { runId: id }, select: { id: true, year: true, month: true } });
+      for (const payroll of payrolls) await this.loans.postPayrollDeductions(payroll.id, payroll.year, payroll.month, tx);
       const updated = await tx.payrollRun.update({ where: { id }, data: { status: PayrollRunStatus.PAID, paidByUserId: user.id, paidAt: new Date(), version: { increment: 1 } }, include: payrollRunInclude });
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'PayrollRun', resourceId: id, summary: 'Payroll run marked paid', reason: dto.reason, workflowStatus: PayrollRunStatus.PAID, payrollPeriod: this.payrollPeriod(run), changes: [{ field: 'status', previousValue: run.status, nextValue: PayrollRunStatus.PAID }] });
       await this.saveIdempotency(tx, user, 'payroll.mark-paid', key, { id, dto }, 'PayrollRun', id); return this.presentRun(updated);
@@ -282,7 +313,9 @@ export class PayrollService {
       const run = await this.ensureRun(id, tx); this.assertVersion(run.version, dto.expectedVersion);
       if (([PayrollRunStatus.CANCELLED, PayrollRunStatus.PAID] as PayrollRunStatus[]).includes(run.status)) throw new BadRequestException('Paid or cancelled payroll cannot be cancelled');
       const payrolls = await tx.payroll.findMany({ where: { runId: id }, select: { id: true } });
+      const repaymentLoans = await tx.loanRepayment.findMany({ where: { payrollId: { in: payrolls.map((item) => item.id) }, status: LoanRepaymentStatus.POSTED }, select: { loanId: true } });
       await tx.loanRepayment.updateMany({ where: { payrollId: { in: payrolls.map((item) => item.id) }, status: LoanRepaymentStatus.POSTED }, data: { status: LoanRepaymentStatus.REVERSED, reversedAt: new Date() } });
+      await this.loans.refreshLoanStatuses(repaymentLoans.map((item) => item.loanId), tx);
       await tx.payroll.updateMany({ where: { runId: id, revokedAt: null }, data: { revokedAt: new Date(), revokedByUserId: user.id, revocationReason: dto.reason } });
       const updated = await tx.payrollRun.update({ where: { id }, data: { status: PayrollRunStatus.CANCELLED, cancelledByUserId: user.id, cancelledAt: new Date(), cancellationReason: dto.reason, version: { increment: 1 } }, include: payrollRunInclude });
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'PayrollRun', resourceId: id, summary: 'Payroll run cancelled', reason: dto.reason, workflowStatus: PayrollRunStatus.CANCELLED, payrollPeriod: this.payrollPeriod(run), changes: [{ field: 'status', previousValue: run.status, nextValue: PayrollRunStatus.CANCELLED }] });
@@ -301,6 +334,7 @@ export class PayrollService {
 
   async listMyPayslips(query: QueryPayrollDto, user: RequestUser) {
     if (!user.employeeId) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
+    if (!this.authorization.permissionAllowedForScope(user, 'payroll.self.read_payslip', AccessScopeType.SELF, user.employeeId)) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
     return this.listPayslipsInternal(query, user, { employeeId: user.employeeId, revokedAt: null, payrollRun: { status: { in: [PayrollRunStatus.PUBLISHED, PayrollRunStatus.PAID] } } });
   }
 
@@ -332,7 +366,7 @@ export class PayrollService {
   async downloadPayslip(id: string, user: RequestUser) {
     const payroll = await this.prisma.payroll.findFirst({ where: { id, revokedAt: null, payrollRun: { status: { in: [PayrollRunStatus.PUBLISHED, PayrollRunStatus.PAID] } } }, include: { employee: { select: { id: true, employeeCode: true } } } });
     if (!payroll?.objectName) throw new NotFoundException('Payslip not found');
-    const self = payroll.employeeId === user.employeeId && this.authorization.has(user, 'payroll.self.read_payslip');
+    const self = payroll.employeeId === user.employeeId && this.authorization.permissionAllowedForScope(user, 'payroll.self.read_payslip', AccessScopeType.SELF, payroll.employeeId);
     if (!self && !this.authorization.permissionAllowedForScope(user, 'payroll.pdf.download_all', AccessScopeType.ALL_EMPLOYEES, payroll.employeeId)) throw new NotFoundException('Payslip not found');
     const buffer = await this.storage.download(payroll.objectName, payroll.objectGeneration);
     if (payroll.sha256 && createHash('sha256').update(buffer).digest('hex') !== payroll.sha256) throw new ConflictException('Stored payslip integrity check failed');
@@ -345,7 +379,11 @@ export class PayrollService {
     const run = await this.prisma.payrollRun.findUnique({ where: { id }, include: { payrolls: { where: departmentId ? { employee: { departmentId } } : undefined, include: { employee: { select: { employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } } } } } });
     if (!run) throw new NotFoundException('Payroll run not found');
     if (run.payrolls.length > 10_000) throw new BadRequestException('Export is limited to 10,000 rows');
-    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const quote = (value: unknown) => {
+      const text = String(value ?? '');
+      const safe = '=+-@'.includes(text.trimStart().charAt(0)) ? `'${text}` : text;
+      return `"${safe.replaceAll('"', '""')}"`;
+    };
     const rows = [['Employee Code', 'Employee', 'Department', 'Base Salary', 'Allowances', 'Bonuses', 'Deductions', 'Tax', 'Gross Pay', 'Net Pay'], ...run.payrolls.map((item) => [item.employee.employeeCode, `${item.employee.firstName} ${item.employee.lastName}`, item.employee.department?.name ?? '', item.baseSalary.toFixed(2), item.allowances.toFixed(2), item.bonuses.toFixed(2), item.deductions.toFixed(2), item.taxAmount.toFixed(2), item.grossPay.toFixed(2), item.netPay.toFixed(2)])];
     const buffer = Buffer.from(`\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\r\n')}`, 'utf8');
     await this.audit.record(this.prisma, user, { action: AuditAction.EXPORT, resourceType: 'PayrollRun', resourceId: id, summary: departmentId ? 'Department payroll exported' : 'Payroll run exported', workflowStatus: run.status, payrollPeriod: this.payrollPeriod(run), metadata: { departmentId, recordCount: run.payrolls.length } });
@@ -380,19 +418,50 @@ export class PayrollService {
   private payslipPdf(payroll: Prisma.PayrollGetPayload<{ include: { employee: { select: typeof employeePayrollSelect }; lineItems: true } }>, run: { year: number; month: number; revision: number }) {
     const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     const safe = (value: string) => stripControlCharacters(value).slice(0, 200);
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const drawLineItemHeader = (top: number, continuation = false) => {
+      if (continuation) {
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text('Payslip - continued', 40, 40);
+      }
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+      doc.text('Description', 40, top); doc.text('Amount', 480, top, { align: 'right' });
+      doc.line(40, top + 5, 500, top + 5); doc.setFont('helvetica', 'normal');
+    };
     doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('Payslip', 40, 50);
     doc.setFontSize(10); doc.setFont('helvetica', 'normal');
     doc.text(`Employee: ${safe(`${payroll.employee.firstName} ${payroll.employee.lastName}`)}`, 40, 82);
     doc.text(`Employee code: ${safe(payroll.employee.employeeCode)}`, 40, 100);
     doc.text(`Period: ${run.year}-${String(run.month).padStart(2, '0')}  Revision: ${run.revision}`, 40, 118);
     doc.text(`Department: ${safe(payroll.employee.department?.name ?? 'N/A')}`, 40, 136);
-    let y = 175; doc.setFont('helvetica', 'bold'); doc.text('Description', 40, y); doc.text('Amount', 480, y, { align: 'right' }); doc.line(40, y + 5, 500, y + 5); doc.setFont('helvetica', 'normal');
-    for (const line of payroll.lineItems) { y += 22; doc.text(safe(line.description), 40, y); doc.text(line.amount.toFixed(2), 480, y, { align: 'right' }); }
+    let y = 175; drawLineItemHeader(y);
+    for (const line of payroll.lineItems) {
+      const description = doc.splitTextToSize(safe(line.description), 380) as string[];
+      const rowHeight = Math.max(22, description.length * 12 + 8);
+      if (y + rowHeight > pageHeight - 120) {
+        doc.addPage();
+        y = 65;
+        drawLineItemHeader(y, true);
+      }
+      y += 20;
+      doc.text(description, 40, y);
+      doc.text(line.amount.toFixed(2), 480, y, { align: 'right' });
+      y += rowHeight - 20;
+    }
+    if (y + 95 > pageHeight - 45) {
+      doc.addPage();
+      y = 65;
+      drawLineItemHeader(y, true);
+    }
     y += 35; doc.line(310, y - 15, 500, y - 15); doc.setFont('helvetica', 'bold');
     doc.text('Gross pay', 330, y); doc.text(payroll.grossPay.toFixed(2), 480, y, { align: 'right' });
     y += 20; doc.text('Total deductions', 330, y); doc.text(payroll.deductions.plus(payroll.taxAmount).toFixed(2), 480, y, { align: 'right' });
     y += 20; doc.text('Net pay', 330, y); doc.text(payroll.netPay.toFixed(2), 480, y, { align: 'right' });
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text('System-generated payroll record', 40, 800);
+    const pageCount = doc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page += 1) {
+      doc.setPage(page); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+      doc.text('System-generated payroll record', 40, pageHeight - 25);
+      doc.text(`Page ${page} of ${pageCount}`, 500, pageHeight - 25, { align: 'right' });
+    }
     return Buffer.from(doc.output('arraybuffer'));
   }
 
@@ -425,6 +494,56 @@ export class PayrollService {
     else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read_compensation', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
     return scopes.length ? { OR: scopes } : { employeeId: '__salary_access_denied__' };
+  }
+
+  private salaryAmounts(
+    dto: Partial<CreateSalaryRecordDto>,
+    current?: {
+      allowances: Prisma.Decimal;
+      housingAllowance: Prisma.Decimal;
+      foodAllowance: Prisma.Decimal;
+      mobileAllowance: Prisma.Decimal;
+      specialAllowance: Prisma.Decimal;
+      bonuses: Prisma.Decimal;
+      overtimeAmount: Prisma.Decimal;
+    },
+  ) {
+    const componentSupplied = [dto.housingAllowance, dto.foodAllowance, dto.mobileAllowance, dto.specialAllowance].some((value) => value !== undefined);
+    const aggregateSupplied = dto.allowances !== undefined;
+    const component = (value: string | undefined, existing: Prisma.Decimal | undefined, field: string) =>
+      value === undefined ? existing ?? ZERO_MONEY : nonNegativeMoney(value, field, '1000000000');
+    let housingAllowance = component(dto.housingAllowance, current?.housingAllowance, 'housingAllowance');
+    let foodAllowance = component(dto.foodAllowance, current?.foodAllowance, 'foodAllowance');
+    let mobileAllowance = component(dto.mobileAllowance, current?.mobileAllowance, 'mobileAllowance');
+    let specialAllowance = component(dto.specialAllowance, current?.specialAllowance, 'specialAllowance');
+    if (aggregateSupplied && !componentSupplied) {
+      housingAllowance = nonNegativeMoney(dto.allowances!, 'allowances', '1000000000');
+      foodAllowance = ZERO_MONEY;
+      mobileAllowance = ZERO_MONEY;
+      specialAllowance = ZERO_MONEY;
+    }
+    const allowances = componentSupplied || aggregateSupplied || !current
+      ? sumMoney([housingAllowance, foodAllowance, mobileAllowance, specialAllowance])
+      : undefined;
+    const overtimeSupplied = dto.overtimeAmount !== undefined;
+    const bonusesSupplied = dto.bonuses !== undefined;
+    const overtimeAmount = overtimeSupplied
+      ? nonNegativeMoney(dto.overtimeAmount!, 'overtimeAmount', '1000000000')
+      : bonusesSupplied
+        ? nonNegativeMoney(dto.bonuses!, 'bonuses', '1000000000')
+        : current?.overtimeAmount ?? ZERO_MONEY;
+    const bonuses = overtimeSupplied || bonusesSupplied || !current
+      ? nonNegativeMoney(dto.bonuses ?? overtimeAmount, 'bonuses', '1000000000')
+      : undefined;
+    return {
+      allowances,
+      housingAllowance: componentSupplied || aggregateSupplied || !current ? housingAllowance : undefined,
+      foodAllowance: componentSupplied || aggregateSupplied || !current ? foodAllowance : undefined,
+      mobileAllowance: componentSupplied || aggregateSupplied || !current ? mobileAllowance : undefined,
+      specialAllowance: componentSupplied || aggregateSupplied || !current ? specialAllowance : undefined,
+      bonuses,
+      overtimeAmount: overtimeSupplied || bonusesSupplied || !current ? overtimeAmount : undefined,
+    };
   }
 
   private payrollAccessWhere(user: RequestUser): Prisma.PayrollWhereInput {

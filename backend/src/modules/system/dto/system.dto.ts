@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccessScopeType, ApproverMode, LeaveApprovalStage, PermissionOverrideEffect, WorkflowType } from '@prisma/client';
-import { Transform } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class SystemMutationDto {
@@ -37,6 +37,17 @@ export class UpdateSystemUserDto {
 
 export class AssignUserRolesDto {
   @ApiProperty({ type: [String] }) @IsArray() @ArrayUnique() @IsUUID('4', { each: true }) roleIds: string[];
+  @ApiProperty({ minimum: 1 }) @IsInt() @Min(1) expectedAuthorizationVersion: number;
+  @ApiProperty({ minLength: 3, maxLength: 500 }) @IsString() @MinLength(3) @MaxLength(500) reason: string;
+}
+
+export const ROLE_FLOW_CODES = ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER', 'HR'] as const;
+export type RoleFlowCode = typeof ROLE_FLOW_CODES[number];
+
+export class AssignRoleFlowDto {
+  @ApiProperty({ enum: ROLE_FLOW_CODES, isArray: true })
+  @IsArray() @ArrayMinSize(1) @ArrayUnique() @IsIn(ROLE_FLOW_CODES, { each: true })
+  roleCodes: RoleFlowCode[];
   @ApiProperty({ minimum: 1 }) @IsInt() @Min(1) expectedAuthorizationVersion: number;
   @ApiProperty({ minLength: 3, maxLength: 500 }) @IsString() @MinLength(3) @MaxLength(500) reason: string;
 }
@@ -103,3 +114,23 @@ export class CreateWorkflowDelegationDto {
 }
 
 export class RevokeWorkflowDelegationDto extends SystemMutationDto {}
+
+export class EmployeeManagerChangeDto {
+  @ApiProperty() @IsUUID() employeeId: string;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsUUID() managerId?: string | null;
+}
+
+export class DepartmentManagerChangeDto {
+  @ApiProperty() @IsUUID() departmentId: string;
+  @ApiPropertyOptional({ nullable: true }) @IsOptional() @IsUUID() managerId?: string | null;
+}
+
+export class PreviewOrganizationRemediationDto {
+  @ApiPropertyOptional({ type: [EmployeeManagerChangeDto] }) @IsOptional() @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => EmployeeManagerChangeDto) employeeManagers: EmployeeManagerChangeDto[] = [];
+  @ApiPropertyOptional({ type: [DepartmentManagerChangeDto] }) @IsOptional() @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => DepartmentManagerChangeDto) departmentManagers: DepartmentManagerChangeDto[] = [];
+}
+
+export class ApplyOrganizationRemediationDto extends PreviewOrganizationRemediationDto {
+  @ApiProperty() @IsString() @Matches(/^[a-f0-9]{64}$/u) previewHash: string;
+  @ApiProperty({ minLength: 3, maxLength: 500 }) @IsString() @MinLength(3) @MaxLength(500) reason: string;
+}

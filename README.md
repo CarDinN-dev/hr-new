@@ -2,14 +2,26 @@
 
 Production-oriented HR-only ERP built from the supplied MedTech HR references.
 
-## Run locally
+## Local development
 
 ```powershell
+# Terminal 1: PostgreSQL and backend
+docker compose up -d postgres
+cd backend
+npm install
+Copy-Item .env.example .env
+# Set DATABASE_URL to localhost:5434 and provide development secrets.
+npm run prisma:generate
+npm run prisma:deploy
+npm run start:dev
+
+# Terminal 2: Vite frontend
+cd ..
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5173`. Vite proxies `/api` to `http://127.0.0.1:3000`, and frontend requests include credentials for both same-origin and explicitly configured cross-origin development. If a different backend origin is required, set `VITE_API_URL` and include the frontend origin in backend `CORS_ORIGIN`.
 
 ## Docker
 
@@ -61,10 +73,24 @@ Changing bootstrap password variables does not rotate an existing account. Rotat
 - Restrict SSH to the administrator IP and do not add public ingress rules for `3000`, `3100`, `5432`, `5434`, `8080` or `8443`.
 - Rebuild the existing Compose project with `docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml up -d --build`; do not start a second stack.
 - Check `docker compose -p medtech-hr-erp -f docker-compose.yml -f docker-compose.production.yml ps` and both `/healthz` and `/api/v1/health` after deployment.
-- The backend keeps up to 90 workspace snapshots, runs one every eight hours, and supports manual backup and rollback from Settings.
-- Copy encrypted PostgreSQL disaster-recovery dumps and uploaded-document backups to a private, versioned Google Cloud Storage bucket; application snapshots in the same database do not protect against disk or VM loss.
+- Set `MICROSOFT_LOGIN_ENABLED=false` for local-only authentication. When it is `true`, all Microsoft tenant, client, secret, and redirect variables are mandatory and startup fails if any are missing.
+- Set `GCS_DOCUMENTS_BUCKET` to a private bucket. Production startup fails if the bucket name is missing.
 - Keep `CORS_ORIGIN` empty when the frontend proxies `/api/v1` from the same domain.
 - Do not restart the Cloudflare tunnel during an application-only deployment; a Quick Tunnel URL can change when its process restarts.
+
+## Guided role assignment
+
+The System page contains an Admin/Super Admin-only role flow for standard operational access. It always assigns `EMPLOYEE`, guides direct-report and management-tree access through `LINE_MANAGER` and `MANAGER`, and optionally assigns `HR`. `CPO`, `COO`, `ADMIN`, `SUPER_ADMIN`, and custom roles are locked and preserved by the flow. The backend rechecks the administrator role, rejects self-assignment and stale versions, records the reason, and revokes the target user's sessions. Reporting lines are separate: use the preview-first organization remediation workflow to change `Employee.managerId`.
+
+## Backup and restore operator procedure
+
+Production runs an hourly systemd backup timer through `ops/backup.sh`. Each custom-format PostgreSQL dump has a SHA-256 manifest and is uploaded through the dedicated backup identity to daily, weekly, and monthly recovery prefixes. Do not run backup or regression scripts against an unguarded production database.
+
+Production operations are consolidated in `ops/production.sh`. On the existing host, run `sudo PROJECT_DIR=/opt/medtech-hr-erp bash ops/production.sh preflight` before any release and `sudo bash ops/production.sh deploy` for the guarded backup, migration, staged service restart, health verification, and image rollback path. The malware scanner must be healthy before the API is recreated; uploaded files remain unavailable until their persisted scan state is `CLEAN`.
+
+For a restore drill, download one `hr_erp.dump` and its matching `manifest.json` using an auditor identity, then run `sudo bash ops/production.sh restore-drill /path/hr_erp.dump /path/manifest.json`. The command verifies the manifest checksum, restores into a temporary private PostgreSQL network, applies newer migrations, boots the real API image, runs its health check and financial regression, reports integrity counts, and deletes every temporary container, network, and volume.
+
+For an actual recovery, stop application writes, verify the dump checksum, restore into a newly created database, validate migrations and record counts, then switch the API only after the restore test succeeds. Recover document objects from GCS generations according to the bucket retention policy.
 
 ## Checks
 
@@ -80,4 +106,4 @@ cd ..
 docker compose config
 ```
 
-The app saves HR data to PostgreSQL through the backend. Browser JSON import/export is intentionally disabled; use the protected Settings backup controls.
+The app saves HR data to PostgreSQL through the backend. Browser JSON import/export is intentionally disabled; backup and restore remain infrastructure-operator responsibilities.
