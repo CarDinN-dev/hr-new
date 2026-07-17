@@ -66,6 +66,7 @@ enum AttendanceStatus {
 }
 
 enum AttendanceApprovalStatus {
+  PENDING
   APPROVED
   NOT_APPROVED
 }
@@ -615,7 +616,7 @@ model Attendance {
   lateMinutes    Int                      @default(0)
   workingHours   Decimal                  @default(0) @db.Decimal(5, 2)
   status         AttendanceStatus         @default(PRESENT)
-  approvalStatus AttendanceApprovalStatus @default(NOT_APPROVED)
+  approvalStatus AttendanceApprovalStatus @default(PENDING)
   notes          String?
   version        Int                      @default(1)
   createdAt      DateTime                 @default(now())

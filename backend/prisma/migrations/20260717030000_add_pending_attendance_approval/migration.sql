@@ -1,0 +1,1 @@
+ALTER TYPE "AttendanceApprovalStatus" ADD VALUE IF NOT EXISTS 'PENDING';

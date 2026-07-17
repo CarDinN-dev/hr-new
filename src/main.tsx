@@ -60,7 +60,7 @@ import {
   type RecruitmentCandidate,
   type RecruitmentJob
 } from "./data";
-import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook, validateEmployeeImportCounts } from "./employeeSheet";
+import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook, validateEmployeeImportCounts, validateNewEmployeeImportRows } from "./employeeSheet";
 import { attendanceTemplateHtml, buildAttendanceImportRows, parseAttendanceSheet } from "./attendanceSheet";
 import {
   activeEmployees,
@@ -1047,6 +1047,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canonica
         : { rows: parseEmployeeSheet(await file.text()), skipped: 0 };
 
       validateEmployeeImportCounts(parsed.rows.length, parsed.skipped);
+      validateNewEmployeeImportRows(state, parsed.rows);
 
       const result = applyEmployeeRows(state, parsed.rows);
       const importedCodes = new Set(parsed.rows.map(row => row["Employee Code"]?.trim()).filter(Boolean));
@@ -1347,7 +1348,7 @@ function Attendance({ state, setState, savePdf, notify, canonicalMutation, loadP
                   const code = day[employee.id];
                   const punch = attendancePunch(attendanceByEmployee.get(employee.id), code, state.settings.workdayHours, state.settings.halfDayHours);
                   const approval = state.attendanceApprovals[date]?.[employee.id];
-                  const needsReview = (code === "H" || code === "A") && approval !== "Approved";
+                  const needsReview = (code === "H" || code === "A") && !approval;
                   return (
                     <div className="attendance-record" key={employee.id}>
                       <div className="attendance-row">

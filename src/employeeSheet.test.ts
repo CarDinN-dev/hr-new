@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { defaultState } from "./data";
-import { applyEmployeeRows, employeeTemplateColumns, parseEmployeeSheet, parseEmployeeWorkbook, parseEmployeeWorkbookRows, validateEmployeeImportCounts } from "./employeeSheet";
+import { applyEmployeeRows, employeeTemplateColumns, parseEmployeeSheet, parseEmployeeWorkbook, parseEmployeeWorkbookRows, validateEmployeeImportCounts, validateNewEmployeeImportRows } from "./employeeSheet";
 
 describe("employee sheet import", () => {
   it("adds and updates employees from the Excel template table", () => {
@@ -72,6 +72,32 @@ describe("employee sheet import", () => {
     expect(imported.skipped).toBe(1);
     expect(imported.errors[0]).toContain("duplicated");
     expect(() => validateEmployeeImportCounts(imported.rows.length, imported.skipped)).toThrow("Import aborted");
+  });
+
+  it("treats blank workbook cells as an unchanged field when updating an existing employee", () => {
+    const headers = employeeTemplateColumns.map(item => item.header.trim());
+    const row = headers.map(() => "");
+    row[0] = "MT-001";
+    row[1] = "COO";
+    row[2] = "Mohammed";
+    row[3] = "Kashif";
+    const parsed = parseEmployeeWorkbookRows([headers, row]);
+    expect(parsed.rows[0]).not.toHaveProperty("Joining Date");
+
+    const existing = applyEmployeeRows(defaultState(), [{
+      "Employee Code": "MT-001", "Full Name": "Existing Person", "Joining Date": "2020-01-01", "E-Mail ID (Work)": "existing@example.invalid"
+    }]).state;
+    const updated = applyEmployeeRows(existing, parsed.rows).state.employees[0];
+    expect(updated.fields["Joining Date"]).toBe("2020-01-01");
+    expect(updated.fields["E-Mail ID (Work)"]).toBe("existing@example.invalid");
+    expect(updated.fields["Full Name"]).toBe("Existing Person");
+    expect(updated.fields["First Name"]).toBe("Mohammed");
+    expect(updated.fields["Last Name"]).toBe("Kashif");
+  });
+
+  it("explains which required field a genuinely new sparse row needs", () => {
+    expect(() => validateNewEmployeeImportRows(defaultState(), [{ "Employee Code": "MT-001", "First Name": "Mohammed", "Last Name": "Kashif" }]))
+      .toThrow("New employee MT-001 needs a Joining Date.");
   });
 
   it("rejects the complete employee import before upload when it is empty or over the row limit", () => {

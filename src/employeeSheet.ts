@@ -21,6 +21,17 @@ export function validateEmployeeImportCounts(rowCount: number, skipped: number) 
   if (rowCount === 0) throw new Error("No employee rows were found in this file.");
 }
 
+export function validateNewEmployeeImportRows(state: HrState, rows: Array<Record<string, string>>) {
+  const existingCodes = new Set(state.employees.map(employee => employee.fields["Employee Code"].trim().toLocaleLowerCase()));
+  for (const row of rows) {
+    const code = row["Employee Code"]?.trim();
+    if (!code || existingCodes.has(code.toLocaleLowerCase())) continue;
+    const name = row["Full Name"] || `${row["First Name"] || ""} ${row["Last Name"] || ""}`.trim();
+    if (!name) throw new Error(`New employee ${code} needs a full name.`);
+    if (!row["Joining Date"]) throw new Error(`New employee ${code} needs a Joining Date.`);
+  }
+}
+
 // These labels and their order match the employee workbook supplied by HR.
 // Position matters because that workbook intentionally reuses labels such as "Issue Date".
 export const employeeTemplateColumns: readonly TemplateColumn[] = [
@@ -175,7 +186,8 @@ export function parseEmployeeWorkbookRows(rows: ReadonlyArray<ReadonlyArray<unkn
 
     const record: Record<string, string> = {};
     columns.forEach((column, columnIndex) => {
-      if (column) record[column] = values[columnIndex] ?? "";
+      const value = values[columnIndex];
+      if (column && value) record[column] = value;
     });
     parsed.push(record);
   });

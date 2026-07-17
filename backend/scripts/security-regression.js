@@ -286,6 +286,8 @@ test('attendance dates, lateness, and hours are derived by the server', () => {
   assert.equal(data.isLate, true);
   assert.equal(data.lateMinutes, 30);
   assert.equal(data.workingHours, 8);
+  assert.equal(data.approvalStatus, 'APPROVED');
+  assert.equal(attendance.manualAttendanceData({ employeeId: 'employee-1', attendanceDate: new Date('2026-07-14T00:00:00Z'), status: AttendanceStatus.ABSENT }, new Date('2026-07-14T00:00:00Z')).approvalStatus, 'PENDING');
   assert.equal(attendance.companyDay(new Date('2026-07-13T21:30:00Z')).toISOString(), '2026-07-14T00:00:00.000Z');
 });
 

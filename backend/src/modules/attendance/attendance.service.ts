@@ -26,6 +26,19 @@ const attendanceInclude = {
   },
 };
 
+type ManualAttendanceData = {
+  employeeId: string;
+  attendanceDate: Date;
+  checkIn?: Date;
+  checkOut?: Date;
+  notes?: string;
+  isLate: boolean;
+  lateMinutes: number;
+  workingHours: number;
+  status: AttendanceStatus;
+  approvalStatus: AttendanceApprovalStatus;
+};
+
 @Injectable()
 export class AttendanceService {
   private readonly companyTimeZone = 'Asia/Qatar';
@@ -88,7 +101,7 @@ export class AttendanceService {
         const values = chunk.map((row) => Prisma.sql`(
           ${randomUUID()}, ${row.employeeId}, ${row.attendanceDate}, ${row.checkIn ?? null}, ${row.checkOut ?? null},
           ${row.isLate}, ${row.lateMinutes}, ${new Prisma.Decimal(row.workingHours)},
-          ${row.status}::"AttendanceStatus", ${row.approvalStatus ?? AttendanceApprovalStatus.NOT_APPROVED}::"AttendanceApprovalStatus",
+          ${row.status}::"AttendanceStatus", ${row.approvalStatus ?? this.defaultApprovalStatus(row.status)}::"AttendanceApprovalStatus",
           ${row.notes ?? null}, 1, NOW(), NOW(), NULL
         )`);
         await tx.$executeRaw(Prisma.sql`
@@ -144,14 +157,18 @@ export class AttendanceService {
       const attendanceDate = this.dayStart(dto.attendanceDate ?? record.attendanceDate);
       await this.assertPayrollIsOpen(record.employeeId, record.attendanceDate, tx);
       await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
+      const status: AttendanceStatus = dto.status ?? record.status;
+      const approvalStatus = dto.approvalStatus ?? (dto.status && dto.status !== record.status
+        ? this.defaultApprovalStatus(status)
+        : record.approvalStatus);
       const data = this.manualAttendanceData(
         {
           employeeId,
           attendanceDate,
           checkIn: dto.checkIn ?? record.checkIn ?? undefined,
           checkOut: dto.checkOut ?? record.checkOut ?? undefined,
-          status: dto.status ?? record.status,
-          approvalStatus: dto.approvalStatus ?? record.approvalStatus,
+          status,
+          approvalStatus,
           notes: dto.notes ?? record.notes ?? undefined,
         },
         attendanceDate,
@@ -226,6 +243,7 @@ export class AttendanceService {
         isLate: lateMinutes > 0,
         lateMinutes,
         status: lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT,
+        approvalStatus: AttendanceApprovalStatus.APPROVED,
         deletedAt: null,
       };
       const checkedIn = await (existing
@@ -400,7 +418,7 @@ export class AttendanceService {
     return { year: part('year'), month: part('month'), day: part('day'), hour: part('hour'), minute: part('minute') };
   }
 
-  private manualAttendanceData(dto: CreateAttendanceDto, attendanceDate: Date) {
+  private manualAttendanceData(dto: CreateAttendanceDto, attendanceDate: Date): ManualAttendanceData {
     if (dto.checkOut && !dto.checkIn) throw new BadRequestException('checkIn is required when checkOut is supplied');
     if (dto.checkIn && dto.checkOut && dto.checkOut < dto.checkIn) {
       throw new BadRequestException('checkOut must be on or after checkIn');
@@ -410,6 +428,7 @@ export class AttendanceService {
       ? Number(((dto.checkOut.getTime() - dto.checkIn.getTime()) / 36e5).toFixed(2))
       : 0;
     if (workingHours > 48) throw new BadRequestException('Attendance duration cannot exceed 48 hours');
+    const status: AttendanceStatus = dto.status ?? (lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT);
     return {
       employeeId: dto.employeeId,
       attendanceDate,
@@ -419,9 +438,15 @@ export class AttendanceService {
       isLate: lateMinutes > 0,
       lateMinutes,
       workingHours,
-      status: dto.status ?? (lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT),
-      approvalStatus: dto.approvalStatus,
+      status,
+      approvalStatus: dto.approvalStatus ?? this.defaultApprovalStatus(status),
     };
+  }
+
+  private defaultApprovalStatus(status: AttendanceStatus) {
+    return status === AttendanceStatus.HALF_DAY || status === AttendanceStatus.ABSENT
+      ? AttendanceApprovalStatus.PENDING
+      : AttendanceApprovalStatus.APPROVED;
   }
 
   private async assertPayrollIsOpen(employeeId: string, attendanceDate: Date, tx: Prisma.TransactionClient) {

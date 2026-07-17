@@ -254,7 +254,7 @@ export async function loadBackendState(current: HrState, session: BackendSession
     attendanceState[day] ??= {};
     const code = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
     attendanceState[day][employeeId] = code;
-    if (code === "H" || code === "A") {
+    if ((code === "H" || code === "A") && item.approvalStatus !== "PENDING") {
       attendanceApprovals[day] ??= {};
       attendanceApprovals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
     }
@@ -349,7 +349,7 @@ export async function loadBackendAttendancePeriod(year: number, month: number) {
     attendance[day] ??= {};
     const code = ({ PRESENT: "P", LATE: "P", HALF_DAY: "H", ON_LEAVE: "L", ABSENT: "A" } as const)[String(item.status)] ?? "A";
     attendance[day][employeeId] = code;
-    if (code === "H" || code === "A") {
+    if ((code === "H" || code === "A") && item.approvalStatus !== "PENDING") {
       approvals[day] ??= {};
       approvals[day][employeeId] = item.approvalStatus === "APPROVED" ? "Approved" : "Not approved";
     }

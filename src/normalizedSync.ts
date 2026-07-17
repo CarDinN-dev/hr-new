@@ -191,7 +191,9 @@ async function syncAttendance(before: HrState, after: HrState, request: RequestF
     }
     const payload = {
       employeeId, attendanceDate: day, status: attendanceStatus(nextCode),
-      approvalStatus: nextApproval === "Approved" ? "APPROVED" : "NOT_APPROVED",
+      approvalStatus: nextCode === "H" || nextCode === "A"
+        ? nextApproval === "Approved" ? "APPROVED" : nextApproval === "Not approved" ? "NOT_APPROVED" : "PENDING"
+        : "APPROVED",
       correctionReason: existing ? "Attendance updated in HR console" : undefined
     };
     if (existing) await request(`/attendance/${existing.id}`, "PATCH", payload);
