@@ -1,11 +1,16 @@
 # HR ERP Production Readiness Report
 
-Report date: 17 July 2026  
-Decision: **BLOCK production sign-off**  
-Deployed application revision: `2acb92ed4021656ded30ac9c7a5af600603fd12d`  
-GitHub branch: `codex/complete-hr-erp-remediation`  
-Draft pull request: <https://github.com/CarDinN-dev/hr-new/pull/1>  
-Production: Google Cloud project `hr-erp-502412`, VM `hrerp1`, existing `/opt/medtech-hr-erp` Compose project  
+Report date: 17 July 2026
+
+Decision: **BLOCK production sign-off**
+
+Deployed application revision: `2acb92ed4021656ded30ac9c7a5af600603fd12d`
+
+GitHub branch: `codex/complete-hr-erp-remediation`
+
+Draft pull request: <https://github.com/CarDinN-dev/hr-new/pull/1>
+
+Production: Google Cloud project `hr-erp-502412`, VM `hrerp1`, existing `/opt/medtech-hr-erp` Compose project
 Public endpoint: <https://resulted-supporting-alone-limitation.trycloudflare.com/>
 
 ## Executive decision
@@ -26,7 +31,7 @@ No database table, migration, graph dependency, or parallel authorization model 
 
 | Area | Result |
 |---|---|
-| GitHub | Branch head `2acb92e`; draft PR #1; GitGuardian check passed |
+| GitHub | Deployed application commit `2acb92e`; branch also contains evidence-only report commits; draft PR #1; GitGuardian check passed |
 | Release archive | SHA-256 `13f6889db85569d1cf31b35201c39f148bbe87b2a2fdb6f7a0fa08df18a1dea9` |
 | Deployment | Guarded deployment `20260717T073521Z` passed backup, build, migration, local API, and web health gates |
 | Images | API `cea42370607c1435a419d4f525b09ab6b01865507418b0e19c6260caccc55ddc`; web `bf68f017aceecb2e3d0fa51188ea70a7b49ee79cafa90d275d759c01f4d77ae5` |
