@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish MedTech HR ERP health every five minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Persistent=true
+Unit=medtech-hr-erp-monitor.service
+
+[Install]
+WantedBy=timers.target

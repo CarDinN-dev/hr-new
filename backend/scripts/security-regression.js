@@ -140,6 +140,13 @@ test('permissions guard is default-deny and implements all/any without an admini
   assert.equal(await guard({ any: ['payroll.generate', 'leave.self.read'] }).canActivate(executionContext(actor)), true);
 });
 
+test('permissions catalogue rejects pagination parameters', () => {
+  const controller = new SystemController({ listPermissions: () => ['permission.read'] });
+  assert.deepEqual(controller.permissions({}, {}), ['permission.read']);
+  assert.throws(() => controller.permissions({ page: '1' }, {}), { status: 400 });
+  assert.throws(() => controller.permissions({ limit: '100' }, {}), { status: 400 });
+});
+
 test('System APIs require an active SUPER_ADMIN role before endpoint permissions', async () => {
   assert.equal(Reflect.getMetadata(SUPER_ADMIN_ONLY_KEY, SystemController), true);
   for (const method of ['policy', 'updatePolicy', 'holds', 'createHold', 'releaseHold']) {

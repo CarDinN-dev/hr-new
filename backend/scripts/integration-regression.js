@@ -177,6 +177,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     MICROSOFT_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
     MICROSOFT_CLIENT_SECRET: 'integration-client-secret-value',
     MICROSOFT_REDIRECT_URI: `http://127.0.0.1:${port}/api/v1/auth/microsoft/callback`,
+    MICROSOFT_PROVISIONING_ENABLED: 'false',
   };
   child = spawn(process.execPath, ['dist/main'], { cwd: backendDirectory, env: serverEnvironment, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (chunk) => serverOutput.push(String(chunk)));
@@ -196,7 +197,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal((await api('/employees/me', {}, sessions.EMPLOYEE)).status, 200);
   assert.equal((await api('/system/users', {}, sessions.EMPLOYEE)).status, 403);
   assert.equal((await api('/system/users', {}, sessions.HR)).status, 403);
-  assert.equal((await api('/system/users?limit=100', {}, sessions.ADMIN)).status, 200);
+  assert.equal((await api('/system/users?limit=100', {}, sessions.SUPER_ADMIN)).status, 200);
   for (const role of ['CPO', 'COO', 'ADMIN']) {
     assert.equal((await api('/payroll/runs', {}, sessions[role])).status, 200);
     assert.equal((await mutate('/payroll/runs', sessions[role], { year: 2098, month: 6 })).status, 403);
@@ -221,7 +222,8 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(missingCsrf.status, 403);
   assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 200);
 
-  const systemRoles = (await api('/system/roles', {}, sessions.ADMIN)).data;
+  const systemAdmin = sessions.SUPER_ADMIN;
+  const systemRoles = (await api('/system/roles', {}, systemAdmin)).data;
   const hrRole = systemRoles.find((role) => role.code === 'HR');
   const lineManagerRole = systemRoles.find((role) => role.code === 'LINE_MANAGER');
   const checkerCreated = await api('/system/users', {
@@ -230,7 +232,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
       email: 'rbac.checker@example.invalid', password: checkerPassword, localLoginEnabled: true, microsoftLoginEnabled: false,
       roleIds: [hrRole.id, lineManagerRole.id], reason: 'Maker-checker integration account',
     },
-  }, sessions.ADMIN);
+  }, systemAdmin);
   assert.equal(checkerCreated.status, 201, JSON.stringify(checkerCreated.payload));
   assert.equal(Object.hasOwn(checkerCreated.data, 'passwordHash'), false);
   const checker = await login('rbac.checker@example.invalid', checkerPassword);
@@ -384,17 +386,21 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const departmentA = await api('/departments', { method: 'POST', body: { name: 'Scoped A', code: `SCA${Date.now()}`.slice(0, 20) } }, sessions.ADMIN);
   const departmentB = await api('/departments', { method: 'POST', body: { name: 'Scoped B', code: `SCB${Date.now()}`.slice(0, 20) } }, sessions.ADMIN);
   assert.equal(departmentA.status, 201); assert.equal(departmentB.status, 201);
-  const permissionCatalogue = (await api('/system/permissions', {}, sessions.ADMIN)).data;
+  const permissionCatalogueResponse = await api('/system/permissions', {}, systemAdmin);
+  assert.equal(permissionCatalogueResponse.status, 200);
+  assert.equal((await api('/system/permissions?page=1', {}, systemAdmin)).status, 400);
+  assert.equal((await api('/system/permissions?limit=100', {}, systemAdmin)).status, 400);
+  const permissionCatalogue = permissionCatalogueResponse.data;
   const departmentRead = permissionCatalogue.find((permission) => permission.code === 'department.read');
   const announcementRead = permissionCatalogue.find((permission) => permission.code === 'announcement.read');
-  let systemUsers = (await api('/system/users?limit=100', {}, sessions.ADMIN)).data;
+  let systemUsers = (await api('/system/users?limit=100', {}, systemAdmin)).data;
   let employeeUser = systemUsers.find((entry) => entry.email === personaEmail('EMPLOYEE'));
   const scopedGrant = await api(`/system/users/${employeeUser.id}/overrides`, {
     method: 'POST', body: {
       permissionId: departmentRead.id, effect: 'GRANT', scopeType: 'ALL_SYSTEM', scopeIds: [departmentA.data.id],
       expectedAuthorizationVersion: employeeUser.authorizationVersion, reason: 'Scoped department integration grant',
     },
-  }, sessions.ADMIN);
+  }, systemAdmin);
   assert.equal(scopedGrant.status, 201);
   assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 401);
   sessions.EMPLOYEE = await loginRole('EMPLOYEE');
@@ -402,24 +408,144 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.deepEqual(scopedDepartments.data.map((department) => department.id), [departmentA.data.id]);
   assert.equal((await api(`/departments/${departmentB.data.id}`, {}, sessions.EMPLOYEE)).status, 404);
 
-  systemUsers = (await api('/system/users?limit=100', {}, sessions.ADMIN)).data;
+  systemUsers = (await api('/system/users?limit=100', {}, systemAdmin)).data;
   employeeUser = systemUsers.find((entry) => entry.email === personaEmail('EMPLOYEE'));
   const directDeny = await api(`/system/users/${employeeUser.id}/overrides`, {
     method: 'POST', body: {
       permissionId: announcementRead.id, effect: 'DENY', scopeType: 'ALL_SYSTEM', scopeIds: [],
       expectedAuthorizationVersion: employeeUser.authorizationVersion, reason: 'Direct deny precedence integration test',
     },
-  }, sessions.ADMIN);
+  }, systemAdmin);
   assert.equal(directDeny.status, 201);
   sessions.EMPLOYEE = await loginRole('EMPLOYEE');
   assert.equal((await api('/announcements', {}, sessions.EMPLOYEE)).status, 403);
 
-  const superAdminUser = systemUsers.find((entry) => entry.email === personaEmail('SUPER_ADMIN'));
-  const finalAdminAttempt = await api(`/system/users/${superAdminUser.id}/status`, {
-    method: 'PATCH', body: { isActive: false, expectedAuthorizationVersion: superAdminUser.authorizationVersion, reason: 'Final administrator protection test' },
-  }, sessions.ADMIN);
-  assert.equal(finalAdminAttempt.status, 400);
+  const revokedDeny = await api(`/system/users/${employeeUser.id}/overrides/${directDeny.data.id}/revoke`, {
+    method: 'POST', body: { expectedVersion: directDeny.data.version, reason: 'Direct deny revocation integration test' },
+  }, systemAdmin);
+  assert.equal(revokedDeny.status, 201);
 
+  const localUserEmail = `system.local.${Date.now()}@example.invalid`;
+  const localUserPassword = 'SystemLocal123!';
+  const localUserCreated = await api('/system/users', {
+    method: 'POST', body: {
+      email: localUserEmail, password: localUserPassword, localLoginEnabled: true, microsoftLoginEnabled: false,
+      roleIds: [hrRole.id], reason: 'Local-only System administration integration account',
+    },
+  }, systemAdmin);
+  assert.equal(localUserCreated.status, 201);
+  assert.equal((await login(localUserEmail, localUserPassword)).user.email, localUserEmail);
+  assert.equal((await api('/system/users', {
+    method: 'POST', body: {
+      email: localUserEmail, password: localUserPassword, localLoginEnabled: true, microsoftLoginEnabled: false,
+      roleIds: [hrRole.id], reason: 'Duplicate local account rejection test',
+    },
+  }, systemAdmin)).status, 409);
+  for (const [kind, localLoginEnabled] of [['microsoft-only', false], ['dual-login', true]]) {
+    const email = `system.${kind}.${Date.now()}@example.invalid`;
+    const result = await api('/system/users', {
+      method: 'POST', body: {
+        email, password: localLoginEnabled ? localUserPassword : undefined, localLoginEnabled, microsoftLoginEnabled: true,
+        roleIds: [hrRole.id], reason: `Microsoft ${kind} provisioning failure test`,
+      },
+    }, systemAdmin);
+    assert.equal(result.status, 503);
+    assert.equal(await prisma.user.findUnique({ where: { email } }), null);
+  }
+
+  systemUsers = (await api('/system/users?limit=100', {}, systemAdmin)).data;
+  let localUser = systemUsers.find((entry) => entry.email === localUserEmail);
+  const localUserSession = await login(localUserEmail, localUserPassword);
+  const disabledLocalUser = await api(`/system/users/${localUser.id}/status`, {
+    method: 'PATCH', body: { isActive: false, expectedAuthorizationVersion: localUser.authorizationVersion, reason: 'System account disable integration test' },
+  }, systemAdmin);
+  assert.equal(disabledLocalUser.status, 200);
+  assert.equal((await api('/auth/me', {}, localUserSession)).status, 401);
+  assert.equal((await api(`/system/users/${localUser.id}/status`, {
+    method: 'PATCH', body: { isActive: true, expectedAuthorizationVersion: localUser.authorizationVersion, reason: 'Stale account status test' },
+  }, systemAdmin)).status, 409);
+  const enabledLocalUser = await api(`/system/users/${localUser.id}/status`, {
+    method: 'PATCH', body: { isActive: true, expectedAuthorizationVersion: disabledLocalUser.data.authorizationVersion, reason: 'System account enable integration test' },
+  }, systemAdmin);
+  assert.equal(enabledLocalUser.status, 200);
+
+  const customRoleCode = `SYS_TEST_${Date.now()}`.slice(0, 30);
+  const customRoleCreated = await api('/system/roles', {
+    method: 'POST', body: { code: customRoleCode, displayName: 'System Test Role', permissionIds: [departmentRead.id], reason: 'Custom role creation integration test' },
+  }, systemAdmin);
+  assert.equal(customRoleCreated.status, 201);
+  const customRoleUpdated = await api(`/system/roles/${customRoleCreated.data.id}`, {
+    method: 'PATCH', body: { displayName: 'Updated System Test Role', expectedVersion: customRoleCreated.data.version, reason: 'Custom role update integration test' },
+  }, systemAdmin);
+  assert.equal(customRoleUpdated.status, 200);
+  const permissionsReplaced = await api(`/system/roles/${customRoleCreated.data.id}/permissions`, {
+    method: 'PUT', body: { permissionIds: [announcementRead.id], expectedVersion: customRoleUpdated.data.version, reason: 'Custom role permission replacement test' },
+  }, systemAdmin);
+  assert.equal(permissionsReplaced.status, 200);
+  assert.equal((await api(`/system/roles/${customRoleCreated.data.id}/permissions`, {
+    method: 'PUT', body: { permissionIds: [departmentRead.id], expectedVersion: customRoleUpdated.data.version, reason: 'Stale role permission replacement test' },
+  }, systemAdmin)).status, 409);
+
+  localUser = (await api('/system/users?limit=100', {}, systemAdmin)).data.find((entry) => entry.email === localUserEmail);
+  const rolesAssigned = await api(`/system/users/${localUser.id}/roles`, {
+    method: 'PUT', body: { roleIds: [hrRole.id, customRoleCreated.data.id], expectedAuthorizationVersion: localUser.authorizationVersion, reason: 'System role assignment integration test' },
+  }, systemAdmin);
+  assert.equal(rolesAssigned.status, 200);
+  assert.equal((await api(`/system/roles/${customRoleCreated.data.id}`, {
+    method: 'DELETE', body: { expectedVersion: permissionsReplaced.data.version, reason: 'Assigned role deletion rejection test' },
+  }, systemAdmin)).status, 400);
+  const disposableRole = await api('/system/roles', {
+    method: 'POST', body: { code: `DEL_TEST_${Date.now()}`.slice(0, 30), displayName: 'Disposable System Role', permissionIds: [], reason: 'Disposable role deletion integration test' },
+  }, systemAdmin);
+  assert.equal(disposableRole.status, 201);
+  assert.equal((await api(`/system/roles/${disposableRole.data.id}`, {
+    method: 'DELETE', body: { expectedVersion: disposableRole.data.version, reason: 'Disposable role deletion integration test' },
+  }, systemAdmin)).status, 200);
+
+  const workflowPolicies = await api('/system/workflow-policy', {}, systemAdmin);
+  assert.equal(workflowPolicies.status, 200);
+  let hrPolicy = workflowPolicies.data.find((policy) => policy.stage === 'HR');
+  assert.equal((await api('/system/workflow-policy/LEAVE/HR', {
+    method: 'PUT', body: { mode: 'ANY_ONE', primaryUserId: sessions.HR.user.id, memberUserIds: [], expectedVersion: hrPolicy.version, reason: 'Invalid ANY_ONE policy integration test' },
+  }, systemAdmin)).status, 400);
+  const primaryPolicy = await api('/system/workflow-policy/LEAVE/HR', {
+    method: 'PUT', body: { mode: 'PRIMARY_APPROVER', primaryUserId: sessions.HR.user.id, memberUserIds: [], expectedVersion: hrPolicy.version, reason: 'Primary workflow policy integration test' },
+  }, systemAdmin);
+  assert.equal(primaryPolicy.status, 200);
+  const namedPoolPolicy = await api('/system/workflow-policy/LEAVE/HR', {
+    method: 'PUT', body: { mode: 'NAMED_POOL', memberUserIds: [sessions.HR.user.id, sessions.CPO.user.id], expectedVersion: primaryPolicy.data.version, reason: 'Named-pool workflow policy integration test' },
+  }, systemAdmin);
+  assert.equal(namedPoolPolicy.status, 200);
+
+  const delegationTimes = { startsAt: '2099-06-01T09:00:00.000Z', endsAt: '2099-06-02T09:00:00.000Z' };
+  const delegation = await api('/system/delegations', {
+    method: 'POST', body: { workflowType: 'LEAVE', stage: 'HR', delegatorUserId: sessions.HR.user.id, delegateUserId: sessions.CPO.user.id, ...delegationTimes, reason: 'Workflow delegation integration test' },
+  }, systemAdmin);
+  assert.equal(delegation.status, 201);
+  assert.equal((await api('/system/delegations', {
+    method: 'POST', body: { workflowType: 'LEAVE', stage: 'HR', delegatorUserId: sessions.HR.user.id, delegateUserId: sessions.CPO.user.id, ...delegationTimes, reason: 'Overlapping workflow delegation test' },
+  }, systemAdmin)).status, 409);
+  assert.equal((await api(`/system/delegations/${delegation.data.id}/revoke`, {
+    method: 'POST', body: { expectedVersion: delegation.data.version, reason: 'Workflow delegation revocation integration test' },
+  }, systemAdmin)).status, 201);
+
+  const softDeleteEmail = `system.delete.${Date.now()}@example.invalid`;
+  const softDeleteUser = await api('/system/users', {
+    method: 'POST', body: { email: softDeleteEmail, password: localUserPassword, localLoginEnabled: true, microsoftLoginEnabled: false, roleIds: [hrRole.id], reason: 'Soft-deletion System integration account' },
+  }, systemAdmin);
+  assert.equal(softDeleteUser.status, 201);
+  assert.equal((await api(`/system/users/${softDeleteUser.data.id}`, {
+    method: 'DELETE', body: { expectedVersion: softDeleteUser.data.authorizationVersion, reason: 'System user soft-deletion integration test' },
+  }, systemAdmin)).status, 200);
+  assert.equal((await api('/system/users?limit=100', {}, systemAdmin)).data.some((entry) => entry.email === softDeleteEmail), false);
+
+  const superAdminUser = systemUsers.find((entry) => entry.email === personaEmail('SUPER_ADMIN'));
+  const selfStatusAttempt = await api(`/system/users/${superAdminUser.id}/status`, {
+    method: 'PATCH', body: { isActive: false, expectedAuthorizationVersion: superAdminUser.authorizationVersion, reason: 'Self account-status protection test' },
+  }, systemAdmin);
+  assert.equal(selfStatusAttempt.status, 403, JSON.stringify(selfStatusAttempt.payload));
+
+  sessions.EMPLOYEE = await loginRole('EMPLOYEE');
   const secondEmployeeSession = await loginRole('EMPLOYEE');
   const currentLogout = await api('/auth/logout', { method: 'POST' }, sessions.EMPLOYEE);
   assert.equal(currentLogout.status, 200);
@@ -432,34 +558,34 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   await prisma.authSession.update({ where: { id: expiringSession.user.sessionId }, data: { expiresAt: new Date(0) } });
   assert.equal((await api('/auth/me', {}, expiringSession)).status, 401);
   const revokableSession = await loginRole('EMPLOYEE');
-  assert.equal((await api(`/system/sessions/${revokableSession.user.sessionId}/revoke`, { method: 'POST', body: { reason: 'Administrative session revocation test' } }, sessions.ADMIN)).status, 201);
+  assert.equal((await api(`/system/sessions/${revokableSession.user.sessionId}/revoke`, { method: 'POST', body: { reason: 'Administrative session revocation test' } }, systemAdmin)).status, 201);
   assert.equal((await api('/auth/me', {}, revokableSession)).status, 401);
 
   const notifications = await api('/notifications?limit=100', {}, sessions.HR);
   assert.equal(notifications.status, 200);
   assert.ok(notifications.data.length > 0);
-  const auditList = await api('/audit/events?limit=100', {}, sessions.ADMIN);
+  const auditList = await api('/audit/events?limit=100', {}, systemAdmin);
   assert.equal(auditList.status, 200);
   assert.doesNotMatch(JSON.stringify(auditList.data), /CheckerPass123|BlockedPass123|IntegrationPass123/);
-  const chain = await api('/audit/events/verify-chain', {}, sessions.ADMIN);
+  const chain = await api('/audit/events/verify-chain', {}, systemAdmin);
   assert.equal(chain.status, 200);
   assert.equal(chain.data.valid, true, JSON.stringify(chain.data));
   const auditEvent = await prisma.auditEvent.findFirstOrThrow({ orderBy: { sequence: 'asc' } });
   await assert.rejects(prisma.auditEvent.update({ where: { id: auditEvent.id }, data: { reason: 'tamper' } }));
-  const auditExport = await api('/audit/events/exports', { method: 'POST', body: { format: 'CSV', exportReason: 'Integration audit export' } }, sessions.ADMIN);
+  const auditExport = await api('/audit/events/exports', { method: 'POST', body: { format: 'CSV', exportReason: 'Integration audit export' } }, systemAdmin);
   assert.equal(auditExport.status, 201);
-  const auditDownload = await api(`/audit/events/exports/${auditExport.data.id}/download`, {}, sessions.ADMIN);
+  const auditDownload = await api(`/audit/events/exports/${auditExport.data.id}/download`, {}, systemAdmin);
   assert.equal(auditDownload.status, 200);
   assert.match(auditDownload.buffer.toString('utf8'), /Resource Type/);
-  const policy = await api('/audit/events/policy', {}, sessions.ADMIN);
+  const policy = await api('/audit/events/policy', {}, systemAdmin);
   assert.equal(policy.status, 200);
   const policyUpdate = await api('/audit/events/policy', {
     method: 'POST', body: { enabled: false, retentionDays: 365, expectedVersion: policy.data.version, reason: 'Keep retention disabled in integration test' },
-  }, sessions.ADMIN);
+  }, systemAdmin);
   assert.equal(policyUpdate.status, 201);
-  const hold = await api('/audit/events/legal-holds', { method: 'POST', body: { name: 'Integration hold', reason: 'Audit legal hold integration test', resourceType: 'PayrollRun', resourceId: payroll.data.id } }, sessions.ADMIN);
+  const hold = await api('/audit/events/legal-holds', { method: 'POST', body: { name: 'Integration hold', reason: 'Audit legal hold integration test', resourceType: 'PayrollRun', resourceId: payroll.data.id } }, systemAdmin);
   assert.equal(hold.status, 201);
-  assert.equal((await api(`/audit/events/legal-holds/${hold.data.id}/release`, { method: 'POST', body: { reason: 'Integration hold released' } }, sessions.ADMIN)).status, 201);
+  assert.equal((await api(`/audit/events/legal-holds/${hold.data.id}/release`, { method: 'POST', body: { reason: 'Integration hold released' } }, systemAdmin)).status, 201);
 
   const databaseCounts = await Promise.all([
     prisma.role.count({ where: { isBuiltIn: true } }),
@@ -470,14 +596,14 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.ok(databaseCounts[2] > 30);
 
   const bulkTarget = await loginRole('EMPLOYEE');
-  const searchedSessions = await api('/system/sessions?active=true&page=1&limit=10&search=rbac.employee', {}, sessions.ADMIN);
+  const searchedSessions = await api('/system/sessions?active=true&page=1&limit=10&search=rbac.employee', {}, systemAdmin);
   assert.equal(searchedSessions.status, 200);
   assert.ok(searchedSessions.data.length <= 10);
   assert.ok(searchedSessions.data.every((entry) => entry.user.email === personaEmail('EMPLOYEE')));
-  const bulkRevocation = await api('/system/sessions/revoke-all', { method: 'POST', body: { reason: 'Administrative bulk session revocation test' } }, sessions.ADMIN);
+  const bulkRevocation = await api('/system/sessions/revoke-all', { method: 'POST', body: { reason: 'Administrative bulk session revocation test' } }, systemAdmin);
   assert.equal(bulkRevocation.status, 201);
   assert.equal(bulkRevocation.data.currentSessionRevoked, true);
   assert.ok(bulkRevocation.data.revokedCount >= 2);
   assert.equal((await api('/auth/me', {}, bulkTarget)).status, 401);
-  assert.equal((await api('/auth/me', {}, sessions.ADMIN)).status, 401);
+  assert.equal((await api('/auth/me', {}, systemAdmin)).status, 401);
 });

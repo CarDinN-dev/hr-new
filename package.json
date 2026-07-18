@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
+    "test:system-ui": "playwright test --config playwright.config.ts",
     "docker:build": "docker build -t medtech-hr-erp .",
     "tunnel:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cloudflare/start-tunnel.ps1",
     "tunnel:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cloudflare/stop-tunnel.ps1",
@@ -24,6 +25,7 @@
     "read-excel-file": "^5.8.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

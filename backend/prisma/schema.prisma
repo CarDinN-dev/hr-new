@@ -68,6 +68,7 @@ enum AttendanceStatus {
 enum AttendanceApprovalStatus {
   APPROVED
   NOT_APPROVED
+  PENDING
 }
 
 enum LeaveRequestStatus {

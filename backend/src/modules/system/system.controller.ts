@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Permissions, SuperAdminOnly } from '../../common/decorators/permissions.decorator';
@@ -34,7 +34,10 @@ export class SystemController {
   @Permissions('role.manage') @Put('roles/:id/permissions') replacePermissions(@Param('id') id: string, @Body() dto: ReplaceRolePermissionsDto, @CurrentUser() user: RequestUser) { return this.system.replaceRolePermissions(id, dto, user); }
   @Permissions('role.manage') @Delete('roles/:id') deleteRole(@Param('id') id: string, @Body() dto: SystemMutationDto, @CurrentUser() user: RequestUser) { return this.system.deleteRole(id, dto, user); }
 
-  @Permissions('permission.read') @Get('permissions') permissions(@CurrentUser() user: RequestUser) { return this.system.listPermissions(user); }
+  @Permissions('permission.read') @Get('permissions') permissions(@Query() query: Record<string, unknown>, @CurrentUser() user: RequestUser) {
+    if (Object.keys(query).length) throw new BadRequestException('The permissions catalogue does not support query parameters.');
+    return this.system.listPermissions(user);
+  }
   @Permissions('session.manage') @Get('sessions') sessions(@Query() query: QuerySystemSessionsDto, @CurrentUser() user: RequestUser) { return this.system.listSessions(query, user); }
   @Permissions('session.manage') @Post('sessions/revoke-all') revokeAllSessions(@Body() dto: RevokeSystemSessionDto, @CurrentUser() user: RequestUser) { return this.system.revokeAllSessions(dto, user); }
   @Permissions('session.manage') @Post('sessions/:id/revoke') revokeSession(@Param('id') id: string, @Body() dto: RevokeSystemSessionDto, @CurrentUser() user: RequestUser) { return this.system.revokeSession(id, dto, user); }

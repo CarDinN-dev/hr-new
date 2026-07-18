@@ -49,13 +49,25 @@ export class AuditService {
     this.hashKey = config.get<string>('AUDIT_HMAC_KEY') || config.getOrThrow<string>('JWT_SECRET');
   }
 
-  record(client: AuditClient, user: RequestUser | null, entry: AuditEntry) {
+  async record(client: AuditClient, user: RequestUser | null, entry: AuditEntry) {
     if (client === this.prisma) {
-      return this.prisma.$transaction((tx) => this.create(tx, user, entry), {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await this.prisma.$transaction((tx) => this.create(tx, user, entry), {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          });
+        } catch (error) {
+          if (!this.isSerializationConflict(error)) throw error;
+        }
+      }
+      throw new ConflictException('Audit record changed in another request. Try again.');
     }
     return this.create(client, user, entry);
+  }
+
+  private isSerializationConflict(error: unknown) {
+    return error instanceof Prisma.PrismaClientKnownRequestError
+      && (error.code === 'P2034' || (error.code === 'P2010' && error.meta?.code === '40001'));
   }
 
   private async create(client: Prisma.TransactionClient, user: RequestUser | null, entry: AuditEntry) {

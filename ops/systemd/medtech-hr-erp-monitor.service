@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish MedTech HR ERP operational health metrics
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/medtech-hr-erp-monitor
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run

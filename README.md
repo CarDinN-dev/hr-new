@@ -65,6 +65,7 @@ Changing bootstrap password variables does not rotate an existing account. Rotat
 - Copy encrypted PostgreSQL disaster-recovery dumps and uploaded-document backups to a private, versioned Google Cloud Storage bucket; application snapshots in the same database do not protect against disk or VM loss.
 - Keep `CORS_ORIGIN` empty when the frontend proxies `/api/v1` from the same domain.
 - Do not restart the Cloudflare tunnel during an application-only deployment; a Quick Tunnel URL can change when its process restarts.
+- The GCP VM is the only production host. Use IAP to deploy to `hrerp1`; the tracked `ops/` scripts are the canonical production operations assets.
 
 ## Checks
 
