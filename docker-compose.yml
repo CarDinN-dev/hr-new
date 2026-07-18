@@ -20,6 +20,20 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  clamav:
+    image: clamav/clamav:1.4_base
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 6m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
   api:
     build:
       context: ./backend
@@ -46,11 +60,16 @@ services:
       MICROSOFT_ENTERPRISE_APP_OBJECT_ID: ${MICROSOFT_ENTERPRISE_APP_OBJECT_ID:-}
       MICROSOFT_USER_APP_ROLE_ID: ${MICROSOFT_USER_APP_ROLE_ID:-}
       GCS_DOCUMENTS_BUCKET: ${GCS_DOCUMENTS_BUCKET:-}
+      DOCUMENT_SCAN_ENABLED: ${DOCUMENT_SCAN_ENABLED:-true}
+      CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
     ports:
       - "127.0.0.1:3100:3000"
     depends_on:
       postgres:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     command: ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
     healthcheck:

@@ -181,6 +181,13 @@ enum DocumentVisibility {
   PUBLIC
 }
 
+enum DocumentScanStatus {
+  PENDING
+  CLEAN
+  REJECTED
+  FAILED
+}
+
 enum TripStatus {
   PENDING
   APPROVED
@@ -950,24 +957,28 @@ model PerformanceReview {
 }
 
 model EmployeeDocument {
-  id               String             @id @default(uuid())
-  employeeId       String
-  documentType     String
-  fileName         String
-  fileUrl          String             @default("")
-  documentNumber   String?            @unique
-  objectName       String?            @unique
-  objectGeneration String?
-  contentType      String?
-  sizeBytes        Int?
-  sha256           String?
-  uploadedById     String
-  expiryDate       DateTime?
-  visibility       DocumentVisibility @default(MANAGER_AND_HR)
-  version          Int                @default(1)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  deletedAt        DateTime?
+  id                  String             @id @default(uuid())
+  employeeId          String
+  documentType        String
+  fileName            String
+  fileUrl             String             @default("")
+  documentNumber      String?            @unique
+  objectName          String?            @unique
+  objectGeneration    String?
+  contentType         String?
+  sizeBytes           Int?
+  sha256              String?
+  uploadedById        String
+  expiryDate          DateTime?
+  visibility          DocumentVisibility @default(MANAGER_AND_HR)
+  scanStatus          DocumentScanStatus @default(PENDING)
+  scannedAt           DateTime?
+  scanResultCode      String?            @db.VarChar(200)
+  quarantineReference String?
+  version             Int                @default(1)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  deletedAt           DateTime?
 
   employee   Employee @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
   uploadedBy Employee @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
@@ -976,6 +987,7 @@ model EmployeeDocument {
   @@index([uploadedById])
   @@index([documentType])
   @@index([expiryDate])
+  @@index([scanStatus, createdAt])
   @@index([deletedAt])
 }
 

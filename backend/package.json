@@ -10,6 +10,7 @@
     "test:rbac": "npm run build && node --test scripts/rbac-regression.js",
     "test:integration": "npm run build && node --test scripts/integration-regression.js",
     "test:financial": "npm run build && node scripts/financial-regression.js",
+    "test:document-scanning": "npm run build && node --test scripts/document-malware-scanner-regression.js",
     "test:microsoft-provisioning": "npm run build && node --test scripts/microsoft-provisioning-regression.js",
     "import:console-state:dry-run": "node scripts/import-console-state.js",
     "import:console-state": "node scripts/import-console-state.js --apply",
