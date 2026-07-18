@@ -180,6 +180,10 @@ export function hasPermission(session: BackendSession, permission: string) {
   return session.permissions.includes(permission);
 }
 
+export function hasActiveSuperAdminRole(session: Pick<BackendSession, "roles">) {
+  return session.roles.includes("SUPER_ADMIN");
+}
+
 export function hasAnyPermission(session: BackendSession, ...permissions: string[]) {
   return permissions.some(permission => hasPermission(session, permission));
 }

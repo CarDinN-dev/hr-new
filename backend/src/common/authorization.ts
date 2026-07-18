@@ -1,5 +1,9 @@
 import { RequestUser } from './types/request-user.type';
 
+export function hasActiveSuperAdminRole(user: Pick<RequestUser, 'isSuperAdmin' | 'roles'>) {
+  return user.isSuperAdmin && user.roles.includes('SUPER_ADMIN');
+}
+
 export function hasPermission(user: RequestUser, permission: string) {
   return user.permissions.includes(permission);
 }

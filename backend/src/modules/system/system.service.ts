@@ -6,6 +6,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
+import { hasActiveSuperAdminRole } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -604,7 +605,7 @@ export class SystemService {
       this.authorization.requireRecentStepUp(actor);
     }
     const escalation = permissions.find((permission) => !actor.permissions.includes(permission.code));
-    if (escalation && !actor.isSuperAdmin) throw new ForbiddenException('Cannot delegate a permission you do not hold');
+    if (escalation && !hasActiveSuperAdminRole(actor)) throw new ForbiddenException('Cannot delegate a permission you do not hold');
   }
 
   private assertAssignableRoles(roles: Array<{ protection: RoleProtection }>, actor: RequestUser) {
@@ -625,7 +626,7 @@ export class SystemService {
       where: {
         userId: targetUserId,
         ...activeAssignmentWhere(new Date()),
-        role: { protection: RoleProtection.SUPER_ADMIN, isActive: true },
+        role: { code: 'SUPER_ADMIN', protection: RoleProtection.SUPER_ADMIN, isActive: true },
       },
       select: { id: true },
     });
@@ -634,7 +635,7 @@ export class SystemService {
     const remaining = await tx.userRole.count({
       where: {
         userId: { not: targetUserId }, ...activeAssignmentWhere(new Date()),
-        user: { isActive: true, deletedAt: null }, role: { protection: RoleProtection.SUPER_ADMIN, isActive: true },
+        user: { isActive: true, deletedAt: null }, role: { code: 'SUPER_ADMIN', protection: RoleProtection.SUPER_ADMIN, isActive: true },
       },
     });
     if (remaining < 1) throw new BadRequestException('Cannot remove or disable the final active Super Administrator');
@@ -679,7 +680,7 @@ export class SystemService {
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    const isSuperAdmin = user.roles.some((assignment) => assignment.role.protection === RoleProtection.SUPER_ADMIN);
+    const isSuperAdmin = user.roles.some((assignment) => assignment.role.code === 'SUPER_ADMIN' && assignment.role.protection === RoleProtection.SUPER_ADMIN);
     const permissions = new Map<string, { id: string; code: string; displayName: string; category: string; sources: string[] }>();
     for (const assignment of user.roles) {
       for (const link of assignment.role.permissions) {

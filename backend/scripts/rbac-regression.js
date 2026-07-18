@@ -65,6 +65,14 @@ test('role inheritance and business separation match the production matrix', () 
     assert.equal(coo.has(permission), false, `COO must not mutate through ${permission}`);
     assert.equal(admin.has(permission), false, `ADMIN must not mutate through ${permission}`);
   }
+  for (const permission of [
+    'system.read', 'user.read', 'user.manage', 'user.deactivate', 'user.delete_soft', 'role.read', 'role.manage', 'role.assign',
+    'permission.read', 'permission.assign', 'session.manage', 'workflow.policy.read', 'workflow.policy.manage',
+    'workflow.delegation.read', 'workflow.delegation.manage', 'audit.configure',
+  ]) assert.equal(admin.has(permission), false, `ADMIN must not retain System access through ${permission}`);
+  for (const permission of ['settings.manage', 'system.configure', 'department.manage', 'payroll.read', 'audit.read', 'audit.export']) {
+    assert.equal(admin.has(permission), true, `ADMIN non-System access changed for ${permission}`);
+  }
   for (const permission of catalog.permissions) assert.equal(superAdmin.has(permission), true, `SUPER_ADMIN lacks ${permission}`);
 });
 

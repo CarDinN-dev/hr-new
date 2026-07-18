@@ -3,6 +3,7 @@ import { AccessScopeType, AuditAction, Prisma, ServiceRequestEventType, ServiceR
 import { createHash } from 'crypto';
 import { jsPDF } from 'jspdf';
 import { RequestUser } from '../../common/types/request-user.type';
+import { hasActiveSuperAdminRole } from '../../common/authorization';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -168,7 +169,7 @@ export class ServiceRequestsService {
   }
 
   override(id: string, dto: ServiceRequestOverrideDto, key: string | undefined, user: RequestUser) {
-    if (!user.isSuperAdmin || !user.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Super Administrator override is required');
+    if (!hasActiveSuperAdminRole(user)) throw new ForbiddenException('Super Administrator override is required');
     this.authorization.requireRecentStepUp(user);
     const allowed: ServiceRequestStatus[] = [ServiceRequestStatus.APPROVED, ServiceRequestStatus.PUBLISHED, ServiceRequestStatus.REJECTED, ServiceRequestStatus.REVOKED];
     if (!allowed.includes(dto.targetStatus)) throw new BadRequestException('Invalid override target status');

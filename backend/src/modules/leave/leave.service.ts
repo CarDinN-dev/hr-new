@@ -5,6 +5,7 @@ import {
 } from '@prisma/client';
 import { createHash } from 'crypto';
 import { RequestUser } from '../../common/types/request-user.type';
+import { hasActiveSuperAdminRole } from '../../common/authorization';
 import { listArgs, listRecords, paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -433,7 +434,7 @@ export class LeaveService {
   }
 
   override(id: string, dto: OverrideLeaveDto, key: string | undefined, user: RequestUser) {
-    if (!user.isSuperAdmin || !user.roles.includes('SUPER_ADMIN')) throw new ForbiddenException('Super Administrator override is required');
+    if (!hasActiveSuperAdminRole(user)) throw new ForbiddenException('Super Administrator override is required');
     this.authorization.requireRecentStepUp(user);
     if (!([LeaveRequestStatus.APPROVED, LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED] as LeaveRequestStatus[]).includes(dto.targetStatus)) throw new BadRequestException('Invalid override target status');
     return this.leaveTransaction(async (tx) => {

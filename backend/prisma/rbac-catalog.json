@@ -113,12 +113,11 @@
       "protection": "PROTECTED",
       "inherits": ["EMPLOYEE"],
       "permissions": [
-        "settings.read", "settings.manage", "system.read", "system.configure", "department.read", "department.manage", "position.read", "position.manage", "announcement.read",
+        "settings.read", "settings.manage", "system.configure", "department.read", "department.manage", "position.read", "position.manage", "announcement.read",
         "employee.read_all", "employee.hr.read_sensitive", "attendance.read_all", "leave.read_all", "leave.reassign", "service_request.read_all", "service_request.pdf.download_all",
         "payroll.read", "payroll.read_compensation", "payroll.read_bank", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "payroll.audit.read",
         "expense.read_all", "trip.read_all", "loan.read_all", "document.read_all", "document.pdf.download_all", "contract.read_all", "performance.read_all", "recruitment.read", "eos.read", "report.read", "report.export", "import.run", "import.read",
-        "user.read", "user.manage", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "role.assign", "permission.read", "permission.assign", "session.manage",
-        "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage", "audit.read", "audit.export", "audit.configure"
+        "audit.read", "audit.export"
       ]
     },
     {

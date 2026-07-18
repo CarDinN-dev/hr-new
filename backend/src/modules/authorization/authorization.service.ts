@@ -75,7 +75,7 @@ export class AuthorizationService {
   ): RequestUser {
     const rolePermissions = new Set<string>();
     const roles = new Set<string>();
-    const isSuperAdmin = user.roles.some((assignment) => assignment.role.protection === RoleProtection.SUPER_ADMIN);
+    const isSuperAdmin = user.roles.some((assignment) => assignment.role.code === 'SUPER_ADMIN' && assignment.role.protection === RoleProtection.SUPER_ADMIN);
     for (const assignment of user.roles) {
       roles.add(assignment.role.code);
       for (const link of assignment.role.permissions) rolePermissions.add(link.permission.code);

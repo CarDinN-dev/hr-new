@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Permissions } from '../../common/decorators/permissions.decorator';
+import { Permissions, SuperAdminOnly } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import {
   AssignUserRolesDto, ChangeUserStatusDto, CreateRoleDto, CreateSystemUserDto, QuerySystemSessionsDto, QuerySystemUsersDto,
@@ -14,6 +14,7 @@ import { SystemService } from './system.service';
 @ApiTags('System administration')
 @ApiBearerAuth()
 @Controller('system')
+@SuperAdminOnly()
 export class SystemController {
   constructor(private readonly system: SystemService) {}
 

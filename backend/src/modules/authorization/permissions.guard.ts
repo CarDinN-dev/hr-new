@@ -1,9 +1,10 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
-import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } from '../../common/decorators/permissions.decorator';
+import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY } from '../../common/decorators/permissions.decorator';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
+import { hasActiveSuperAdminRole } from '../../common/authorization';
 import { AuditAction, AuditOutcome } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -20,6 +21,13 @@ export class PermissionsGuard implements CanActivate {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()]);
     if (isPublic) return true;
 
+    const superAdminOnly = this.reflector.getAllAndOverride<boolean>(SUPER_ADMIN_ONLY_KEY, [context.getHandler(), context.getClass()]);
+    const request = context.switchToHttp().getRequest<Request & { user?: RequestUser }>();
+    if (superAdminOnly && (!request.user || !hasActiveSuperAdminRole(request.user))) {
+      await this.recordDenial(context, 'Active Super Administrator role required');
+      throw new ForbiddenException('Active Super Administrator role required');
+    }
+
     const requiredAll = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);
     const requiredAny = this.reflector.getAllAndOverride<string[]>(ANY_PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);
     if (!requiredAll?.length && !requiredAny?.length) {
@@ -27,7 +35,6 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('Endpoint permission policy is not configured');
     }
 
-    const request = context.switchToHttp().getRequest<Request & { user?: RequestUser }>();
     const permissions = new Set(request.user?.permissions ?? []);
     if (requiredAll?.some((permission) => !permissions.has(permission))) {
       await this.recordDenial(context, 'Required permission missing');

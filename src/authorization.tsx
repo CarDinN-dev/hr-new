@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { BackendSession } from "./api";
-import { hasAllPermissions, hasAnyPermission, hasPermission } from "./api";
+import { hasActiveSuperAdminRole, hasAllPermissions, hasAnyPermission, hasPermission } from "./api";
 import type { NavItem } from "./data";
 
 const routePermissions: Record<NavItem, string[]> = {
@@ -19,7 +19,7 @@ const routePermissions: Record<NavItem, string[]> = {
   Documents: ["document.self.read", "document.hr.read", "document.read_all"],
   Reports: ["report.read"],
   Audit: ["audit.read"],
-  System: ["user.read", "role.read", "permission.read", "session.manage", "system.configure"],
+  System: [],
   Settings: ["settings.read", "settings.manage", "department.manage", "position.manage", "leave.configure"]
 };
 
@@ -41,7 +41,7 @@ export function AuthorizationProvider({ session, children }: { session: BackendS
     hasPermission: permission => hasPermission(session, permission),
     hasAnyPermission: (...permissions) => hasAnyPermission(session, ...permissions),
     hasAllPermissions: (...permissions) => hasAllPermissions(session, ...permissions),
-    canAccessRoute: route => hasAnyPermission(session, ...routePermissions[route])
+    canAccessRoute: route => canAccessRoute(session, route)
   }), [session]);
   return <AuthorizationContext.Provider value={value}>{children}</AuthorizationContext.Provider>;
 }
@@ -53,5 +53,6 @@ export function useAuthorization() {
 }
 
 export function canAccessRoute(session: BackendSession, route: NavItem) {
+  if (route === "System") return hasActiveSuperAdminRole(session);
   return hasAnyPermission(session, ...routePermissions[route]);
 }

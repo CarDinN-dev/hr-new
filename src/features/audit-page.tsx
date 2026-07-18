@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ShieldCheck } from "lucide-react";
-import { apiDownload, apiList, apiPage, apiRequest, hasPermission, type BackendSession } from "../api";
+import { apiDownload, apiList, apiPage, apiRequest, hasActiveSuperAdminRole, hasPermission, type BackendSession } from "../api";
 
 type AuditEvent = {
   id: string;
@@ -66,12 +66,12 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
   const policy = useQuery({
     queryKey: queryKey(session, "audit-policy"),
     queryFn: () => apiRequest<AuditPolicy>("/audit/events/policy"),
-    enabled: hasPermission(session, "audit.configure"),
+    enabled: hasActiveSuperAdminRole(session) && hasPermission(session, "audit.configure"),
   });
   const holds = useQuery({
     queryKey: queryKey(session, "audit-holds"),
     queryFn: () => apiList<LegalHold>("/audit/events/legal-holds"),
-    enabled: hasPermission(session, "audit.configure"),
+    enabled: hasActiveSuperAdminRole(session) && hasPermission(session, "audit.configure"),
   });
 
   const savePolicy = useMutation({
@@ -175,7 +175,7 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
       </>}
     </div>
 
-    {hasPermission(session, "audit.configure") && <>
+    {hasActiveSuperAdminRole(session) && hasPermission(session, "audit.configure") && <>
       <div className="panel">
         <div className="panel-head"><div><h3>Retention policy</h3><span>Deletion remains disabled unless explicitly enabled and run by maintenance.</span></div>{policy.data && <button onClick={() => setPolicyDraft({ enabled: policy.data.enabled, retentionDays: policy.data.retentionDays, reason: "" })}>Edit policy</button>}</div>
         {policy.isPending ? <p className="muted">Loading policy…</p> : policy.data && <div className="metric-row"><div><span>Status</span><strong>{policy.data.enabled ? "Enabled" : "Disabled"}</strong></div><div><span>Retention</span><strong>{policy.data.retentionDays} days</strong></div><div><span>Version</span><strong>{policy.data.version}</strong></div></div>}

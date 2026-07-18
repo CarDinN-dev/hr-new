@@ -26,7 +26,9 @@ const { PayrollService } = require('../dist/modules/payroll/payroll.service');
 const { EmploymentContractsService } = require('../dist/modules/employment-contracts/employment-contracts.service');
 const { PerformanceReviewsService } = require('../dist/modules/performance-reviews/performance-reviews.service');
 const { SystemService } = require('../dist/modules/system/system.service');
-const { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } = require('../dist/common/decorators/permissions.decorator');
+const { SystemController } = require('../dist/modules/system/system.controller');
+const { AuditController } = require('../dist/modules/audit/audit.controller');
+const { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY } = require('../dist/common/decorators/permissions.decorator');
 const { IS_PUBLIC_KEY } = require('../dist/common/decorators/public.decorator');
 
 function user(overrides = {}) {
@@ -71,6 +73,7 @@ function reflector(metadata = {}) {
       if (key === IS_PUBLIC_KEY) return metadata.public;
       if (key === PERMISSIONS_KEY) return metadata.all;
       if (key === ANY_PERMISSIONS_KEY) return metadata.any;
+      if (key === SUPER_ADMIN_ONLY_KEY) return metadata.superAdminOnly;
       return undefined;
     },
   };
@@ -137,6 +140,35 @@ test('permissions guard is default-deny and implements all/any without an admini
   assert.equal(await guard({ any: ['payroll.generate', 'leave.self.read'] }).canActivate(executionContext(actor)), true);
 });
 
+test('System APIs require an active SUPER_ADMIN role before endpoint permissions', async () => {
+  assert.equal(Reflect.getMetadata(SUPER_ADMIN_ONLY_KEY, SystemController), true);
+  for (const method of ['policy', 'updatePolicy', 'holds', 'createHold', 'releaseHold']) {
+    assert.equal(Reflect.getMetadata(SUPER_ADMIN_ONLY_KEY, AuditController.prototype[method]), true, `audit configuration method ${method} must be Super Admin only`);
+  }
+
+  const guard = new PermissionsGuard(reflector({ superAdminOnly: true, all: ['user.read'] }), {}, audit);
+  const legacyPermissions = ['system.configure', 'user.read', 'role.read', 'permission.read', 'session.manage'];
+  await assert.rejects(
+    guard.canActivate(executionContext(user({ roles: ['ADMIN'], permissions: legacyPermissions }))),
+    /Active Super Administrator role required/,
+  );
+  await assert.rejects(
+    guard.canActivate(executionContext(user({ roles: ['CUSTOM_ROLE'], permissions: legacyPermissions }))),
+    /Active Super Administrator role required/,
+  );
+  await assert.rejects(
+    guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: false, permissions: legacyPermissions }))),
+    /Active Super Administrator role required/,
+  );
+  await assert.rejects(
+    guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: true }))),
+    /Insufficient permission/,
+  );
+  assert.equal(await guard.canActivate(executionContext(user({
+    roles: ['SUPER_ADMIN'], isSuperAdmin: true, permissions: ['user.read'], rolePermissions: ['user.read'],
+  }))), true);
+});
+
 test('authorization context unions roles, applies direct denies, and preserves the Super Admin exception', async () => {
   const baseRecord = {
     id: 'user-1', email: 'user@example.invalid', isActive: true, deletedAt: null, authorizationVersion: 4,
@@ -148,8 +180,12 @@ test('authorization context unions roles, applies direct denies, and preserves t
     permissionOverrides: [{ permission: { code: 'employee.team.read' }, effect: PermissionOverrideEffect.DENY, scopeType: AccessScopeType.ALL_SYSTEM, scopeIds: [] }],
   };
   let record = structuredClone(baseRecord);
-  const service = new AuthorizationService({ user: { findUnique: async () => record } });
+  let userQuery;
+  const service = new AuthorizationService({ user: { findUnique: async (query) => { userQuery = query; return record; } } });
   const context = service.toRequestUser(await service.loadUserContext('user-1'), { id: 'session-1', csrfToken: 'csrf', provider: 'local' });
+  assert.equal(userQuery.select.roles.where.revokedAt, null);
+  assert.equal(userQuery.select.roles.where.role.isActive, true);
+  assert.ok(userQuery.select.roles.where.OR.some((condition) => condition.expiresAt?.gt instanceof Date));
   assert.deepEqual(context.roles, ['EMPLOYEE', 'LINE_MANAGER']);
   assert.deepEqual(context.permissions, ['employee.self.read']);
   assert.deepEqual(context.departmentScopeIds, ['department-1']);
