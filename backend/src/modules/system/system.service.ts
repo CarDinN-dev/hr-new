@@ -49,7 +49,7 @@ export class SystemService {
       select: { id: true, protection: true },
     });
     if (requestedRoles.length !== new Set(dto.roleIds).size) throw new BadRequestException('One or more roles do not exist or are inactive');
-    this.assertAssignableRoles(requestedRoles, actor);
+    this.assertAssignableRoles(requestedRoles, actor, false);
     if (dto.employeeId) {
       const employee = await this.prisma.employee.findFirst({
         where: { id: dto.employeeId, deletedAt: null },
@@ -64,7 +64,7 @@ export class SystemService {
     return this.serializable(async (tx) => {
       const roles = await tx.role.findMany({ where: { id: { in: dto.roleIds }, isActive: true }, select: { id: true, code: true, protection: true } });
       if (roles.length !== new Set(dto.roleIds).size) throw new BadRequestException('One or more roles do not exist or are inactive');
-      this.assertAssignableRoles(roles, actor);
+      this.assertAssignableRoles(roles, actor, false);
       if (dto.employeeId) {
         const employee = await tx.employee.findFirst({ where: { id: dto.employeeId, deletedAt: null }, select: { id: true, userId: true } });
         if (!employee) throw new NotFoundException('Employee not found');
@@ -608,10 +608,10 @@ export class SystemService {
     if (escalation && !hasActiveSuperAdminRole(actor)) throw new ForbiddenException('Cannot delegate a permission you do not hold');
   }
 
-  private assertAssignableRoles(roles: Array<{ protection: RoleProtection }>, actor: RequestUser) {
+  private assertAssignableRoles(roles: Array<{ protection: RoleProtection }>, actor: RequestUser, requireRecentStepUp = true) {
     if (roles.some((role) => role.protection !== RoleProtection.STANDARD)) {
       this.authorization.require(actor, 'role.assign_protected');
-      this.authorization.requireRecentStepUp(actor);
+      if (requireRecentStepUp) this.authorization.requireRecentStepUp(actor);
     }
   }
 

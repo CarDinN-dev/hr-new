@@ -28,7 +28,7 @@ const { PerformanceReviewsService } = require('../dist/modules/performance-revie
 const { SystemService } = require('../dist/modules/system/system.service');
 const { SystemController } = require('../dist/modules/system/system.controller');
 const { AuditController } = require('../dist/modules/audit/audit.controller');
-const { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY } = require('../dist/common/decorators/permissions.decorator');
+const { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } = require('../dist/common/decorators/permissions.decorator');
 const { IS_PUBLIC_KEY } = require('../dist/common/decorators/public.decorator');
 
 function user(overrides = {}) {
@@ -74,6 +74,7 @@ function reflector(metadata = {}) {
       if (key === PERMISSIONS_KEY) return metadata.all;
       if (key === ANY_PERMISSIONS_KEY) return metadata.any;
       if (key === SUPER_ADMIN_ONLY_KEY) return metadata.superAdminOnly;
+      if (key === SYSTEM_ADMINISTRATOR_ONLY_KEY) return metadata.systemAdministratorOnly;
       return undefined;
     },
   };
@@ -140,6 +141,12 @@ test('permissions guard is default-deny and implements all/any without an admini
   assert.equal(await guard({ any: ['payroll.generate', 'leave.self.read'] }).canActivate(executionContext(actor)), true);
 });
 
+test('Super Administrators bypass step-up authentication while other roles do not', () => {
+  const authorization = new AuthorizationService({});
+  assert.doesNotThrow(() => authorization.requireRecentStepUp(user({ isSuperAdmin: true, reauthenticatedAt: new Date(0) })));
+  assert.throws(() => authorization.requireRecentStepUp(user({ reauthenticatedAt: new Date(0) })), /Recent authentication is required/);
+});
+
 test('permissions catalogue rejects pagination parameters', () => {
   const controller = new SystemController({ listPermissions: () => ['permission.read'] });
   assert.deepEqual(controller.permissions({}, {}), ['permission.read']);
@@ -147,26 +154,23 @@ test('permissions catalogue rejects pagination parameters', () => {
   assert.throws(() => controller.permissions({ limit: '100' }, {}), { status: 400 });
 });
 
-test('System APIs require an active SUPER_ADMIN role before endpoint permissions', async () => {
-  assert.equal(Reflect.getMetadata(SUPER_ADMIN_ONLY_KEY, SystemController), true);
+test('System APIs require an active ADMIN or SUPER_ADMIN role before endpoint permissions', async () => {
+  assert.equal(Reflect.getMetadata(SYSTEM_ADMINISTRATOR_ONLY_KEY, SystemController), true);
   for (const method of ['policy', 'updatePolicy', 'holds', 'createHold', 'releaseHold']) {
     assert.equal(Reflect.getMetadata(SUPER_ADMIN_ONLY_KEY, AuditController.prototype[method]), true, `audit configuration method ${method} must be Super Admin only`);
   }
 
-  const guard = new PermissionsGuard(reflector({ superAdminOnly: true, all: ['user.read'] }), {}, audit);
+  const guard = new PermissionsGuard(reflector({ systemAdministratorOnly: true, all: ['user.read'] }), {}, audit);
   const legacyPermissions = ['system.configure', 'user.read', 'role.read', 'permission.read', 'session.manage'];
   await assert.rejects(
-    guard.canActivate(executionContext(user({ roles: ['ADMIN'], permissions: legacyPermissions }))),
-    /Active Super Administrator role required/,
-  );
-  await assert.rejects(
     guard.canActivate(executionContext(user({ roles: ['CUSTOM_ROLE'], permissions: legacyPermissions }))),
-    /Active Super Administrator role required/,
+    /Active Administrator role required/,
   );
   await assert.rejects(
     guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: false, permissions: legacyPermissions }))),
-    /Active Super Administrator role required/,
+    /Active Administrator role required/,
   );
+  assert.equal(await guard.canActivate(executionContext(user({ roles: ['ADMIN'], permissions: ['user.read'] }))), true);
   await assert.rejects(
     guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: true }))),
     /Insufficient permission/,

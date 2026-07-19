@@ -4,6 +4,10 @@ export function hasActiveSuperAdminRole(user: Pick<RequestUser, 'isSuperAdmin' |
   return user.isSuperAdmin && user.roles.includes('SUPER_ADMIN');
 }
 
+export function hasActiveSystemAdministratorRole(user: Pick<RequestUser, 'isSuperAdmin' | 'roles'>) {
+  return hasActiveSuperAdminRole(user) || user.roles.includes('ADMIN');
+}
+
 export function hasPermission(user: RequestUser, permission: string) {
   return user.permissions.includes(permission);
 }

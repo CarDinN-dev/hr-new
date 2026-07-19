@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { BackendSession } from "./api";
-import { hasActiveSuperAdminRole, hasAllPermissions, hasAnyPermission, hasPermission } from "./api";
+import { hasActiveSystemAdministratorRole, hasAllPermissions, hasAnyPermission, hasPermission } from "./api";
 import type { NavItem } from "./data";
 
 const routePermissions: Record<NavItem, string[]> = {
@@ -53,6 +53,6 @@ export function useAuthorization() {
 }
 
 export function canAccessRoute(session: BackendSession, route: NavItem) {
-  if (route === "System") return hasActiveSuperAdminRole(session);
+  if (route === "System") return hasActiveSystemAdministratorRole(session);
   return hasAnyPermission(session, ...routePermissions[route]);
 }

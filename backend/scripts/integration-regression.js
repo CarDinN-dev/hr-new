@@ -226,6 +226,16 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const systemRoles = (await api('/system/roles', {}, systemAdmin)).data;
   const hrRole = systemRoles.find((role) => role.code === 'HR');
   const lineManagerRole = systemRoles.find((role) => role.code === 'LINE_MANAGER');
+  const adminRole = systemRoles.find((role) => role.code === 'ADMIN');
+  const superAdminRole = systemRoles.find((role) => role.code === 'SUPER_ADMIN');
+  await prisma.authSession.update({ where: { id: systemAdmin.user.sessionId }, data: { reauthenticatedAt: new Date(0) } });
+  const protectedAccountCreated = await api('/system/users', {
+    method: 'POST', body: {
+      email: `system.protected.${Date.now()}@example.invalid`, password: checkerPassword, localLoginEnabled: true, microsoftLoginEnabled: false,
+      roleIds: [adminRole.id, superAdminRole.id], reason: 'Protected account creation without step-up integration test',
+    },
+  }, systemAdmin);
+  assert.equal(protectedAccountCreated.status, 201, JSON.stringify(protectedAccountCreated.payload));
   const checkerCreated = await api('/system/users', {
     method: 'POST',
     body: {

@@ -135,6 +135,7 @@ export class AuthorizationService {
   }
 
   requireRecentStepUp(user: RequestUser, windowMs = 10 * 60 * 1000) {
+    if (user.isSuperAdmin) return;
     if (!user.reauthenticatedAt || Date.now() - user.reauthenticatedAt.getTime() > windowMs) {
       throw new ForbiddenException('Recent authentication is required');
     }

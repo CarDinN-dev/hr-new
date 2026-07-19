@@ -18,13 +18,13 @@ function session(roles: string[], permissions: string[]): BackendSession {
 }
 
 describe("System route authorization", () => {
-  it("allows an active SUPER_ADMIN session role", () => {
+  it("allows active ADMIN and SUPER_ADMIN session roles", () => {
     expect(canAccessRoute(session(["SUPER_ADMIN"], []), "System")).toBe(true);
+    expect(canAccessRoute(session(["ADMIN"], []), "System")).toBe(true);
   });
 
-  it("denies ADMIN and direct System permissions", () => {
+  it("denies direct System permissions without an administrator role", () => {
     const systemPermissions = ["system.configure", "user.read", "role.read", "permission.read", "session.manage"];
-    expect(canAccessRoute(session(["ADMIN"], systemPermissions), "System")).toBe(false);
     expect(canAccessRoute(session(["CUSTOM_ROLE"], systemPermissions), "System")).toBe(false);
   });
 

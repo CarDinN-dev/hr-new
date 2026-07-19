@@ -1,10 +1,10 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
-import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY } from '../../common/decorators/permissions.decorator';
+import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } from '../../common/decorators/permissions.decorator';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
-import { hasActiveSuperAdminRole } from '../../common/authorization';
+import { hasActiveSuperAdminRole, hasActiveSystemAdministratorRole } from '../../common/authorization';
 import { AuditAction, AuditOutcome } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,6 +26,12 @@ export class PermissionsGuard implements CanActivate {
     if (superAdminOnly && (!request.user || !hasActiveSuperAdminRole(request.user))) {
       await this.recordDenial(context, 'Active Super Administrator role required');
       throw new ForbiddenException('Active Super Administrator role required');
+    }
+
+    const systemAdministratorOnly = this.reflector.getAllAndOverride<boolean>(SYSTEM_ADMINISTRATOR_ONLY_KEY, [context.getHandler(), context.getClass()]);
+    if (systemAdministratorOnly && (!request.user || !hasActiveSystemAdministratorRole(request.user))) {
+      await this.recordDenial(context, 'Active Administrator role required');
+      throw new ForbiddenException('Active Administrator role required');
     }
 
     const requiredAll = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);
