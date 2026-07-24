@@ -19,7 +19,7 @@ const managerSummarySelect = {
 const employeeSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
   phone: true, hireDate: true, employmentStatus: true, departmentId: true, positionId: true,
-  managerId: true, version: true, createdAt: true, updatedAt: true,
+  managerId: true, profilePhoto: true, version: true, createdAt: true, updatedAt: true,
   department: { select: { id: true, name: true, code: true } },
   position: { select: { id: true, title: true, code: true, level: true } },
   manager: {

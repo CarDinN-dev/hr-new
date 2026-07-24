@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsDate, IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { UpdateEmployeeDetailsDto } from './update-employee-details.dto';
 
 export class UpdateSelfBasicProfileDto {
@@ -11,6 +11,9 @@ export class UpdateSelfBasicProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2_000) address?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(200) emergencyContactName?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(50) emergencyContactPhone?: string;
+  @ApiPropertyOptional({ description: 'A normalized JPEG data URL, or an empty string to remove it.' })
+  @IsOptional() @IsString() @MaxLength(700_000) @Matches(/^$|^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/)
+  profilePhoto?: string;
 }
 
 export class UpdateSelfBankDto {

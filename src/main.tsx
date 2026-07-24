@@ -599,7 +599,7 @@ function App() {
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
-          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
+          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} refreshWorkspace={refreshWorkspace} />}
         </div>
       </main>
 
@@ -626,7 +626,7 @@ function AccountMenu({
   toggleTheme: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const photo = state.settings.company.accountPhoto;
+  const photo = state.employees.find(employee => employee.id === backendSession.employeeId)?.photo;
 
   function go(destination: NavItem) {
     setOpen(false);
@@ -705,6 +705,7 @@ function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState
   }
 
   return <div className="dashboard-grid">
+    <ProfilePhotoPanel employee={employee} session={session} notify={notify} refreshWorkspace={refreshWorkspace} />
     <section className="panel span-2"><div className="panel-head"><div><h3>Personal details</h3><span>Only the fields you can maintain yourself are editable.</span></div></div>
       {!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
         {(["firstName", "lastName", "phone", "address", "emergencyContactName", "emergencyContactPhone"] as const).map(key => <label key={key}>{({ firstName: "First name", lastName: "Last name", phone: "Phone", address: "Address", emergencyContactName: "Emergency contact", emergencyContactPhone: "Emergency phone" } as const)[key]}<input value={basic[key]} onChange={event => setBasic(value => ({ ...value, [key]: event.target.value }))} /></label>)}
@@ -1027,6 +1028,45 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       notify(error instanceof Error ? error.message : "Employee import failed. Use the downloaded .xlsx template or a CSV exported from Excel.");
     }
   }
+}
+
+function ProfilePhotoPanel({ employee, session, notify, refreshWorkspace }: { employee?: EmployeeRecord; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  const canUpdate = hasPermission(session, "employee.self.update_basic");
+
+  async function save(profilePhoto: string) {
+    setSaving(true);
+    try {
+      await apiRequest("/employees/me/basic", { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify({ profilePhoto }) });
+      await refreshWorkspace();
+      notify(profilePhoto ? "Profile photo updated." : "Profile photo removed.");
+    } catch (error) {
+      notify(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function upload(file?: File) {
+    if (!file) return;
+    try {
+      await save(await preparePhoto(file));
+    } catch (error) {
+      notify(errorMessage(error));
+    }
+  }
+
+  return <section className="panel account-photo-panel"><div className="panel-head"><div><h3>Profile photo</h3><span>Shown only as your account avatar.</span></div></div>
+    {!employee ? <p className="muted">Link an employee record to this account to add a profile photo.</p> : <div className="account-photo-row">
+      <span className="account-photo-preview">{employee.photo ? <img src={employee.photo} alt="Your profile" /> : accountInitials(session.email)}</span>
+      <div className="account-photo-actions">
+        {canUpdate && <label className="button-like"><ImagePlus size={16} /> {employee.photo ? "Replace photo" : "Upload photo"}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={saving} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ""; }} /></label>}
+        {canUpdate && employee.photo && <button type="button" disabled={saving} onClick={() => void save("")}> <Trash2 size={16} /> Remove photo</button>}
+        {!canUpdate && <p className="muted">You do not have permission to change this photo.</p>}
+        <p className="muted">JPEG, PNG or WebP; up to 8 MB.</p>
+      </div>
+    </div>}
+  </section>;
 }
 
 function EmployeeMasterDataImportPreview({ rows, errors, existingEmployeeCodes, session, close, notify, refreshWorkspace }: {
@@ -2109,12 +2149,14 @@ function SettingsPage({
   state,
   setState,
   notify,
-  backendSession
+  backendSession,
+  refreshWorkspace
 }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   notify: (message: string) => void;
   backendSession: BackendSession | null;
+  refreshWorkspace: () => Promise<void>;
 }) {
   const canConfigureSystem = Boolean(backendSession && hasPermission(backendSession, "system.configure"));
   const canManageDepartments = Boolean(backendSession && hasPermission(backendSession, "department.manage"));
@@ -2148,6 +2190,7 @@ function SettingsPage({
   }
 
   return <section className="settings-grid">
+    {backendSession && <ProfilePhotoPanel employee={state.employees.find(item => item.id === backendSession.employeeId)} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} />}
     {canConfigureSystem && <div className="panel">
       <div className="panel-head"><h3>Data Protection</h3><span>Managed on Google Cloud</span></div>
       <p className="muted">The database and private document bucket are backed up by the server schedule. Restore operations are restricted to administrators with server access.</p>

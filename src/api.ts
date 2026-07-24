@@ -79,6 +79,7 @@ type BackendEmployee = {
   salary?: string | number;
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
+  profilePhoto?: string | null;
   department?: BackendDepartment | null;
   position?: { title: string; code: string } | null;
   manager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
@@ -403,6 +404,7 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
   return normalizeEmployee({
     id: employee.id,
     status: mapEmployeeStatus(employee.employmentStatus),
+    photo: employee.profilePhoto || undefined,
     fields: {
       ...fields,
       "Employee Code": employee.employeeCode,

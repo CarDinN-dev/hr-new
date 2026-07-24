@@ -518,6 +518,7 @@ model Employee {
   salary                Decimal          @db.Decimal(12, 2)
   emergencyContactName  String?
   emergencyContactPhone String?
+  profilePhoto          String?          @db.Text
   version               Int              @default(1)
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
