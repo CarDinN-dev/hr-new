@@ -10,6 +10,7 @@ export function testState(): HrState {
   ];
   const job = {
     id: "test-job",
+    version: 1,
     title: "Test Engineer",
     dept: "Service",
     openings: 1,
@@ -23,6 +24,7 @@ export function testState(): HrState {
     jobs: [job],
     candidates: [{
       id: "test-candidate",
+      version: 1,
       jobId: job.id,
       name: "Candidate Test",
       email: "candidate@example.invalid",

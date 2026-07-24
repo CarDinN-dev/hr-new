@@ -155,6 +155,11 @@ export class AttendanceService {
     const attendanceDate = this.companyDay(now);
     return this.attendanceTransaction(async (tx) => {
       await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
+      const openSession = await tx.attendance.findFirst({
+        where: { employeeId, deletedAt: null, checkIn: { not: null }, checkOut: null },
+        select: { id: true },
+      });
+      if (openSession) throw new BadRequestException('Employee is already checked in and must check out first');
       const existing = await tx.attendance.findUnique({
         where: { employeeId_attendanceDate: { employeeId, attendanceDate } },
       });
@@ -185,15 +190,15 @@ export class AttendanceService {
   async checkOut(dto: CheckAttendanceDto, user: RequestUser) {
     const employeeId = await this.resolveSelfOrHrEmployee(dto.employeeId, user);
     const now = new Date();
-    const attendanceDate = this.companyDay(now);
     return this.attendanceTransaction(async (tx) => {
-      await this.assertPayrollIsOpen(employeeId, attendanceDate, tx);
-      const record = await tx.attendance.findUnique({
-        where: { employeeId_attendanceDate: { employeeId, attendanceDate } },
+      const record = await tx.attendance.findFirst({
+        where: { employeeId, deletedAt: null, checkIn: { not: null }, checkOut: null },
+        orderBy: { checkIn: 'desc' },
       });
       if (!record?.checkIn || record.deletedAt) {
         throw new BadRequestException('Employee must check in before checking out');
       }
+      await this.assertPayrollIsOpen(employeeId, record.attendanceDate, tx);
       if (record.checkOut) {
         throw new BadRequestException('Employee is already checked out for today');
       }

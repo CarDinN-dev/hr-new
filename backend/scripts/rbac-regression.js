@@ -65,14 +65,17 @@ test('role inheritance and business separation match the production matrix', () 
     assert.equal(coo.has(permission), false, `COO must not mutate through ${permission}`);
     assert.equal(admin.has(permission), false, `ADMIN must not mutate through ${permission}`);
   }
+  assert.equal(employee.has('payroll.self.read_payslip'), false, 'EMPLOYEE must not access payroll');
+  for (const role of [cpo, coo]) assert.equal(role.has('payroll.read'), true, 'CPO and COO require payroll read access');
   for (const permission of [
     'system.read', 'user.read', 'user.manage', 'user.deactivate', 'user.delete_soft', 'role.read', 'role.manage', 'role.assign',
     'permission.read', 'permission.assign', 'session.manage', 'workflow.policy.read', 'workflow.policy.manage',
     'workflow.delegation.read', 'workflow.delegation.manage', 'audit.configure',
   ]) assert.equal(admin.has(permission), false, `ADMIN must not retain System access through ${permission}`);
-  for (const permission of ['settings.manage', 'system.configure', 'department.manage', 'payroll.read', 'audit.read', 'audit.export']) {
+  for (const permission of ['settings.manage', 'system.configure', 'department.manage', 'audit.read', 'audit.export']) {
     assert.equal(admin.has(permission), true, `ADMIN non-System access changed for ${permission}`);
   }
+  assert.equal(admin.has('payroll.read'), false, 'ADMIN must not access payroll');
   for (const permission of catalog.permissions) assert.equal(superAdmin.has(permission), true, `SUPER_ADMIN lacks ${permission}`);
 });
 

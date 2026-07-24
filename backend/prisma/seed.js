@@ -47,21 +47,16 @@ async function createInitialSuperAdmin(prisma) {
   if (!email) throw new Error('INITIAL_SUPER_ADMIN_EMAIL must be set before production seeding.');
   const role = await prisma.role.findUniqueOrThrow({ where: { code: 'SUPER_ADMIN' }, select: { id: true } });
   const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-  const passwordHash = existing ? undefined : await bcrypt.hash(requiredPassword('INITIAL_SUPER_ADMIN_PASSWORD'), saltRounds());
+  if (existing) {
+    throw new Error('Initial super-admin bootstrap has already been completed. Use the audited access-recovery process instead of re-running the seed.');
+  }
+  const passwordHash = await bcrypt.hash(requiredPassword('INITIAL_SUPER_ADMIN_PASSWORD'), saltRounds());
   const user = await prisma.$transaction(async (tx) => {
-    const account = await tx.user.upsert({
-      where: { email },
-      create: { email, passwordHash, isActive: true, localLoginEnabled: true },
-      update: { isActive: true, deletedAt: null },
-    });
-    await tx.userRole.upsert({
-      where: { userId_roleId: { userId: account.id, roleId: role.id } },
-      create: { userId: account.id, roleId: role.id, reason: 'Initial protected administrator bootstrap' },
-      update: { revokedAt: null, expiresAt: null, reason: 'Initial protected administrator bootstrap' },
-    });
+    const account = await tx.user.create({ data: { email, passwordHash, isActive: true, localLoginEnabled: true } });
+    await tx.userRole.create({ data: { userId: account.id, roleId: role.id, reason: 'Initial protected administrator bootstrap' } });
     return account;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  return { created: !existing, user: { id: user.id, email: user.email } };
+  return { created: true, user: { id: user.id, email: user.email } };
 }
 
 async function createTestPersonas(prisma, passwordHash) {

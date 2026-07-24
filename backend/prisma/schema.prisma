@@ -136,6 +136,22 @@ enum PayrollRunStatus {
   CANCELLED
 }
 
+enum PayrollRunType {
+  REGULAR
+  OFF_CYCLE
+}
+
+enum PayrollAdjustmentDirection {
+  EARNING
+  DEDUCTION
+}
+
+enum PayrollPaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
 enum ServiceRequestType {
   SALARY_CERTIFICATE
   EXPERIENCE_CERTIFICATE
@@ -519,6 +535,7 @@ model Employee {
   leaveRequests         LeaveRequest[]          @relation("EmployeeLeaveRequests")
   salaryRecords         SalaryRecord[]
   payrolls              Payroll[]               @relation("EmployeePayrolls")
+  payrollAdjustments    PayrollAdjustment[]
   serviceRequests       ServiceRequest[]        @relation("ServiceRequestSubject")
   performanceReviews    PerformanceReview[]     @relation("ReviewSubject")
   reviewsGiven          PerformanceReview[]     @relation("ReviewReviewer")
@@ -840,6 +857,13 @@ model SalaryRecord {
   id            String    @id @default(uuid())
   employeeId    String
   baseSalary    Decimal   @db.Decimal(12, 2)
+  hra           Decimal   @default(0) @db.Decimal(12, 2)
+  conveyance    Decimal   @default(0) @db.Decimal(12, 2)
+  mobile        Decimal   @default(0) @db.Decimal(12, 2)
+  food          Decimal   @default(0) @db.Decimal(12, 2)
+  fuel          Decimal   @default(0) @db.Decimal(12, 2)
+  other         Decimal   @default(0) @db.Decimal(12, 2)
+  grossAdjustment Decimal @default(0) @db.Decimal(12, 2)
   allowances    Decimal   @default(0) @db.Decimal(12, 2)
   deductions    Decimal   @default(0) @db.Decimal(12, 2)
   bonuses       Decimal   @default(0) @db.Decimal(12, 2)
@@ -863,6 +887,8 @@ model PayrollRun {
   year               Int
   month              Int
   revision           Int              @default(1)
+  runType            PayrollRunType   @default(REGULAR)
+  purpose            String?
   status             PayrollRunStatus @default(GENERATED)
   generatedByUserId  String
   generatedAt        DateTime         @default(now())
@@ -872,6 +898,7 @@ model PayrollRun {
   publishedAt        DateTime?
   paidByUserId       String?
   paidAt             DateTime?
+  paymentBatchReference String?
   cancelledByUserId  String?
   cancelledAt        DateTime?
   cancellationReason String?
@@ -891,6 +918,7 @@ model PayrollRun {
 
   @@unique([year, month, revision])
   @@index([status, year, month])
+  @@index([runType, year, month])
   @@index([generatedByUserId])
   @@index([correctionOfId])
 }
@@ -908,6 +936,12 @@ model Payroll {
   taxAmount        Decimal   @default(0) @db.Decimal(12, 2)
   grossPay         Decimal   @db.Decimal(12, 2)
   netPay           Decimal   @db.Decimal(12, 2)
+  paymentStatus    PayrollPaymentStatus @default(PENDING)
+  paymentReference String?
+  paymentReconciledAt DateTime?
+  paymentFailureReason String?
+  inputSnapshot    Json      @default("{}")
+  calculationHash  String    @default("")
   objectName       String?   @unique
   objectGeneration String?
   contentType      String?
@@ -925,11 +959,35 @@ model Payroll {
   revokedBy      User?             @relation("PayrollRevoker", fields: [revokedByUserId], references: [id], onDelete: Restrict)
   lineItems      PayrollLineItem[]
   loanRepayments LoanRepayment[]
+  adjustments    PayrollAdjustment[]
 
   @@unique([runId, employeeId])
   @@index([employeeId, year, month])
   @@index([runId])
   @@index([revokedByUserId])
+  @@index([paymentStatus])
+}
+
+model PayrollAdjustment {
+  id               String                     @id @default(uuid())
+  employeeId       String
+  year             Int
+  month            Int
+  direction        PayrollAdjustmentDirection
+  amount           Decimal                    @db.Decimal(12, 2)
+  taxable          Boolean                    @default(false)
+  description      String
+  reason           String
+  createdByUserId  String
+  appliedPayrollId String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  appliedPayroll Payroll? @relation(fields: [appliedPayrollId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, year, month])
+  @@index([appliedPayrollId])
 }
 
 model PerformanceReview {
@@ -1148,6 +1206,10 @@ model OrganizationSettings {
   halfDayHours           Decimal  @default(4) @db.Decimal(5, 2)
   loanCapType            String   @default("AMOUNT")
   loanCapValue           Decimal  @default(0) @db.Decimal(12, 2)
+  payrollProrationBasis  String   @default("FIXED_30")
+  payrollRequireBankDetails Boolean @default(true)
+  payrollRequireAttendance Boolean @default(false)
+  payrollVarianceThreshold Decimal @default(25) @db.Decimal(5, 2)
   financialPolicyVersion Int      @default(1)
   version                Int      @default(1)
   createdAt              DateTime @default(now())
@@ -1244,6 +1306,9 @@ model EmployeeBenefitProfile {
   overtimeEligible       Boolean  @default(false)
   companyFood            Boolean  @default(false)
   companyFuelCard        Boolean  @default(false)
+  companyConveyance      Boolean  @default(false)
+  companyFuel            Boolean  @default(false)
+  companyOther           Boolean  @default(false)
   version                Int      @default(1)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt

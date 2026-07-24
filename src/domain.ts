@@ -38,7 +38,7 @@ export function employeeSalary(employee: EmployeeRecord) {
   const fields = employee.fields;
   const basic = moneyValue(fields.Basic);
   const housing = moneyValue(fields.HRA);
-  const allowances = moneyValue(fields["Food Allowance"]) + moneyValue(fields["Mobile Allowance"]) + moneyValue(fields["Special Allowance"]) + moneyValue(fields["Transport Allowance"]);
+  const allowances = moneyValue(fields["Conveyance Allowance"]) + moneyValue(fields["Food Allowance"]) + moneyValue(fields["Mobile Allowance"]) + moneyValue(fields["Fuel Allowance"]) + moneyValue(fields["Other Allowance"]) + moneyValue(fields["Gross Adjustment"]) + moneyValue(fields["Special Allowance"]) + moneyValue(fields["Transport Allowance"]);
   const overtime = moneyValue(fields["Overtime Amount"]);
   const total = moneyValue(fields.Total) || basic + housing + allowances + overtime;
   return { basic, housing, allowances, overtime, total };
@@ -510,6 +510,7 @@ export function createEosRecord(state: HrState, employee: EmployeeRecord, asOf: 
   const summary = eosSummary(employee, state, asOf);
   return {
     id: newId(),
+    version: 1,
     employeeId: employee.id,
     asOf,
     reason,

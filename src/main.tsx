@@ -61,7 +61,7 @@ import {
   type RecruitmentJob
 } from "./data";
 import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
-import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet } from "./attendanceSheet";
+import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet, parseAttendanceWorkbook } from "./attendanceSheet";
 import {
   activeEmployees,
   attendanceDaySummary,
@@ -71,7 +71,6 @@ import {
   companyLoanDeductionCap,
   decideAttendance,
   createEosRecord,
-  deleteEmployee,
   documentNumber,
   employeeName,
   employeeSalary,
@@ -143,6 +142,9 @@ const employeeFieldOptions: Record<string, readonly string[]> = {
   "Salary Pay Type": ["Bank Transfer", "Cash", "Cheque"],
   "Company Accommodation": ["Yes", "No"],
   "Company Transportation": ["Yes", "No"],
+  "Company Conveyance": ["Yes", "No"],
+  "Company Fuel": ["Yes", "No"],
+  "Company Other": ["Yes", "No"],
   "Overtime Eligible": ["Yes", "No"],
   "Company Food": ["Yes", "No"],
   "Company Fuel Card": ["Yes", "No"]
@@ -278,7 +280,7 @@ function App() {
     queryKey: backendSession ? workspaceQueryKey(backendSession) : ["workspace", "signed-out"],
     queryFn: () => loadBackendState(stateRef.current, backendSession!),
     enabled: Boolean(backendSession),
-    staleTime: Number.POSITIVE_INFINITY
+    staleTime: 30_000
   });
   const workspaceLoadError = workspaceQuery.isError ? errorMessage(workspaceQuery.error) : "";
   const workspaceLoading = Boolean(backendSession) && !workspaceLoadError && (
@@ -584,7 +586,7 @@ function App() {
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} />}
           {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
-          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} />}
+          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
@@ -747,8 +749,8 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const broadLeave = hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
   const leaveRecords = useQuery({ queryKey: ["dashboard-leave", session.sessionId, session.authorizationVersion, broadLeave], queryFn: () => apiList<DashboardLeave>(broadLeave ? "/leave/requests" : "/leave/mine"), enabled: canReadLeave });
   const currentYear = new Date().getFullYear(); const currentMonth = new Date().getMonth() + 1;
-  const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}`), enabled: hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
-  const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}`), enabled: hasPermission(session, "payroll.payslip.read_all") });
+  const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
+  const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasPermission(session, "payroll.payslip.read_all") });
   const attendanceSummary = attendance.data?.summary;
   const byStatus = attendanceSummary?.byStatus;
   const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendanceSummary.totalRecords) } : fallbackAttendance;
@@ -892,7 +894,7 @@ function pageDescription(nav: NavItem) {
   return descriptions[nav];
 }
 
-function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean }) {
+function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
@@ -910,11 +912,20 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
   }
 
-  function remove(employee: EmployeeRecord) {
+  async function remove(employee: EmployeeRecord) {
     const confirmed = window.confirm(`Delete ${employeeName(employee)}? This also removes linked attendance, leave, payroll, expenses, trips, EOS records and generated documents.`);
     if (!confirmed) return;
-    setState(prev => deleteEmployee(prev, employee.id));
-    notify("Employee and linked records deleted.");
+    if (!session) {
+      notify("Your session has ended. Sign in again.");
+      return;
+    }
+    try {
+      await apiRequest(`/employees/${employee.id}`, { method: "DELETE", csrfToken: session.csrfToken });
+      await refreshWorkspace();
+      notify("Employee deleted.");
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   }
 
   return (
@@ -968,7 +979,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
                     <button onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canUpdate ? () => edit(employee) : undefined} savePdf={savePdf} canExport={canExport} canViewSalary={canViewSalary} />)}>Open profile</button>
                     {canUpdate && <button onClick={() => edit(employee)}>Edit</button>}
                     {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>PDF</button>}
-                    {canTerminate && <button className="danger-outline" onClick={() => remove(employee)}><Trash2 size={15} /> Delete</button>}
+                    {canTerminate && <button className="danger-outline" onClick={() => void remove(employee)}><Trash2 size={15} /> Delete</button>}
                   </div>
                 </article>
               );
@@ -995,12 +1006,17 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       const spreadsheet = /\.(xlsx|xlsm|xltx|xltm)$/i.test(file.name);
       const parsed = spreadsheet
         ? await parseEmployeeWorkbook(file)
-        : { rows: parseEmployeeSheet(await file.text()), skipped: 0 };
+        : { rows: parseEmployeeSheet(await file.text()), skipped: 0, errors: [], format: "generic" as const };
 
       if (parsed.rows.length > 5_000) throw new Error("Employee imports are limited to 5,000 rows at a time.");
 
       if (!parsed.rows.length) {
         notify(parsed.skipped ? `No employees were imported. ${parsed.skipped} row${parsed.skipped === 1 ? "" : "s"} need a unique Employee Code.` : "No employee rows were found in this file.");
+        return;
+      }
+
+      if (parsed.format === "master-data") {
+        setModal(<EmployeeMasterDataImportPreview rows={parsed.rows} errors={parsed.errors} existingEmployeeCodes={state.employees.map(employee => employee.fields["Employee Code"])} session={session} close={close} notify={notify} refreshWorkspace={refreshWorkspace} />);
         return;
       }
 
@@ -1011,6 +1027,63 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       notify(error instanceof Error ? error.message : "Employee import failed. Use the downloaded .xlsx template or a CSV exported from Excel.");
     }
   }
+}
+
+function EmployeeMasterDataImportPreview({ rows, errors, existingEmployeeCodes, session, close, notify, refreshWorkspace }: {
+  rows: Array<Record<string, string>>;
+  errors: string[];
+  existingEmployeeCodes: string[];
+  session: BackendSession | null | undefined;
+  close: () => void;
+  notify: (message: string) => void;
+  refreshWorkspace: () => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const existing = useMemo(() => new Set(existingEmployeeCodes.map(code => code.toLocaleLowerCase())), [existingEmployeeCodes]);
+  const updates = rows.filter(row => existing.has((row["Employee Code"] || "").toLocaleLowerCase())).length;
+  const adjustments = rows.filter(row => Number(row["Gross Adjustment"] || 0) !== 0).length;
+  const departments = new Set(rows.map(row => row.Department).filter(Boolean)).size;
+  const positions = new Set(rows.map(row => `${row.Department}:${row.Designation}`).filter(value => value !== ":")).size;
+
+  async function confirm() {
+    if (!session || errors.length) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const result = await apiRequest<{ created: number; updated: number; departments: number; positions: number }>("/employees/import-master-data", {
+        method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ rows: rows.map(masterDataImportRow) })
+      });
+      await refreshWorkspace();
+      close();
+      notify(`Employee import complete: ${result.created} added, ${result.updated} updated.`);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Employee import failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <div className="import-preview">
+    <div className="panel-head"><div><p className="section-label">Employee master data</p><h3>Review import</h3></div></div>
+    <p>{rows.length} valid employee rows: {rows.length - updates} new and {updates} existing records to update.</p>
+    <div className="profile-field-grid">
+      <div><span>Departments</span><strong>{departments}</strong></div><div><span>Positions</span><strong>{positions}</strong></div><div><span>Gross adjustments</span><strong>{adjustments}</strong></div>
+    </div>
+    {errors.length > 0 && <div className="form-error"><strong>Fix these rows before importing:</strong><ul>{errors.slice(0, 12).map(error => <li key={error}>{error}</li>)}</ul>{errors.length > 12 && <p>{errors.length - 12} more issue(s).</p>}</div>}
+    {submitError && <p className="form-error">{submitError}</p>}
+    <div className="table-wrap"><table><thead><tr><th>Employee Code</th><th>Employee</th><th>Department</th><th>Designation</th><th>Gross salary</th></tr></thead><tbody>{rows.slice(0, 12).map(row => <tr key={row["Employee Code"]}><td>{row["Employee Code"]}</td><td>{row["Full Name"]}</td><td>{row.Department}</td><td>{row.Designation}</td><td>{row.Total}</td></tr>)}</tbody></table>{rows.length > 12 && <p className="muted">Showing the first 12 records.</p>}</div>
+    <div className="modal-actions"><button type="button" onClick={close} disabled={submitting}>Cancel</button><button className="primary" type="button" onClick={() => void confirm()} disabled={submitting || errors.length > 0 || !session}>{submitting ? "Importing…" : "Confirm import"}</button></div>
+  </div>;
+}
+
+function masterDataImportRow(row: Record<string, string>) {
+  return {
+    employeeCode: row["Employee Code"], fullName: row["Full Name"], company: row.Company, wpsSponsor: row["WPS Sponsor"], designation: row.Designation,
+    department: row.Department, joiningDate: row["Joining Date"], gender: row.Gender, basic: row.Basic, hra: row.HRA,
+    conveyance: row["Conveyance Allowance"], mobile: row["Mobile Allowance"], food: row["Food Allowance"], fuel: row["Fuel Allowance"], other: row["Other Allowance"],
+    grossSalary: row.Total, companyConveyance: row["Company Conveyance"] === "Yes", companyFuel: row["Company Fuel"] === "Yes", companyOther: row["Company Other"] === "Yes"
+  };
 }
 
 function EmployeeEditor({ state, employee, save, close, notify }: {
@@ -1175,7 +1248,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
     if (!file) return;
     try {
       if (file.size > 10_000_000) throw new Error("Attendance imports are limited to 10 MB.");
-      const rows = parseAttendanceSheet(await file.text());
+      const rows = /\.xls$/i.test(file.name) ? await parseAttendanceWorkbook(file) : parseAttendanceSheet(await file.text());
       if (rows.length > 50_000) throw new Error("Attendance imports are limited to 50,000 rows at a time.");
       const result = applyAttendanceRows(state, rows);
       if (!result.imported) {
@@ -1200,7 +1273,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
           </div>
           {canManage && <div className="inline-controls">
             <button onClick={downloadAttendanceTemplate}><Download size={16} /> Template</button>
-            <label className="button-like"><Upload size={16} /> Import attendance<input type="file" accept=".xls,.html,.csv,.tsv,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
+            <label className="button-like"><Upload size={16} /> Import attendance<input type="file" accept=".xls,.html,.csv,.tsv,application/vnd.ms-excel,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
             <button onClick={() => setState(prev => markAllAttendance(prev, date, "P"))}>Mark all present</button>
             <button onClick={() => setState(prev => clearAttendanceDay(prev, date))}>Clear day</button>
           </div>}
@@ -1327,6 +1400,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
       ...prev,
       businessTrips: [...prev.businessTrips, {
         id: newId(),
+        version: 1,
         employeeId,
         destination,
         purpose,
@@ -1413,7 +1487,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
     if (!employeeId || !category.trim() || !date || !Number.isFinite(value) || value <= 0) return notify("Employee, category, date and positive amount are required.");
     setState(prev => ({
       ...prev,
-      expenses: [...prev.expenses, { id: newId(), employeeId, tripId: tripId || undefined, category, date, amount: value, description, status: "Submitted", createdOn: todayISO() }]
+      expenses: [...prev.expenses, { id: newId(), version: 1, employeeId, tripId: tripId || undefined, category, date, amount: value, description, status: "Submitted", createdOn: todayISO() }]
     }));
     setAmount("");
     setDescription("");
@@ -1683,6 +1757,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     if (!jobTitle.trim()) return notify("Job title is required.");
     const record: RecruitmentJob = {
       id: editingJobId || newId(),
+      version: editingJobId ? state.jobs.find(job => job.id === editingJobId)?.version ?? 1 : 1,
       title: jobTitle.trim(),
       dept: jobDept,
       openings: Math.max(1, Number(jobOpenings) || 1),
@@ -1702,14 +1777,13 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
 
   function deleteJob(id: string) {
     const job = state.jobs.find(item => item.id === id);
-    if (!confirmDelete(`${job?.title || "job opening"} and its linked candidates`)) return;
+    if (!confirmDelete(`${job?.title || "job opening"}. Candidate history will be retained.`)) return;
     setState(prev => ({
       ...prev,
-      jobs: prev.jobs.filter(job => job.id !== id),
-      candidates: prev.candidates.filter(candidate => candidate.jobId !== id)
+      jobs: prev.jobs.filter(job => job.id !== id)
     }));
     if (editingJobId === id) resetJobForm();
-    notify("Opening and linked candidates deleted.");
+    notify("Opening archived. Candidate history was retained.");
   }
 
   function resetCandidateForm() {
@@ -1738,6 +1812,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     if (!candidateName.trim()) return notify("Candidate name is required.");
     const record: RecruitmentCandidate = {
       id: editingCandidateId || newId(),
+      version: editingCandidateId ? state.candidates.find(candidate => candidate.id === editingCandidateId)?.version ?? 1 : 1,
       jobId: candidateJobId || state.jobs[0].id,
       name: candidateName.trim(),
       email: candidateEmail.trim(),
@@ -1758,6 +1833,8 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   }
 
   function moveCandidate(id: string, stage: RecruitmentCandidate["stage"]) {
+    const candidate = state.candidates.find(item => item.id === id);
+    if (candidate?.stage === "Hired" && stage !== "Hired") return notify("A hired candidate must be managed through the employee offboarding process.");
     setState(prev => ({
       ...prev,
       candidates: prev.candidates.map(candidate => candidate.id === id ? { ...candidate, stage } : candidate)
@@ -2049,16 +2126,10 @@ function SettingsPage({
   const [halfDayHours, setHalfDayHours] = useState(state.settings.halfDayHours);
   const [loanCapType, setLoanCapType] = useState(state.settings.loanDeductionCap.type);
   const [loanCapValue, setLoanCapValue] = useState(state.settings.loanDeductionCap.value);
-
-  async function updatePhoto(file?: File) {
-    if (!file) return;
-    try {
-      const accountPhoto = await preparePhoto(file);
-      setCompany(prev => ({ ...prev, accountPhoto }));
-    } catch (error) {
-      notify(errorMessage(error));
-    }
-  }
+  const [payrollProrationBasis, setPayrollProrationBasis] = useState(state.settings.payrollProrationBasis);
+  const [payrollRequireBankDetails, setPayrollRequireBankDetails] = useState(state.settings.payrollRequireBankDetails);
+  const [payrollRequireAttendance, setPayrollRequireAttendance] = useState(state.settings.payrollRequireAttendance);
+  const [payrollVarianceThreshold, setPayrollVarianceThreshold] = useState(state.settings.payrollVarianceThreshold);
 
   function saveSettings() {
     const nextDepartments = departments.split("\n").map(item => item.trim()).filter(Boolean);
@@ -2069,7 +2140,7 @@ function SettingsPage({
     }).filter(item => item.name);
     setState(prev => ({ ...prev, settings: {
       ...prev.settings,
-      ...(canConfigureSystem ? { company, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)), loanDeductionCap: { type: loanCapType, value: Math.max(0, loanCapType === "Percent" ? Math.min(100, loanCapValue) : loanCapValue) } } : {}),
+      ...(canConfigureSystem ? { company, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)), loanDeductionCap: { type: loanCapType, value: Math.max(0, loanCapType === "Percent" ? Math.min(100, loanCapValue) : loanCapValue) }, payrollProrationBasis, payrollRequireBankDetails, payrollRequireAttendance, payrollVarianceThreshold: Math.max(0, payrollVarianceThreshold) } : {}),
       ...(canManageDepartments ? { departments: nextDepartments } : {}),
       ...(canConfigureLeave ? { leaveTypes: nextLeaveTypes } : {})
     } }));
@@ -2077,17 +2148,6 @@ function SettingsPage({
   }
 
   return <section className="settings-grid">
-    {canConfigureSystem && <div className="panel account-photo-panel">
-      <div className="panel-head"><h3>Account Photo</h3><span>Shown in the sidebar</span></div>
-      <div className="account-photo-row">
-        <span className="account-photo-preview">{company.accountPhoto ? <img src={company.accountPhoto} alt="Account" /> : accountInitials(backendSession?.email || "HR")}</span>
-        <div className="account-photo-actions">
-          <label className="button-like"><Upload size={15} /> Upload photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { void updatePhoto(event.target.files?.[0]); event.target.value = ""; }} /></label>
-          {company.accountPhoto && <button onClick={() => setCompany(prev => ({ ...prev, accountPhoto: "" }))}>Remove</button>}
-          <p className="muted">JPEG, PNG or WebP under 8 MB. The app compresses it before saving.</p>
-        </div>
-      </div>
-    </div>}
     {canConfigureSystem && <div className="panel">
       <div className="panel-head"><h3>Data Protection</h3><span>Managed on Google Cloud</span></div>
       <p className="muted">The database and private document bucket are backed up by the server schedule. Restore operations are restricted to administrators with server access.</p>
@@ -2102,6 +2162,7 @@ function SettingsPage({
     {canConfigureLeave && <div className="panel"><div className="panel-head"><h3>Leave Types</h3><span>Format: Name:days</span></div><textarea id="settings-leave-types" name="settings-leave-types" aria-label="Leave types" value={leaveTypes} onChange={event => setLeaveTypes(event.target.value)} /></div>}
     {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>}
     {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>}
+    {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Payroll Controls</h3><span>These values are snapshotted on every run.</span></div><div className="form-grid compact"><label>Proration basis<select value={payrollProrationBasis} onChange={event => setPayrollProrationBasis(event.target.value as "Fixed 30" | "Calendar Days")}><option>Fixed 30</option><option>Calendar Days</option></select></label><label>Net pay variance warning (%)<input type="number" min="0" max="1000" step="0.01" value={payrollVarianceThreshold} onChange={event => setPayrollVarianceThreshold(Number(event.target.value) || 0)} /></label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireBankDetails} onChange={event => setPayrollRequireBankDetails(event.target.checked)} /> Require bank details before payroll</label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireAttendance} onChange={event => setPayrollRequireAttendance(event.target.checked)} /> Block payroll when attendance is missing</label></div><p className="muted">Bank data is required by default. Attendance can remain a warning while the rollout is in progress.</p></div>}
     <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>
   </section>;
 }
@@ -2193,7 +2254,11 @@ function hydrateState(value: Partial<HrState>): HrState {
       documentSeq: value.settings?.documentSeq ?? base.settings.documentSeq,
       workdayHours: value.settings?.workdayHours ?? base.settings.workdayHours,
       halfDayHours: value.settings?.halfDayHours ?? base.settings.halfDayHours,
-      loanDeductionCap: value.settings?.loanDeductionCap ?? base.settings.loanDeductionCap
+      loanDeductionCap: value.settings?.loanDeductionCap ?? base.settings.loanDeductionCap,
+      payrollProrationBasis: value.settings?.payrollProrationBasis ?? base.settings.payrollProrationBasis,
+      payrollRequireBankDetails: value.settings?.payrollRequireBankDetails ?? base.settings.payrollRequireBankDetails,
+      payrollRequireAttendance: value.settings?.payrollRequireAttendance ?? base.settings.payrollRequireAttendance,
+      payrollVarianceThreshold: value.settings?.payrollVarianceThreshold ?? base.settings.payrollVarianceThreshold
     }
   };
 }

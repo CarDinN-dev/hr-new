@@ -73,6 +73,32 @@ describe("employee sheet import", () => {
     expect(imported.errors[0]).toContain("duplicated");
   });
 
+  it("maps the employee master-data workbook using No as the employee code", () => {
+    const headers = ["No", "Master Data Name", "WPS Sponsor", "Working Company", "Designation", "LOB", "Date of Joining", "Gender", "BASIC", "HRA", "CONVEYANCE", "MOBILE", "Food", "Fuel", "OTHER", "GROSS SALARY"];
+    const imported = parseEmployeeWorkbookRows([headers, [
+      "MTC082", "K S Arora", "Medtech", "Medtech", "GENERAL MANAGER", "Medical", "14/09/2025", "Male",
+      "17500", "Comp", "7000", "0", "0", "Comp", "Comp", "40000"
+    ]]);
+
+    expect(imported.format).toBe("master-data");
+    expect(imported.skipped).toBe(0);
+    expect(imported.rows).toEqual([expect.objectContaining({
+      "Employee Code": "MTC082", "Full Name": "K S Arora", Department: "Medical", Designation: "GENERAL MANAGER", "Joining Date": "2025-09-14",
+      HRA: "0", "Conveyance Allowance": "7000.00", "Fuel Allowance": "0", "Other Allowance": "0",
+      "Company Fuel": "Yes", "Company Other": "Yes", "Gross Adjustment": "15500.00", Total: "40000.00"
+    })]);
+  });
+
+  it("rejects master-data rows with blank or duplicate No values", () => {
+    const headers = ["No", "Master Data Name", "WPS Sponsor", "Working Company", "Designation", "LOB", "Date of Joining", "Gender", "BASIC", "HRA", "CONVEYANCE", "MOBILE", "Food", "Fuel", "OTHER", "GROSS SALARY"];
+    const row = ["MTC001", "Employee One", "Medtech", "Medtech", "Analyst", "Medical", "2024-08-04", "Male", "1000", "500", "100", "0", "0", "0", "0", "1600"];
+    const imported = parseEmployeeWorkbookRows([headers, row, ["", ...row.slice(1)], row]);
+
+    expect(imported.rows).toHaveLength(1);
+    expect(imported.errors.join(" ")).toContain("blank");
+    expect(imported.errors.join(" ")).toContain("duplicated");
+  });
+
   it("opens the exact downloadable .xlsx template through the browser file path", async () => {
     const bytes = await readFile("public/templates/MedTech-Employee-Import-Template.xlsx");
     const buffer = new Uint8Array(bytes).buffer;

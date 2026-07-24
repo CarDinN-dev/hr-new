@@ -125,6 +125,7 @@ export class LeaveService {
   }
 
   async createBalance(dto: CreateLeaveBalanceDto, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'leave.configure' });
     await Promise.all([this.ensureEmployee(dto.employeeId), this.findTypeById(dto.leaveTypeId)]);
     this.assertBalanceValues(dto.totalDays, dto.usedDays ?? 0, dto.pendingDays ?? 0);
     return this.leaveTransaction(async (tx) => {
@@ -157,7 +158,8 @@ export class LeaveService {
     return this.leaveTransaction(async (tx) => {
       const balance = await tx.leaveBalance.findFirst({ where: { id, deletedAt: null } });
       if (!balance) throw new NotFoundException('Leave balance not found');
-      this.assertBalanceValues(dto.totalDays ?? balance.totalDays, dto.usedDays ?? balance.usedDays, dto.pendingDays ?? balance.pendingDays);
+      await this.authorization.assertEmployeeScope(user, balance.employeeId, { all: 'leave.configure' });
+      this.assertBalanceValues(dto.totalDays, balance.usedDays, balance.pendingDays);
       const updated = await tx.leaveBalance.update({ where: { id }, data: dto, include: leaveBalanceInclude });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'LeaveBalance', resourceId: id, summary: 'Leave balance updated', subjectEmployeeId: balance.employeeId, before: balance, after: updated });
       return updated;
@@ -168,6 +170,7 @@ export class LeaveService {
     return this.leaveTransaction(async (tx) => {
       const balance = await tx.leaveBalance.findFirst({ where: { id, deletedAt: null } });
       if (!balance) throw new NotFoundException('Leave balance not found');
+      await this.authorization.assertEmployeeScope(user, balance.employeeId, { all: 'leave.configure' });
       const active = await tx.leaveRequest.findFirst({
         where: { employeeId: balance.employeeId, leaveTypeId: balance.leaveTypeId, status: { in: [...activePendingStatuses, LeaveRequestStatus.APPROVED] }, deletedAt: null }, select: { id: true },
       });

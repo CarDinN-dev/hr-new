@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
 export class GeneratePayrollDto {
   @ApiProperty({ example: 2026 })
@@ -21,4 +21,15 @@ export class GeneratePayrollDto {
   @IsOptional()
   @IsUUID()
   employeeId?: string;
+
+  @ApiPropertyOptional({ enum: ['REGULAR', 'OFF_CYCLE'], default: 'REGULAR' })
+  @IsOptional()
+  @IsIn(['REGULAR', 'OFF_CYCLE'])
+  runType?: 'REGULAR' | 'OFF_CYCLE';
+
+  @ApiPropertyOptional({ description: 'Required for off-cycle payroll runs' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  purpose?: string;
 }

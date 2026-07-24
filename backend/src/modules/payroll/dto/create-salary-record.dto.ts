@@ -15,6 +15,34 @@ export class CreateSalaryRecordDto {
   baseSalary: string;
 
   @ApiPropertyOptional({ example: '5000.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  hra?: string;
+
+  @ApiPropertyOptional({ example: '2000.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  conveyance?: string;
+
+  @ApiPropertyOptional({ example: '250.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  mobile?: string;
+
+  @ApiPropertyOptional({ example: '500.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  food?: string;
+
+  @ApiPropertyOptional({ example: '300.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  fuel?: string;
+
+  @ApiPropertyOptional({ example: '150.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  other?: string;
+
+  @ApiPropertyOptional({ example: '-100.00', type: String })
+  @IsOptional() @Transform(asDecimalString) @IsDecimal({ decimal_digits: '0,2', force_decimal: false })
+  grossAdjustment?: string;
+
+  @ApiPropertyOptional({ example: '5000.00', type: String })
   @IsOptional()
   @Transform(asDecimalString)
   @IsDecimal({ decimal_digits: '0,2', force_decimal: false })

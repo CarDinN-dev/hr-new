@@ -13,7 +13,8 @@ export const employeeImportColumns = [
   "Work Permit Issue Date", "Work Permit Expiry Date", "Office File No.", "Access Card No.", "Bank Code", "IBAN No.", "Account No.",
   "Highest Education Qualification", "Year of Passing", "Passport No.", "Passport Place of Issue", "Passport Issue Date", "Passport Expiry Date",
   "License Type", "Driving License No.", "Driving License Expiry Date", "Insurance Card No.", "Insurance Issue Date", "Insurance Expiry Date",
-  "Basic", "HRA", "Food Allowance", "Mobile Allowance", "Special Allowance", "Overtime Amount", "Total"
+  "Basic", "HRA", "Conveyance Allowance", "Food Allowance", "Mobile Allowance", "Fuel Allowance", "Other Allowance", "Gross Adjustment", "Special Allowance", "Overtime Amount", "Total",
+  "Company Conveyance", "Company Fuel", "Company Other"
 ] as const;
 
 export const employeeProfileSections = [
@@ -21,8 +22,8 @@ export const employeeProfileSections = [
   { title: "Personal & Identity", fields: ["First Name", "Last Name", "Date of Birth", "Gender", "Marital Status", "Family Status (Yes/No)", "No. of Dependents", "Nationality", "Blood Group"] },
   { title: "Residency, Visa & Access", fields: ["Sponsor Name", "WPS Sponsor", "RP/ID Number", "RP/ID Profession", "QID Expiry Date", "Visa Type", "Work Permit No.", "Work Permit Issue Date", "Work Permit Expiry Date", "Office File No.", "Access Card No."] },
   { title: "Contact & Addresses", fields: ["Office Mobile No.", "Personal Mobile No.", "E-Mail ID (Work)", "Local Building/Villa #", "Local Street #", "Local Zone #", "International Apartment", "International Building", "International Floor", "International Street", "International State", "International Country", "International Zip Code"] },
-  { title: "Leave, Travel & Benefits", fields: ["Leave Policy", "Last Rejoin Date", "Annual Leave Balance (As on Date)", "Annual Leave Balance", "LOP Days (Loss of Pay)", "Travel Sector", "Travel Cost", "No. of Tickets - Employee (Year)", "Ticket Balance (%)", "No. of Tickets - Family", "Company Accommodation", "Company Transportation", "Overtime Eligible", "Company Food", "Company Fuel Card"] },
-  { title: "Bank & Salary", fields: ["Salary Pay Type", "Bank Code", "IBAN No.", "Account No.", "Basic", "HRA", "Food Allowance", "Mobile Allowance", "Special Allowance", "Overtime Amount", "Total"] },
+  { title: "Leave, Travel & Benefits", fields: ["Leave Policy", "Last Rejoin Date", "Annual Leave Balance (As on Date)", "Annual Leave Balance", "LOP Days (Loss of Pay)", "Travel Sector", "Travel Cost", "No. of Tickets - Employee (Year)", "Ticket Balance (%)", "No. of Tickets - Family", "Company Accommodation", "Company Transportation", "Overtime Eligible", "Company Food", "Company Fuel Card", "Company Conveyance", "Company Fuel", "Company Other"] },
+  { title: "Bank & Salary", fields: ["Salary Pay Type", "Bank Code", "IBAN No.", "Account No.", "Basic", "HRA", "Conveyance Allowance", "Food Allowance", "Mobile Allowance", "Fuel Allowance", "Other Allowance", "Gross Adjustment", "Special Allowance", "Overtime Amount", "Total"] },
   { title: "Qualifications & Documents", fields: ["Highest Education Qualification", "Year of Passing", "Passport No.", "Passport Place of Issue", "Passport Issue Date", "Passport Expiry Date", "License Type", "Driving License No.", "Driving License Expiry Date", "Insurance Card No.", "Insurance Issue Date", "Insurance Expiry Date"] },
   { title: "Emergency Contact", fields: ["Emergency Contact Name", "Emergency Contact Relationship", "Emergency Contact Mobile No."] }
 ] as const;
@@ -105,6 +106,7 @@ export type LoanRepayment = {
 
 export type BusinessTrip = {
   id: string;
+  version: number;
   employeeId: string;
   destination: string;
   purpose: string;
@@ -120,6 +122,7 @@ export type BusinessTrip = {
 
 export type EmployeeExpense = {
   id: string;
+  version: number;
   employeeId: string;
   tripId?: string;
   category: string;
@@ -135,6 +138,7 @@ export type CandidateStage = "Applied" | "Screening" | "Interview" | "Offer" | "
 
 export type RecruitmentJob = {
   id: string;
+  version: number;
   title: string;
   dept: string;
   openings: number;
@@ -145,6 +149,7 @@ export type RecruitmentJob = {
 
 export type RecruitmentCandidate = {
   id: string;
+  version: number;
   jobId: string;
   name: string;
   email: string;
@@ -158,6 +163,7 @@ export type RecruitmentCandidate = {
 
 export type EosRecord = {
   id: string;
+  version: number;
   employeeId: string;
   asOf: string;
   reason: string;
@@ -186,6 +192,7 @@ export type DocumentLog = {
 };
 
 export type HrSettings = {
+  organizationVersion: number;
   company: {
     name: string;
     legalName: string;
@@ -208,6 +215,10 @@ export type HrSettings = {
   workdayHours: number;
   halfDayHours: number;
   loanDeductionCap: { type: "Amount" | "Percent"; value: number };
+  payrollProrationBasis: "Fixed 30" | "Calendar Days";
+  payrollRequireBankDetails: boolean;
+  payrollRequireAttendance: boolean;
+  payrollVarianceThreshold: number;
 };
 
 export type HrState = {
@@ -326,8 +337,12 @@ export function normalizeEmployee(employee: EmployeeRecord): EmployeeRecord {
   const total = fields.Total || String(
     moneyField(fields.Basic) +
     moneyField(fields.HRA) +
+    moneyField(fields["Conveyance Allowance"]) +
     moneyField(fields["Food Allowance"]) +
     moneyField(fields["Mobile Allowance"]) +
+    moneyField(fields["Fuel Allowance"]) +
+    moneyField(fields["Other Allowance"]) +
+    moneyField(fields["Gross Adjustment"]) +
     moneyField(fields["Special Allowance"]) +
     moneyField(fields["Overtime Amount"])
   );
@@ -359,8 +374,9 @@ export function defaultState(): HrState {
     candidates: [],
     eosRecords: [],
     documents: [],
-    settings: {
-      company: {
+      settings: {
+        organizationVersion: 1,
+        company: {
         name: "MedTech",
         legalName: "MedTech Corporation Trading W.L.L.",
         tagline: "Human Resources Operations",
@@ -386,7 +402,11 @@ export function defaultState(): HrState {
       documentSeq: 0,
       workdayHours: 8,
       halfDayHours: 4,
-      loanDeductionCap: { type: "Amount", value: 0 }
+      loanDeductionCap: { type: "Amount", value: 0 },
+      payrollProrationBasis: "Fixed 30",
+      payrollRequireBankDetails: true,
+      payrollRequireAttendance: false,
+      payrollVarianceThreshold: 25
     }
   };
 }

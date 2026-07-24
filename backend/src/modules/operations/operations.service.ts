@@ -50,6 +50,7 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const trip = await tx.businessTrip.findFirst({ where: { id, deletedAt: null } });
       if (!trip) throw new NotFoundException('Business trip not found');
+      this.assertExpectedVersion(trip.version, dto.expectedVersion, 'Business trip');
       await this.assertManagerOrHr(trip.employeeId, user, tx, 'trip');
       const allowed: Record<TripStatus, TripStatus[]> = {
         PENDING: [TripStatus.APPROVED, TripStatus.REJECTED], APPROVED: [TripStatus.CLOSED], REJECTED: [], CLOSED: [],
@@ -91,6 +92,7 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const expense = await tx.employeeExpense.findFirst({ where: { id, deletedAt: null } });
       if (!expense) throw new NotFoundException('Expense not found');
+      this.assertExpectedVersion(expense.version, dto.expectedVersion, 'Expense');
       await this.assertManagerOrHr(expense.employeeId, user, tx, 'expense');
       const allowed: Record<ExpenseStatus, ExpenseStatus[]> = {
         SUBMITTED: [ExpenseStatus.APPROVED, ExpenseStatus.REJECTED], APPROVED: [ExpenseStatus.PAID], REJECTED: [], PAID: [],
@@ -139,9 +141,8 @@ export class OperationsService {
       const existing = await tx.recruitmentJob.findFirst({ where: { id, deletedAt: null } });
       if (!existing) throw new NotFoundException('Recruitment job not found');
       const now = new Date();
-      await tx.recruitmentCandidate.updateMany({ where: { jobId: id, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } });
-      const removed = await tx.recruitmentJob.update({ where: { id }, data: { deletedAt: now, version: { increment: 1 } } });
-      await this.record(tx, user, AuditAction.DELETE, 'RecruitmentJob', id, 'Recruitment job and linked candidates archived');
+      const removed = await tx.recruitmentJob.update({ where: { id }, data: { status: RecruitmentJobStatus.CLOSED, deletedAt: now, version: { increment: 1 } } });
+      await this.record(tx, user, AuditAction.DELETE, 'RecruitmentJob', id, 'Recruitment job archived; linked candidate records retained');
       return removed;
     });
   }
@@ -195,8 +196,12 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
       if (!candidate) throw new NotFoundException('Candidate not found');
+      this.assertExpectedVersion(candidate.version, dto.expectedVersion, 'Candidate');
       const order: CandidateStage[] = [CandidateStage.APPLIED, CandidateStage.SCREENING, CandidateStage.INTERVIEW, CandidateStage.OFFER, CandidateStage.HIRED];
       const rejection = dto.stage === CandidateStage.REJECTED;
+      if (candidate.stage === CandidateStage.HIRED && dto.stage !== CandidateStage.HIRED) {
+        throw new BadRequestException('A hired candidate cannot be rejected; use the employee offboarding process instead');
+      }
       const current = order.indexOf(candidate.stage);
       const next = order.indexOf(dto.stage);
       const linkingHiredEmployee = candidate.stage === CandidateStage.HIRED && dto.stage === CandidateStage.HIRED && Boolean(dto.employeeId);
@@ -270,6 +275,7 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const eos = await tx.eosRecord.findFirst({ where: { id, deletedAt: null } });
       if (!eos) throw new NotFoundException('End-of-service record not found');
+      this.assertExpectedVersion(eos.version, dto.expectedVersion, 'End-of-service record');
       await this.authorization.assertEmployeeScope(user, eos.employeeId, { all: 'eos.manage' });
       const allowed = eos.status === EosStatus.DRAFT ? EosStatus.APPROVED : eos.status === EosStatus.APPROVED ? EosStatus.PAID : null;
       if (dto.status !== allowed) throw new BadRequestException('Invalid end-of-service status transition');
@@ -284,6 +290,7 @@ export class OperationsService {
       const record = await tx.eosRecord.findFirst({ where: { id, deletedAt: null } });
       if (!record) throw new NotFoundException('End-of-service record not found');
       await this.authorization.assertEmployeeScope(user, record.employeeId, { all: 'eos.manage' });
+      if (record.status !== EosStatus.DRAFT) throw new BadRequestException('Only draft end-of-service records can be archived');
       const removed = await tx.eosRecord.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } } });
       await this.record(tx, user, AuditAction.DELETE, 'EosRecord', id, 'End-of-service record archived');
       return removed;
@@ -292,32 +299,45 @@ export class OperationsService {
 
   async getSettings(user: RequestUser) {
     this.assertSystemScope(user, 'organization.read', 'default');
-    return this.prisma.organizationSettings.findUnique({ where: { id: 'default' } });
+    const settings = await this.prisma.organizationSettings.findUnique({ where: { id: 'default' } });
+    if (!settings || this.authorization.permissionAllowedForScope(user, 'system.configure', AccessScopeType.ALL_SYSTEM, 'default')) return settings;
+    const publicSettings: Record<string, unknown> = { ...settings };
+    for (const key of ['wpsEmployerEid', 'wpsPayerEid', 'wpsPayerQid', 'wpsPayerBank', 'wpsPayerIban', 'accountPhoto']) delete publicSettings[key];
+    return publicSettings;
   }
 
   async updateSettings(dto: UpdateOrganizationSettingsDto, user: RequestUser) {
     this.assertSystemScope(user, 'system.configure', 'default');
     return this.transaction(async (tx) => {
       const previous = await tx.organizationSettings.findUnique({ where: { id: 'default' } });
+      if (previous && dto.expectedVersion !== previous.version) throw new ConflictException('Organization settings changed; refresh and retry');
+      const { expectedVersion: _expectedVersion, ...input } = dto;
       const data = {
-        ...dto,
-        workdayHours: dto.workdayHours === undefined ? undefined : nonNegativeMoney(dto.workdayHours, 'workdayHours'),
-        halfDayHours: dto.halfDayHours === undefined ? undefined : nonNegativeMoney(dto.halfDayHours, 'halfDayHours'),
-        loanCapValue: dto.loanCapValue === undefined ? undefined : nonNegativeMoney(dto.loanCapValue, 'loanCapValue'),
+        ...input,
+        workdayHours: input.workdayHours === undefined ? undefined : nonNegativeMoney(input.workdayHours, 'workdayHours'),
+        halfDayHours: input.halfDayHours === undefined ? undefined : nonNegativeMoney(input.halfDayHours, 'halfDayHours'),
+        loanCapValue: input.loanCapValue === undefined ? undefined : nonNegativeMoney(input.loanCapValue, 'loanCapValue'),
+        payrollVarianceThreshold: input.payrollVarianceThreshold === undefined ? undefined : nonNegativeMoney(input.payrollVarianceThreshold, 'payrollVarianceThreshold', '1000'),
       };
-      if (!previous && (!dto.name || !dto.legalName)) throw new BadRequestException('name and legalName are required when creating settings');
+      if (!previous && (!input.name || !input.legalName)) throw new BadRequestException('name and legalName are required when creating settings');
       const workdayHours = data.workdayHours ?? previous?.workdayHours ?? new Prisma.Decimal(8);
       const halfDayHours = data.halfDayHours ?? previous?.halfDayHours ?? new Prisma.Decimal(4);
       if (workdayHours.lte(0) || halfDayHours.lte(0) || halfDayHours.gt(workdayHours)) {
         throw new BadRequestException('Half-day hours must be positive and cannot exceed full-day hours');
       }
-      const capType = dto.loanCapType ?? previous?.loanCapType ?? 'AMOUNT';
+      const capType = input.loanCapType ?? previous?.loanCapType ?? 'AMOUNT';
       const capValue = data.loanCapValue ?? previous?.loanCapValue ?? ZERO_MONEY;
       if (capType === 'PERCENT' && capValue.gt(100)) throw new BadRequestException('Percentage loan cap cannot exceed 100');
+      const policyChanged = Boolean(previous && (
+        (input.payrollProrationBasis !== undefined && input.payrollProrationBasis !== previous.payrollProrationBasis)
+        || (input.payrollRequireBankDetails !== undefined && input.payrollRequireBankDetails !== previous.payrollRequireBankDetails)
+        || (input.payrollRequireAttendance !== undefined && input.payrollRequireAttendance !== previous.payrollRequireAttendance)
+        || (data.payrollVarianceThreshold !== undefined && !data.payrollVarianceThreshold.equals(previous.payrollVarianceThreshold))
+      ));
       const settings = await tx.organizationSettings.upsert({
         where: { id: 'default' },
         create: { id: 'default', name: dto.name!, legalName: dto.legalName!, ...data },
-        update: { ...data, version: { increment: 1 } },
+        update: { ...data, version: { increment: 1 }, ...(policyChanged ? { financialPolicyVersion: { increment: 1 } } : {}) },
       });
       await this.record(tx, user, previous ? AuditAction.UPDATE : AuditAction.CREATE, 'OrganizationSettings', 'default', 'Organization settings saved');
       return settings;
@@ -444,10 +464,10 @@ export class OperationsService {
       };
       const record = await delegate.findFirst({ where: { id, deletedAt: null } });
       if (!record) throw new NotFoundException(`${entityType} not found`);
+      if (record.status !== editableStatus) throw new BadRequestException(`Only an unprocessed ${entityType.toLowerCase()} can be deleted`);
       if (!this.authorization.permissionAllowedForScope(user, allPermission, AccessScopeType.ALL_EMPLOYEES, record.employeeId)) {
         const selfPermission = `${allPermission.split('.')[0]}.self.create`;
         if (!user.employeeId || record.employeeId !== user.employeeId || !this.authorization.permissionAllowedForScope(user, selfPermission, AccessScopeType.SELF, record.employeeId)) throw new NotFoundException(`${entityType} not found`);
-        if (record.status !== editableStatus) throw new BadRequestException(`Only an unprocessed ${entityType.toLowerCase()} can be deleted`);
       }
       const removed = await delegate.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } } });
       await this.record(tx, user, AuditAction.DELETE, entityType, id, `${entityType} archived`);
@@ -457,6 +477,10 @@ export class OperationsService {
 
   private transitionAudit(tx: Prisma.TransactionClient, user: RequestUser, entityType: string, entityId: string, previous: string, next: string) {
     return this.audit.record(tx, user, { action: AuditAction.TRANSITION, entityType, entityId, summary: `${entityType} status changed`, changes: [{ field: 'status', previousValue: previous, nextValue: next }] });
+  }
+
+  private assertExpectedVersion(actual: number, expected: number, entity: string) {
+    if (actual !== expected) throw new ConflictException(`${entity} changed; refresh and retry`);
   }
 
   private async transaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {

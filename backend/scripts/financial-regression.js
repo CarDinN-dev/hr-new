@@ -41,6 +41,38 @@ async function main() {
   });
   assert.equal(lopDays.toFixed(2), '1.50');
   assert.equal(money(new Prisma.Decimal('111600').div(30).times(lopDays)).toFixed(2), '5580.00');
+
+  const componentEmployee = {
+    id: 'employee-2', employeeCode: 'MTC082', firstName: 'Component', lastName: 'Test', hireDate: new Date('2026-07-01T00:00:00Z'), salary: new Prisma.Decimal('5000.00'),
+    bankAccount: { bankCode: 'BANK', iban: 'QA000000000000000000000001', accountNumber: null }, profile: null, credentials: [{ type: 'QID', number: '12345678901' }],
+    salaryRecords: [{ id: 'salary-1', version: 1, effectiveFrom: new Date('2026-01-01T00:00:00Z'), effectiveTo: null, baseSalary: new Prisma.Decimal('5000.00'), hra: new Prisma.Decimal('1000.00'), conveyance: new Prisma.Decimal(0), mobile: new Prisma.Decimal(0), food: new Prisma.Decimal(0), fuel: new Prisma.Decimal('200.00'), other: new Prisma.Decimal(0), grossAdjustment: new Prisma.Decimal(0), allowances: new Prisma.Decimal('1200.00'), deductions: new Prisma.Decimal(0), bonuses: new Prisma.Decimal(0), taxRate: new Prisma.Decimal(0) }],
+  };
+  const preflightClient = {
+    organizationSettings: { findUnique: async () => ({ payrollProrationBasis: 'FIXED_30', payrollRequireBankDetails: true, payrollRequireAttendance: false, payrollVarianceThreshold: new Prisma.Decimal(25), financialPolicyVersion: 3 }) },
+    employee: { findMany: async () => [componentEmployee] },
+    payrollAdjustment: { findMany: async () => [] },
+    attendance: { findMany: async () => [], count: async () => 1 },
+    leaveRequest: { findMany: async () => [] },
+    payroll: { findFirst: async () => null },
+    employeeLoan: { findMany: async () => [] },
+    loanRepayment: { findMany: async () => [] },
+  };
+  const componentPayroll = new PayrollService({}, new LoansService({}, {}, {}), {}, {}, {});
+  const componentPreflight = await componentPayroll.collectPayrollInputs({ year: 2026, month: 7 }, preflightClient);
+  assert.equal(componentPreflight.issues.filter((issue) => issue.severity === 'ERROR').length, 0);
+  assert.equal(componentPreflight.calculations[0].allowances.toFixed(2), '1200.00');
+  assert.equal(componentPreflight.calculations[0].grossPay.toFixed(2), '6200.00');
+  assert.ok(componentPreflight.calculations[0].lines.some((line) => line.description === 'Housing allowance' && line.amount.toFixed(2) === '1000.00'));
+  assert.ok(!componentPreflight.calculations[0].lines.some((line) => line.description === 'Allowances'));
+  assert.match(componentPreflight.calculations[0].calculationHash, /^[a-f0-9]{64}$/);
+
+  const joiner = { ...componentEmployee, id: 'employee-3', employeeCode: 'MTC083', hireDate: new Date('2026-07-16T00:00:00Z'), salaryRecords: [{ ...componentEmployee.salaryRecords[0], baseSalary: new Prisma.Decimal('3100.00'), hra: new Prisma.Decimal(0), fuel: new Prisma.Decimal(0), allowances: new Prisma.Decimal(0) }] };
+  preflightClient.organizationSettings.findUnique = async () => ({ payrollProrationBasis: 'CALENDAR_DAYS', payrollRequireBankDetails: true, payrollRequireAttendance: false, payrollVarianceThreshold: new Prisma.Decimal(25), financialPolicyVersion: 4 });
+  preflightClient.employee.findMany = async () => [joiner];
+  const joinerPreflight = await componentPayroll.collectPayrollInputs({ year: 2026, month: 7 }, preflightClient);
+  assert.equal(joinerPreflight.calculations[0].baseSalary.toFixed(2), '1600.00');
+  assert.equal(joinerPreflight.calculations[0].grossPay.toFixed(2), '1600.00');
+  assert.throws(() => componentPayroll.assertRunShape({ year: 2026, month: 7, runType: 'OFF_CYCLE' }, 'OFF_CYCLE'), /Off-cycle payroll requires/);
   console.log('Financial regression checks passed.');
 }
 

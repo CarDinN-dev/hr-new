@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
-import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } from '../../common/decorators/permissions.decorator';
+import { ANY_PERMISSIONS_KEY, PAYROLL_ROLES_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } from '../../common/decorators/permissions.decorator';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { hasActiveSuperAdminRole, hasActiveSystemAdministratorRole } from '../../common/authorization';
@@ -32,6 +32,12 @@ export class PermissionsGuard implements CanActivate {
     if (systemAdministratorOnly && (!request.user || !hasActiveSystemAdministratorRole(request.user))) {
       await this.recordDenial(context, 'Active Administrator role required');
       throw new ForbiddenException('Active Administrator role required');
+    }
+
+    const payrollRoles = this.reflector.getAllAndOverride<string[]>(PAYROLL_ROLES_KEY, [context.getHandler(), context.getClass()]);
+    if (payrollRoles?.length && !request.user?.roles.some((role) => payrollRoles.includes(role))) {
+      await this.recordDenial(context, 'Payroll role required');
+      throw new ForbiddenException('Payroll access is limited to HR, CPO, and COO roles');
     }
 
     const requiredAll = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);

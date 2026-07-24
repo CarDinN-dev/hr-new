@@ -42,7 +42,7 @@
         "attendance.self.read", "attendance.self.create", "attendance.self.correct_request",
         "leave.self.read", "leave.self.create", "leave.self.cancel",
         "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download",
-        "payroll.self.read_payslip", "expense.self.read", "expense.self.create", "trip.self.read", "trip.self.create", "loan.self.read", "document.self.read", "document.self.manage", "contract.self.read", "performance.self.read",
+        "expense.self.read", "expense.self.create", "trip.self.read", "trip.self.create", "loan.self.read", "document.self.read", "document.self.manage", "contract.self.read", "performance.self.read",
         "notification.self.read", "notification.self.manage"
       ]
     },
@@ -115,7 +115,6 @@
       "permissions": [
         "settings.read", "settings.manage", "system.configure", "department.read", "department.manage", "position.read", "position.manage", "announcement.read",
         "employee.read_all", "employee.hr.read_sensitive", "attendance.read_all", "leave.read_all", "leave.reassign", "service_request.read_all", "service_request.pdf.download_all",
-        "payroll.read", "payroll.read_compensation", "payroll.read_bank", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "payroll.audit.read",
         "expense.read_all", "trip.read_all", "loan.read_all", "document.read_all", "document.pdf.download_all", "contract.read_all", "performance.read_all", "recruitment.read", "eos.read", "report.read", "report.export", "import.run", "import.read",
         "audit.read", "audit.export"
       ]

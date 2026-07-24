@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { CandidateStage, EosStatus, ExpenseStatus, RecruitmentJobStatus, TripStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsDate, IsDecimal, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { IsBoolean, IsDate, IsDecimal, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 const asDecimal = ({ value }: { value: unknown }) => String(value);
@@ -32,8 +32,14 @@ export class CreateExpenseDto {
   @ApiProperty() @IsString() @Length(3, 1000) description: string;
 }
 
-export class TransitionTripDto { @ApiProperty({ enum: TripStatus }) @IsEnum(TripStatus) status: TripStatus; }
-export class TransitionExpenseDto { @ApiProperty({ enum: ExpenseStatus }) @IsEnum(ExpenseStatus) status: ExpenseStatus; }
+export class TransitionTripDto {
+  @ApiProperty({ enum: TripStatus }) @IsEnum(TripStatus) status: TripStatus;
+  @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) expectedVersion: number;
+}
+export class TransitionExpenseDto {
+  @ApiProperty({ enum: ExpenseStatus }) @IsEnum(ExpenseStatus) status: ExpenseStatus;
+  @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) expectedVersion: number;
+}
 
 export class CreateRecruitmentJobDto {
   @ApiProperty() @IsString() @Length(1, 150) title: string;
@@ -62,6 +68,7 @@ export class UpdateCandidateDto extends PartialType(CreateCandidateDto) {}
 export class TransitionCandidateDto {
   @ApiProperty({ enum: CandidateStage }) @IsEnum(CandidateStage) stage: CandidateStage;
   @ApiPropertyOptional() @IsOptional() @IsUUID() employeeId?: string;
+  @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) expectedVersion: number;
 }
 
 export class QueryRecruitmentDto extends PaginationQueryDto {
@@ -76,7 +83,10 @@ export class CreateEosDto {
   @ApiProperty() @IsString() @Length(3, 1000) reason: string;
 }
 
-export class TransitionEosDto { @ApiProperty({ enum: EosStatus }) @IsEnum(EosStatus) status: EosStatus; }
+export class TransitionEosDto {
+  @ApiProperty({ enum: EosStatus }) @IsEnum(EosStatus) status: EosStatus;
+  @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) expectedVersion: number;
+}
 
 class OrganizationSettingsInput {
   @IsString() @Length(1, 200) name: string;
@@ -92,11 +102,16 @@ class OrganizationSettingsInput {
   @Transform(emptyToNull) @IsOptional() @IsString() @Length(1, 100) wpsPayerQid?: string | null;
   @Transform(emptyToNull) @IsOptional() @IsString() @Length(1, 100) wpsPayerBank?: string | null;
   @Transform(emptyToNull) @IsOptional() @IsString() @Length(1, 100) wpsPayerIban?: string | null;
-  @Transform(emptyToNull) @IsOptional() @IsString() @Length(1, 750_000) accountPhoto?: string | null;
   @IsOptional() @Transform(asDecimal) @IsDecimal({ decimal_digits: '0,2', force_decimal: false }) workdayHours?: string;
   @IsOptional() @Transform(asDecimal) @IsDecimal({ decimal_digits: '0,2', force_decimal: false }) halfDayHours?: string;
   @IsOptional() @IsIn(['AMOUNT', 'PERCENT']) loanCapType?: 'AMOUNT' | 'PERCENT';
   @IsOptional() @Transform(asDecimal) @IsDecimal({ decimal_digits: '0,2', force_decimal: false }) loanCapValue?: string;
+  @IsOptional() @IsIn(['FIXED_30', 'CALENDAR_DAYS']) payrollProrationBasis?: 'FIXED_30' | 'CALENDAR_DAYS';
+  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() payrollRequireBankDetails?: boolean;
+  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() payrollRequireAttendance?: boolean;
+  @IsOptional() @Transform(asDecimal) @IsDecimal({ decimal_digits: '0,2', force_decimal: false }) payrollVarianceThreshold?: string;
 }
 
-export class UpdateOrganizationSettingsDto extends PartialType(OrganizationSettingsInput) {}
+export class UpdateOrganizationSettingsDto extends PartialType(OrganizationSettingsInput) {
+  @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) expectedVersion: number;
+}

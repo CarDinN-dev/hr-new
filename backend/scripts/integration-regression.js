@@ -198,8 +198,12 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal((await api('/system/users', {}, sessions.EMPLOYEE)).status, 403);
   assert.equal((await api('/system/users', {}, sessions.HR)).status, 403);
   assert.equal((await api('/system/users?limit=100', {}, sessions.SUPER_ADMIN)).status, 200);
-  for (const role of ['CPO', 'COO', 'ADMIN']) {
+  for (const role of ['CPO', 'COO']) {
     assert.equal((await api('/payroll/runs', {}, sessions[role])).status, 200);
+    assert.equal((await mutate('/payroll/runs', sessions[role], { year: 2098, month: 6 })).status, 403);
+  }
+  for (const role of ['EMPLOYEE', 'ADMIN', 'SUPER_ADMIN']) {
+    assert.equal((await api('/payroll/runs', {}, sessions[role])).status, 403);
     assert.equal((await mutate('/payroll/runs', sessions[role], { year: 2098, month: 6 })).status, 403);
   }
 
@@ -223,6 +227,35 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 200);
 
   const systemAdmin = sessions.SUPER_ADMIN;
+  const masterDataRow = (employeeCode, overrides = {}) => ({
+    employeeCode, fullName: 'Master Data Employee', company: 'Medtech', wpsSponsor: 'Medtech', designation: 'Master Data Analyst', department: 'Master Data Testing',
+    joiningDate: '2024-08-04', gender: 'Male', basic: '1000', hra: '500', conveyance: '200', mobile: '100', food: '0', fuel: '0', other: '0', grossSalary: '3000',
+    companyConveyance: false, companyFuel: true, companyOther: true, ...overrides,
+  });
+  assert.equal((await api('/employees/import-master-data', { method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-DENIED')] } }, sessions.EMPLOYEE)).status, 403);
+  const importedMasterData = await api('/employees/import-master-data', {
+    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1'), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
+  }, systemAdmin);
+  assert.equal(importedMasterData.status, 201, JSON.stringify(importedMasterData.payload));
+  assert.deepEqual(importedMasterData.data, { created: 2, updated: 0, departments: 1, positions: 1 });
+  const importedEmployee = await prisma.employee.findUniqueOrThrow({ where: { employeeCode: 'MTC-IMPORT-1' }, include: { department: true, position: true, profile: true, benefits: true, salaryRecords: true } });
+  assert.equal(importedEmployee.department.name, 'Master Data Testing');
+  assert.equal(importedEmployee.position.title, 'Master Data Analyst');
+  assert.equal(importedEmployee.profile.wpsSponsor, 'Medtech');
+  assert.equal(importedEmployee.benefits.companyFuel, true);
+  assert.equal(importedEmployee.salaryRecords[0].grossAdjustment.toFixed(2), '1200.00');
+  const reimportedMasterData = await api('/employees/import-master-data', {
+    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1', { grossSalary: '3200' }), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
+  }, systemAdmin);
+  assert.equal(reimportedMasterData.status, 201, JSON.stringify(reimportedMasterData.payload));
+  assert.deepEqual(reimportedMasterData.data, { created: 0, updated: 2, departments: 1, positions: 1 });
+  assert.equal(await prisma.employee.count({ where: { employeeCode: { in: ['MTC-IMPORT-1', 'MTC-IMPORT-2'] } } }), 2);
+  assert.equal((await prisma.salaryRecord.findFirstOrThrow({ where: { employeeId: importedEmployee.id, deletedAt: null } })).grossAdjustment.toFixed(2), '1400.00');
+  const failedImport = await api('/employees/import-master-data', {
+    method: 'POST', body: { rows: [masterDataRow('MTC-ROLLBACK-1'), masterDataRow('MTC-ROLLBACK-2', { basic: '4000', grossSalary: '3000' })] },
+  }, systemAdmin);
+  assert.equal(failedImport.status, 400);
+  assert.equal(await prisma.employee.count({ where: { employeeCode: { in: ['MTC-ROLLBACK-1', 'MTC-ROLLBACK-2'] } } }), 0);
   const systemRoles = (await api('/system/roles', {}, systemAdmin)).data;
   const hrRole = systemRoles.find((role) => role.code === 'HR');
   const lineManagerRole = systemRoles.find((role) => role.code === 'LINE_MANAGER');
@@ -361,6 +394,10 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   }, sessions.HR);
   assert.equal(loan.status, 201);
   assert.equal((await api(`/loans/${loan.data.id}/activate`, { method: 'PATCH' }, sessions.HR)).status, 200);
+  const bank = await api(`/employees/${sessions.EMPLOYEE.user.employeeId}/bank`, {
+    method: 'PATCH', body: { bankCode: 'TESTBANK', iban: 'QA000000000000000000000001' },
+  }, sessions.HR);
+  assert.equal(bank.status, 200, JSON.stringify(bank.payload));
 
   let payroll = await mutate('/payroll/runs', sessions.HR, { year: 2098, month: 6, employeeId: sessions.EMPLOYEE.user.employeeId });
   assert.equal(payroll.status, 201, JSON.stringify(payroll.payload));
@@ -368,8 +405,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(String(payroll.data.payrolls[0].deductions), '600');
   assert.equal(String(payroll.data.payrolls[0].netPay), '9400');
   const unpublishedPayslips = await api('/payroll/payslips/me?year=2098&month=6', {}, sessions.EMPLOYEE);
-  assert.equal(unpublishedPayslips.status, 200, JSON.stringify(unpublishedPayslips.payload));
-  assert.equal(unpublishedPayslips.data.length, 0);
+  assert.equal(unpublishedPayslips.status, 403, JSON.stringify(unpublishedPayslips.payload));
   payroll = await mutate(`/payroll/runs/${payroll.data.id}/submit`, sessions.HR, { expectedVersion: payroll.data.version, reason: 'Submit payroll' });
   assert.equal(payroll.status, 201);
   assert.equal((await mutate(`/payroll/runs/${payroll.data.id}/approve`, sessions.HR, { expectedVersion: payroll.data.version })).status, 403);
@@ -380,9 +416,11 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(payroll.data.status, 'PUBLISHED');
   assert.doesNotMatch(JSON.stringify(payroll.data), /objectName|objectGeneration|sha256/);
   const myPayslips = await api('/payroll/payslips/me?year=2098&month=6', {}, sessions.EMPLOYEE);
-  assert.equal(myPayslips.status, 200);
-  assert.equal(myPayslips.data.length, 1);
-  const payslipDownload = await api(`/payroll/payslips/${myPayslips.data[0].id}/download`, {}, sessions.EMPLOYEE);
+  assert.equal(myPayslips.status, 403);
+  const hrPayslips = await api('/payroll/payslips?year=2098&month=6', {}, sessions.HR);
+  assert.equal(hrPayslips.status, 200);
+  assert.equal(hrPayslips.data.length, 1);
+  const payslipDownload = await api(`/payroll/payslips/${hrPayslips.data[0].id}/download`, {}, sessions.HR);
   assert.equal(payslipDownload.status, 200);
   assert.equal(payslipDownload.buffer.subarray(0, 4).toString(), '%PDF');
   assert.equal((await api('/attendance/reports/summary?dateFrom=2098-06-01&dateTo=2098-06-30', {}, sessions.CPO)).status, 200);

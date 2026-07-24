@@ -4,6 +4,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
+import { ImportEmployeeMasterDataDto } from './dto/import-employee-master-data.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
@@ -19,6 +20,12 @@ export class EmployeesController {
   @Post()
   create(@Body() dto: CreateEmployeeDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.create(dto, user);
+  }
+
+  @Permissions('import.run', 'employee.hr.create', 'employee.hr.update', 'employee.hr.read_sensitive', 'department.manage', 'position.manage', 'payroll.configure')
+  @Post('import-master-data')
+  importMasterData(@Body() dto: ImportEmployeeMasterDataDto, @CurrentUser() user: RequestUser) {
+    return this.employeesService.importMasterData(dto, user);
   }
 
   @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')

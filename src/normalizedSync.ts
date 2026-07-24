@@ -10,18 +10,22 @@ export async function persistNormalizedStateDelta(before: HrState, after: HrStat
   });
   const needsDepartments = hasAnyPermission(session, "department.manage", "employee.hr.create", "employee.hr.update", "recruitment.manage");
   const needsLeaveTypes = hasAnyPermission(session, "leave.configure", "leave.self.create", "leave.hr.manage");
+  const needsEmployeeRelations = hasAnyPermission(session, "employee.hr.create", "employee.hr.update");
   const [existingDepartments, existingLeaveTypes] = await Promise.all([
     needsDepartments ? apiList<BackendRecord>("/departments") : Promise.resolve([]),
     needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([])
   ]);
   await syncSettings(before, after, existingDepartments, existingLeaveTypes, request, session);
-  const [departments, leaveTypes] = await Promise.all([
+  const [departments, leaveTypes, positions] = await Promise.all([
     needsDepartments ? apiList<BackendRecord>("/departments") : Promise.resolve([]),
-    needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([])
+    needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([]),
+    needsEmployeeRelations && hasPermission(session, "position.read") ? apiList<BackendRecord>("/job-positions") : Promise.resolve([])
   ]);
   const departmentIds = new Map(departments.map(row => [String(row.name), String(row.id)]));
+  const positionIds = new Map(positions.map(row => [`${String(row.departmentId)}:${String(row.title).trim().toLocaleLowerCase()}`, String(row.id)]));
+  const employeeIds = new Map(before.employees.map(employee => [employee.fields["Employee Code"].trim().toLocaleLowerCase(), employee.id]));
   if (hasAnyPermission(session, "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "payroll.configure", "payroll.update_bank")) {
-    await syncEmployees(before, after, departmentIds, request, session);
+    await syncEmployees(before, after, departmentIds, positionIds, employeeIds, request, session);
   }
   if (hasPermission(session, "attendance.hr.manage")) await syncAttendance(before, after, request);
   if (hasAnyPermission(session, "trip.self.create", "trip.team.approve_manager", "trip.management.approve_manager", "trip.hr.manage")) await syncTrips(before, after, request);
@@ -34,7 +38,7 @@ export async function persistNormalizedStateDelta(before: HrState, after: HrStat
 
 type RequestFn = <T>(path: string, method: string, body?: unknown) => Promise<T>;
 
-async function syncEmployees(before: HrState, after: HrState, departmentIds: Map<string, string>, request: RequestFn, session: BackendSession) {
+async function syncEmployees(before: HrState, after: HrState, departmentIds: Map<string, string>, positionIds: Map<string, string>, employeeIds: Map<string, string>, request: RequestFn, session: BackendSession) {
   const previous = byId(before.employees);
   const current = byId(after.employees);
   const canCreate = hasPermission(session, "employee.hr.create");
@@ -46,14 +50,15 @@ async function syncEmployees(before: HrState, after: HrState, departmentIds: Map
   for (const employee of after.employees) {
     const old = previous.get(employee.id);
     if (!old && canCreate) {
-      const created = await request<BackendRecord>("/employees", "POST", employeePayload(employee, departmentIds));
+      const created = await request<BackendRecord>("/employees", "POST", employeePayload(employee, departmentIds, positionIds, employeeIds));
       const employeeId = String(created.id);
+      employeeIds.set(employee.fields["Employee Code"].trim().toLocaleLowerCase(), employeeId);
       if (canUpdateSensitive) await request(`/employees/${employeeId}/details`, "PATCH", employeeDetailsPayload(employee));
       if (canUpdateBank) await request(`/employees/${employeeId}/bank`, "PATCH", employeeBankPayload(employee));
       if (canConfigureSalary) await request("/payroll/salary-records", "POST", salaryRecordPayload(employeeId, employee));
     } else if (old) {
-      if (canUpdate && !same(employeePayload(old, departmentIds), employeePayload(employee, departmentIds))) {
-        await request(`/employees/${employee.id}`, "PATCH", employeePayload(employee, departmentIds));
+      if (canUpdate && !same(employeePayload(old, departmentIds, positionIds, employeeIds), employeePayload(employee, departmentIds, positionIds, employeeIds))) {
+        await request(`/employees/${employee.id}`, "PATCH", employeePayload(employee, departmentIds, positionIds, employeeIds));
       }
       if (canUpdateSensitive && !same(employeeDetailsPayload(old), employeeDetailsPayload(employee))) {
         await request(`/employees/${employee.id}/details`, "PATCH", employeeDetailsPayload(employee));
@@ -95,7 +100,8 @@ function employeeDetailsPayload(employee: EmployeeRecord) {
     benefits: {
       travelSector: f["Travel Sector"], travelCost: money(f["Travel Cost"]), employeeTicketsPerYear: Number(f["No. of Tickets - Employee (Year)"] || 0),
       ticketBalancePercent: money(f["Ticket Balance (%)"]), familyTickets: Number(f["No. of Tickets - Family"] || 0), companyAccommodation: yes("Company Accommodation"),
-      companyTransportation: yes("Company Transportation"), overtimeEligible: yes("Overtime Eligible"), companyFood: yes("Company Food"), companyFuelCard: yes("Company Fuel Card")
+      companyTransportation: yes("Company Transportation"), overtimeEligible: yes("Overtime Eligible"), companyFood: yes("Company Food"), companyFuelCard: yes("Company Fuel Card"),
+      companyConveyance: yes("Company Conveyance"), companyFuel: yes("Company Fuel"), companyOther: yes("Company Other")
     },
     credentials: [
       credential("QID", "RP/ID Number", "RP/ID Profession", undefined, undefined, "QID Expiry Date"),
@@ -108,13 +114,21 @@ function employeeDetailsPayload(employee: EmployeeRecord) {
   };
 }
 
-function employeePayload(employee: EmployeeRecord, departmentIds: Map<string, string>) {
+function employeePayload(employee: EmployeeRecord, departmentIds: Map<string, string>, positionIds: Map<string, string>, employeeIds: Map<string, string>) {
   const f = employee.fields;
   const status = ({ Active: "ACTIVE", "On Leave": "ON_LEAVE", Resigned: "RESIGNED", Terminated: "TERMINATED" } as const)[employee.status];
+  const departmentId = departmentIds.get(f.Department);
+  const designation = f.Designation.trim();
+  const positionId = departmentId && designation ? positionIds.get(`${departmentId}:${designation.toLocaleLowerCase()}`) : undefined;
+  const managerLabel = f["Reporting Manager Employee Code/Name"].trim();
+  const managerCode = managerLabel.split(" - ", 1)[0].trim().toLocaleLowerCase();
+  const managerId = managerCode ? employeeIds.get(managerCode) : undefined;
+  if (designation && departmentId && !positionId) throw new Error(`No active position matches ${designation} in ${f.Department}.`);
+  if (managerLabel && !managerId) throw new Error(`Reporting manager ${managerLabel} was not found.`);
   return compact({
     employeeCode: f["Employee Code"], firstName: f["First Name"], lastName: f["Last Name"],
     email: f["E-Mail ID (Work)"] || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
-    hireDate: f["Joining Date"], employmentStatus: status, departmentId: departmentIds.get(f.Department)
+    hireDate: f["Joining Date"], employmentStatus: status, departmentId, positionId, managerId
   });
 }
 
@@ -125,9 +139,17 @@ function employeeBankPayload(employee: EmployeeRecord) {
 
 function employeeSalaryPayload(employee: EmployeeRecord) {
   const fields = employee.fields;
+  const hra = money(fields.HRA);
+  const conveyance = money(fields["Conveyance Allowance"]) + money(fields["Transport Allowance"]);
+  const mobile = money(fields["Mobile Allowance"]);
+  const food = money(fields["Food Allowance"]);
+  const fuel = money(fields["Fuel Allowance"]);
+  const other = money(fields["Other Allowance"]) + money(fields["Special Allowance"]);
+  const grossAdjustment = money(fields["Gross Adjustment"]);
   return {
     baseSalary: money(fields.Basic),
-    allowances: money(fields.HRA) + money(fields["Food Allowance"]) + money(fields["Mobile Allowance"]) + money(fields["Special Allowance"]),
+    hra, conveyance, mobile, food, fuel, other, grossAdjustment,
+    allowances: 0,
     bonuses: money(fields["Overtime Amount"]),
     deductions: 0,
     taxRate: 0
@@ -155,7 +177,7 @@ async function syncAttendance(before: HrState, after: HrState, request: RequestF
       continue;
     }
     const payload = {
-      employeeId, attendanceDate: day, status: attendanceStatus(nextCode),
+      employeeId, attendanceDate: day, status: oldCode === nextCode && existing ? String(existing.status) : attendanceStatus(nextCode),
       approvalStatus: nextApproval === "Approved" ? "APPROVED" : "NOT_APPROVED",
       correctionReason: existing ? "Attendance updated in HR console" : undefined
     };
@@ -169,7 +191,7 @@ async function syncTrips(before: HrState, after: HrState, request: RequestFn) {
   for (const trip of after.businessTrips) {
     const old = previous.get(trip.id);
     if (!old) await request("/business-trips", "POST", { employeeId: trip.employeeId, destination: trip.destination, purpose: trip.purpose, startDate: trip.from, endDate: trip.to, perDiem: String(trip.perDiem), travelCost: String(trip.travelCost), advanceAmount: String(trip.advanceAmount) });
-    else if (old.status !== trip.status) await request(`/business-trips/${trip.id}/status`, "PATCH", { status: enumValue(trip.status) });
+    else if (old.status !== trip.status) await request(`/business-trips/${trip.id}/status`, "PATCH", { status: enumValue(trip.status), expectedVersion: old.version });
   }
   for (const trip of before.businessTrips) if (!current.has(trip.id)) await request(`/business-trips/${trip.id}`, "DELETE");
 }
@@ -179,7 +201,7 @@ async function syncExpenses(before: HrState, after: HrState, request: RequestFn)
   for (const expense of after.expenses) {
     const old = previous.get(expense.id);
     if (!old) await request("/expenses", "POST", { employeeId: expense.employeeId, tripId: expense.tripId, category: expense.category, expenseDate: expense.date, amount: String(expense.amount), description: expense.description });
-    else if (old.status !== expense.status) await request(`/expenses/${expense.id}/status`, "PATCH", { status: enumValue(expense.status) });
+    else if (old.status !== expense.status) await request(`/expenses/${expense.id}/status`, "PATCH", { status: enumValue(expense.status), expectedVersion: old.version });
   }
   for (const expense of before.expenses) if (!current.has(expense.id)) await request(`/expenses/${expense.id}`, "DELETE");
 }
@@ -207,16 +229,22 @@ async function syncLoans(before: HrState, after: HrState, request: RequestFn) {
 
 async function syncRecruitment(before: HrState, after: HrState, departmentIds: Map<string, string>, request: RequestFn) {
   const oldJobs = byId(before.jobs); const currentJobs = byId(after.jobs);
+  const serverJobIds = new Map(before.jobs.map(job => [job.id, job.id]));
   for (const job of after.jobs) {
     const old = oldJobs.get(job.id);
     const payload = { title: job.title, departmentId: departmentIds.get(job.dept), openings: job.openings, postedOn: job.postedOn, description: job.description || undefined, status: enumValue(job.status) };
-    if (!old) await request("/recruitment/jobs", "POST", { ...payload, status: undefined });
+    if (!old) {
+      const created = await request<BackendRecord>("/recruitment/jobs", "POST", { ...payload, status: undefined });
+      serverJobIds.set(job.id, String(created.id));
+    }
     else if (!same({ ...payload, status: enumValue(old.status), title: old.title, departmentId: departmentIds.get(old.dept), openings: old.openings, postedOn: old.postedOn, description: old.description || undefined }, payload)) await request(`/recruitment/jobs/${job.id}`, "PATCH", payload);
   }
   const oldCandidates = byId(before.candidates); const current = byId(after.candidates);
   for (const candidate of after.candidates) {
     const old = oldCandidates.get(candidate.id);
-    const payload = { jobId: candidate.jobId, name: candidate.name, email: candidate.email, phone: candidate.phone || undefined, rating: String(candidate.rating), notes: candidate.notes || undefined, appliedOn: candidate.appliedOn };
+    let nextVersion = old?.version;
+    const jobId = serverJobIds.get(candidate.jobId) ?? candidate.jobId;
+    const payload = { jobId, name: candidate.name, email: candidate.email, phone: candidate.phone || undefined, rating: String(candidate.rating), notes: candidate.notes || undefined, appliedOn: candidate.appliedOn };
     if (!old) await request("/recruitment/candidates", "POST", payload);
     else {
       const oldPayload = { jobId: old.jobId, name: old.name, email: old.email, phone: old.phone || undefined, rating: String(old.rating), notes: old.notes || undefined, appliedOn: old.appliedOn };
@@ -227,17 +255,19 @@ async function syncRecruitment(before: HrState, after: HrState, departmentIds: M
       const oldIndex = stages.indexOf(old.stage);
       const nextIndex = stages.indexOf(candidate.stage);
       if (candidate.stage === "Rejected") {
-        await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: "REJECTED" });
+        await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: "REJECTED", expectedVersion: nextVersion });
+        nextVersion = (nextVersion ?? 0) + 1;
       } else if (oldIndex >= 0 && nextIndex > oldIndex) {
         for (let index = oldIndex + 1; index <= nextIndex; index += 1) {
-          await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: enumValue(stages[index]) });
+          await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: enumValue(stages[index]), expectedVersion: nextVersion });
+          nextVersion = (nextVersion ?? 0) + 1;
         }
       } else {
         throw new Error("Candidate stages can only move forward or be rejected.");
       }
     }
     if (old && candidate.stage === "Hired" && candidate.employeeId && candidate.employeeId !== old.employeeId) {
-      await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: "HIRED", employeeId: candidate.employeeId });
+      await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: "HIRED", employeeId: candidate.employeeId, expectedVersion: nextVersion });
     }
   }
   for (const candidate of before.candidates) if (!current.has(candidate.id)) await request(`/recruitment/candidates/${candidate.id}`, "DELETE");
@@ -249,15 +279,15 @@ async function syncEos(before: HrState, after: HrState, request: RequestFn) {
   for (const eos of after.eosRecords) {
     const old = previous.get(eos.id);
     if (!old) await request("/eos", "POST", { employeeId: eos.employeeId, asOf: eos.asOf, reason: eos.reason });
-    else if (old.status !== eos.status) await request(`/eos/${eos.id}/status`, "PATCH", { status: enumValue(eos.status) });
+    else if (old.status !== eos.status) await request(`/eos/${eos.id}/status`, "PATCH", { status: enumValue(eos.status), expectedVersion: old.version });
   }
   for (const eos of before.eosRecords) if (!current.has(eos.id)) await request(`/eos/${eos.id}`, "DELETE");
 }
 
 async function syncSettings(before: HrState, after: HrState, departments: BackendRecord[], leaveTypes: BackendRecord[], request: RequestFn, session: BackendSession) {
-  if (hasPermission(session, "system.configure") && (!same(before.settings.company, after.settings.company) || before.settings.workdayHours !== after.settings.workdayHours || before.settings.halfDayHours !== after.settings.halfDayHours || !same(before.settings.loanDeductionCap, after.settings.loanDeductionCap))) {
-    const company = after.settings.company;
-    await request("/organization-settings", "PATCH", { ...company, workdayHours: String(after.settings.workdayHours), halfDayHours: String(after.settings.halfDayHours), loanCapType: enumValue(after.settings.loanDeductionCap.type), loanCapValue: String(after.settings.loanDeductionCap.value) });
+  if (hasPermission(session, "system.configure") && (!same(before.settings.company, after.settings.company) || before.settings.workdayHours !== after.settings.workdayHours || before.settings.halfDayHours !== after.settings.halfDayHours || !same(before.settings.loanDeductionCap, after.settings.loanDeductionCap) || before.settings.payrollProrationBasis !== after.settings.payrollProrationBasis || before.settings.payrollRequireBankDetails !== after.settings.payrollRequireBankDetails || before.settings.payrollRequireAttendance !== after.settings.payrollRequireAttendance || before.settings.payrollVarianceThreshold !== after.settings.payrollVarianceThreshold)) {
+    const { accountPhoto: _accountPhoto, ...company } = after.settings.company;
+    await request("/organization-settings", "PATCH", { ...company, expectedVersion: before.settings.organizationVersion, workdayHours: String(after.settings.workdayHours), halfDayHours: String(after.settings.halfDayHours), loanCapType: enumValue(after.settings.loanDeductionCap.type), loanCapValue: String(after.settings.loanDeductionCap.value), payrollProrationBasis: after.settings.payrollProrationBasis === "Calendar Days" ? "CALENDAR_DAYS" : "FIXED_30", payrollRequireBankDetails: after.settings.payrollRequireBankDetails, payrollRequireAttendance: after.settings.payrollRequireAttendance, payrollVarianceThreshold: String(after.settings.payrollVarianceThreshold) });
   }
   if (hasPermission(session, "department.manage")) {
     const backendDepartments = new Map(departments.map(row => [String(row.name), String(row.id)]));

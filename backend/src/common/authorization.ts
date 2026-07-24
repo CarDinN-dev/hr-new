@@ -1,5 +1,11 @@
 import { RequestUser } from './types/request-user.type';
 
+export const payrollRoleCodes = ['HR', 'CPO', 'COO'] as const;
+
+export function hasPayrollRole(user: Pick<RequestUser, 'roles'>) {
+  return payrollRoleCodes.some((role) => user.roles.includes(role));
+}
+
 export function hasActiveSuperAdminRole(user: Pick<RequestUser, 'isSuperAdmin' | 'roles'>) {
   return user.isSuperAdmin && user.roles.includes('SUPER_ADMIN');
 }

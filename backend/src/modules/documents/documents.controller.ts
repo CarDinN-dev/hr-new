@@ -5,7 +5,6 @@ import { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AnyPermission } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
-import { CreateDocumentDto } from './dto/create-document.dto';
 import { QueryDocumentsDto } from './dto/query-documents.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { DocumentsService } from './documents.service';
@@ -16,12 +15,6 @@ import { UploadDocumentDto } from './dto/upload-document.dto';
 @Controller('documents')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
-
-  @AnyPermission('document.self.manage', 'document.hr.manage')
-  @Post()
-  create(@Body() dto: CreateDocumentDto, @CurrentUser() user: RequestUser) {
-    return this.documentsService.create(dto, user);
-  }
 
   @ApiConsumes('multipart/form-data')
   @AnyPermission('document.self.manage', 'document.hr.manage')

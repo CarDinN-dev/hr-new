@@ -252,6 +252,7 @@ describe("HR domain", () => {
     employee.fields["Annual Leave Balance"] = "5";
     state.businessTrips = [{
       id: "BT-1",
+      version: 1,
       employeeId: employee.id,
       destination: "Riyadh",
       purpose: "Client visit",
@@ -265,8 +266,8 @@ describe("HR domain", () => {
       createdOn: "2026-06-20"
     }];
     state.expenses = [
-      { id: "EX-1", employeeId: employee.id, category: "Hotel", date: "2026-07-03", amount: 300, description: "Stay", status: "Approved", createdOn: "2026-07-04" },
-      { id: "EX-2", employeeId: employee.id, category: "Meal", date: "2026-07-03", amount: 75, description: "Dinner", status: "Paid", createdOn: "2026-07-04" }
+      { id: "EX-1", version: 1, employeeId: employee.id, category: "Hotel", date: "2026-07-03", amount: 300, description: "Stay", status: "Approved", createdOn: "2026-07-04" },
+      { id: "EX-2", version: 1, employeeId: employee.id, category: "Meal", date: "2026-07-03", amount: 75, description: "Dinner", status: "Paid", createdOn: "2026-07-04" }
     ];
 
     const summary = eosSummary(employee, state, "2026-07-31");

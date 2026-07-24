@@ -241,7 +241,7 @@ export async function loadBackendState(current: HrState, session: BackendSession
     email: String(settings.email || ""), website: String(settings.website || ""), currency: String(settings.currency || "QAR"),
     wpsEmployerEid: String(settings.wpsEmployerEid || ""), wpsPayerEid: String(settings.wpsPayerEid || ""),
     wpsPayerQid: String(settings.wpsPayerQid || ""), wpsPayerBank: String(settings.wpsPayerBank || ""), wpsPayerIban: String(settings.wpsPayerIban || ""),
-    accountPhoto: String(settings.accountPhoto || "")
+    accountPhoto: ""
   } : current.settings.company;
   const employeeMap = new Map(employees.map(employee => [employee.id, employee]));
   for (const payrollRecord of payroll) {
@@ -261,30 +261,30 @@ export async function loadBackendState(current: HrState, session: BackendSession
       leaves: leaves.map(mapLeave),
       payroll: payroll.map(mapPayroll),
       businessTrips: trips.map(item => ({
-        id: String(item.id), employeeId: String(item.employeeId), destination: String(item.destination || ""), purpose: String(item.purpose || ""),
+        id: String(item.id), version: Number(item.version ?? 1), employeeId: String(item.employeeId), destination: String(item.destination || ""), purpose: String(item.purpose || ""),
         from: dateOnly(String(item.startDate || "")), to: dateOnly(String(item.endDate || "")), days: Number(item.days || 0),
         perDiem: Number(item.perDiem || 0), travelCost: Number(item.travelCost || 0), advanceAmount: Number(item.advanceAmount || 0),
         status: titleCase(String(item.status)) as HrState["businessTrips"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
       })),
       expenses: expenses.map(item => ({
-        id: String(item.id), employeeId: String(item.employeeId), tripId: item.tripId ? String(item.tripId) : undefined,
+        id: String(item.id), version: Number(item.version ?? 1), employeeId: String(item.employeeId), tripId: item.tripId ? String(item.tripId) : undefined,
         category: String(item.category || ""), date: dateOnly(String(item.expenseDate || "")), amount: Number(item.amount || 0),
         description: String(item.description || ""), status: titleCase(String(item.status)) as HrState["expenses"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
       })),
       loans: loans.map(mapLoan),
       loanRepayments: loans.flatMap(item => Array.isArray(item.repayments) ? item.repayments.map(repayment => mapRepayment(repayment as Record<string, unknown>)) : []),
       jobs: jobs.map(item => ({
-        id: String(item.id), title: String(item.title || ""), dept: String((item.department as Record<string, unknown> | undefined)?.name || ""),
+        id: String(item.id), version: Number(item.version ?? 1), title: String(item.title || ""), dept: String((item.department as Record<string, unknown> | undefined)?.name || ""),
         openings: Number(item.openings || 1), status: titleCase(String(item.status)) as HrState["jobs"][number]["status"],
         postedOn: dateOnly(String(item.postedOn || "")), description: String(item.description || "")
       })),
       candidates: candidates.map(item => ({
-        id: String(item.id), jobId: String(item.jobId), name: String(item.name || ""), email: String(item.email || ""), phone: String(item.phone || ""),
+        id: String(item.id), version: Number(item.version ?? 1), jobId: String(item.jobId), name: String(item.name || ""), email: String(item.email || ""), phone: String(item.phone || ""),
         stage: titleCase(String(item.stage)) as HrState["candidates"][number]["stage"], rating: Number(item.rating || 0), notes: String(item.notes || ""),
         appliedOn: dateOnly(String(item.appliedOn || "")), employeeId: item.employeeId ? String(item.employeeId) : undefined
       })),
       eosRecords: eos.map(item => ({
-        id: String(item.id), employeeId: String(item.employeeId), asOf: dateOnly(String(item.asOf || "")), reason: String(item.reason || ""),
+        id: String(item.id), version: Number(item.version ?? 1), employeeId: String(item.employeeId), asOf: dateOnly(String(item.asOf || "")), reason: String(item.reason || ""),
         serviceYears: Number(item.serviceYears || 0), gratuity: Number(item.gratuity || 0), leaveEncashment: Number(item.leaveEncashment || 0),
         lopDeduction: Number(item.lopDeduction || 0), expenseReimbursement: Number(item.expenseReimbursement || 0), tripAdvanceDeduction: Number(item.tripAdvanceDeduction || 0),
         netSettlement: Number(item.netSettlement || 0), status: titleCase(String(item.status)) as HrState["eosRecords"][number]["status"], createdOn: dateOnly(String(item.createdAt || ""))
@@ -296,24 +296,20 @@ export async function loadBackendState(current: HrState, session: BackendSession
       })),
       settings: {
         ...current.settings,
+        organizationVersion: Number(settings?.version ?? current.settings.organizationVersion),
         company,
         departments: departmentNames.length ? departmentNames : current.settings.departments,
         leaveTypes: leaveTypes.map(item => ({ id: String(item.id), name: String(item.name), days: Number(item.annualAllowanceDays || 0) })),
         workdayHours: Number(settings?.workdayHours || current.settings.workdayHours),
         halfDayHours: Number(settings?.halfDayHours || current.settings.halfDayHours),
-        loanDeductionCap: { type: settings?.loanCapType === "PERCENT" ? "Percent" : "Amount", value: Number(settings?.loanCapValue || 0) }
+        loanDeductionCap: { type: settings?.loanCapType === "PERCENT" ? "Percent" : "Amount", value: Number(settings?.loanCapValue || 0) },
+        payrollProrationBasis: settings?.payrollProrationBasis === "CALENDAR_DAYS" ? "Calendar Days" : "Fixed 30",
+        payrollRequireBankDetails: settings?.payrollRequireBankDetails == null ? current.settings.payrollRequireBankDetails : Boolean(settings.payrollRequireBankDetails),
+        payrollRequireAttendance: settings?.payrollRequireAttendance == null ? current.settings.payrollRequireAttendance : Boolean(settings.payrollRequireAttendance),
+        payrollVarianceThreshold: Number(settings?.payrollVarianceThreshold ?? current.settings.payrollVarianceThreshold)
       }
     }
   };
-}
-
-export async function generateBackendPayroll(session: BackendSession, year: number, month: number) {
-  return apiRequest<{ id: string; payrolls: BackendPayroll[] }>("/payroll/generate", {
-    method: "POST",
-    csrfToken: session.csrfToken,
-    headers: { "Idempotency-Key": crypto.randomUUID() },
-    body: JSON.stringify({ year, month })
-  });
 }
 
 export async function logoutBackend(session: BackendSession) {
@@ -390,6 +386,16 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
   const fields = Object.fromEntries(employeeImportColumns.map(column => [column, ""]));
   const salaryRecord = employee.salaryRecords?.[0];
   const salary = String(Number(salaryRecord?.baseSalary ?? employee.salary ?? 0));
+  const hra = Number(salaryRecord?.hra ?? 0);
+  const conveyance = Number(salaryRecord?.conveyance ?? 0);
+  const mobile = Number(salaryRecord?.mobile ?? 0);
+  const food = Number(salaryRecord?.food ?? 0);
+  const fuel = Number(salaryRecord?.fuel ?? 0);
+  const other = Number(salaryRecord?.other ?? 0);
+  const grossAdjustment = Number(salaryRecord?.grossAdjustment ?? 0);
+  const detailedAllowances = hra + conveyance + mobile + food + fuel + other + grossAdjustment;
+  const allowances = detailedAllowances !== 0 ? detailedAllowances : Number(salaryRecord?.allowances ?? 0);
+  const bonuses = Number(salaryRecord?.bonuses ?? 0);
   const manager = employee.manager
     ? `${employee.manager.employeeCode} - ${employee.manager.firstName} ${employee.manager.lastName}`.trim()
     : "";
@@ -418,9 +424,15 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
       "Emergency Contact Mobile No.": employee.emergencyContactPhone || "",
       ...mapEmployeeDetails(employee),
       Basic: salary,
-      HRA: String(Number(salaryRecord?.allowances || 0)),
-      "Overtime Amount": String(Number(salaryRecord?.bonuses || 0)),
-      Total: String(Number(salary) + Number(salaryRecord?.allowances || 0) + Number(salaryRecord?.bonuses || 0))
+      HRA: String(hra),
+      "Conveyance Allowance": String(conveyance),
+      "Mobile Allowance": String(mobile),
+      "Food Allowance": String(food),
+      "Fuel Allowance": String(fuel),
+      "Other Allowance": String(other),
+      "Gross Adjustment": String(grossAdjustment),
+      "Overtime Amount": String(bonuses),
+      Total: String(Number(salary) + allowances + bonuses)
     }
   });
 }
@@ -525,6 +537,7 @@ function mapEmployeeDetails(employee: BackendEmployee): Record<string, string> {
     "Ticket Balance (%)": value(benefits, "ticketBalancePercent"), "No. of Tickets - Family": value(benefits, "familyTickets"),
     "Company Accommodation": yesNo(benefits, "companyAccommodation"), "Company Transportation": yesNo(benefits, "companyTransportation"),
     "Overtime Eligible": yesNo(benefits, "overtimeEligible"), "Company Food": yesNo(benefits, "companyFood"), "Company Fuel Card": yesNo(benefits, "companyFuelCard"),
+    "Company Conveyance": yesNo(benefits, "companyConveyance"), "Company Fuel": yesNo(benefits, "companyFuel"), "Company Other": yesNo(benefits, "companyOther"),
     "Highest Education Qualification": value(education, "qualification"), "Year of Passing": value(education, "yearOfPassing"),
     "Work Permit No.": value(permit, "number"), "Work Permit Issue Date": dateOnly(value(permit, "issueDate")), "Work Permit Expiry Date": dateOnly(value(permit, "expiryDate")),
     "Passport No.": value(passport, "number"), "Passport Place of Issue": value(passport, "placeOfIssue"), "Passport Issue Date": dateOnly(value(passport, "issueDate")), "Passport Expiry Date": dateOnly(value(passport, "expiryDate")),

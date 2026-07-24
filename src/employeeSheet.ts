@@ -13,6 +13,7 @@ export type EmployeeWorkbookImport = {
   rows: Array<Record<string, string>>;
   skipped: number;
   errors: string[];
+  format: "employee-template" | "master-data" | "generic";
 };
 
 // These labels and their order match the employee workbook supplied by HR.
@@ -138,6 +139,7 @@ export async function parseEmployeeWorkbook(file: File): Promise<EmployeeWorkboo
 export function parseEmployeeWorkbookRows(rows: ReadonlyArray<ReadonlyArray<unknown>>): EmployeeWorkbookImport {
   const [headerRow = [], ...body] = rows;
   const headers = headerRow.map(cellText);
+  if (isMasterDataWorkbook(headers)) return parseMasterDataWorkbook(body);
   const columns = resolveWorkbookColumns(headers);
   const employeeCodeIndex = columns.findIndex(column => column === "Employee Code");
 
@@ -174,7 +176,7 @@ export function parseEmployeeWorkbookRows(rows: ReadonlyArray<ReadonlyArray<unkn
     parsed.push(record);
   });
 
-  return { rows: parsed, skipped: errors.length, errors };
+  return { rows: parsed, skipped: errors.length, errors, format: isEmployeeTemplate(headers) ? "employee-template" : "generic" };
 }
 
 export function applyEmployeeRows(state: HrState, rows: Array<Record<string, string>>) {
@@ -210,17 +212,136 @@ export function applyEmployeeRows(state: HrState, rows: Array<Record<string, str
 }
 
 function resolveWorkbookColumns(headers: string[]) {
-  const suppliedTemplate = headers.length >= employeeTemplateColumns.length && employeeTemplateColumns.every((column, index) => (
-    normalizedHeader(headers[index]) === normalizedHeader(column.header)
-  ));
-
-  if (suppliedTemplate) return employeeTemplateColumns.map(column => column.column);
+  if (isEmployeeTemplate(headers)) return employeeTemplateColumns.map(column => column.column);
 
   return headers.map(header => {
     const normalized = normalizedHeader(header);
     if (normalized === "status") return "Status";
     return canonicalColumnsByHeader.get(normalized) ?? legacyColumnsByHeader.get(normalized);
   });
+}
+
+const masterDataHeaders = [
+  "No", "Master Data Name", "WPS Sponsor", "Working Company", "Designation", "LOB", "Date of Joining", "Gender",
+  "BASIC", "HRA", "CONVEYANCE", "MOBILE", "Food", "Fuel", "OTHER", "GROSS SALARY"
+] as const;
+
+function isEmployeeTemplate(headers: string[]) {
+  return headers.length >= employeeTemplateColumns.length && employeeTemplateColumns.every((column, index) => (
+    normalizedHeader(headers[index]) === normalizedHeader(column.header)
+  ));
+}
+
+function isMasterDataWorkbook(headers: string[]) {
+  return headers.length >= masterDataHeaders.length && masterDataHeaders.every((header, index) => normalizedHeader(headers[index]) === normalizedHeader(header));
+}
+
+function parseMasterDataWorkbook(body: ReadonlyArray<ReadonlyArray<unknown>>): EmployeeWorkbookImport {
+  const parsed: Array<Record<string, string>> = [];
+  const errors: string[] = [];
+  const employeeCodes = new Set<string>();
+
+  body.forEach((sourceRow, index) => {
+    const values = sourceRow.map(cellText);
+    if (!values.some(Boolean)) return;
+    const rowNumber = index + 2;
+    const value = (header: typeof masterDataHeaders[number]) => values[masterDataHeaders.indexOf(header)] ?? "";
+    const employeeCode = value("No").trim();
+    if (!employeeCode) {
+      errors.push(`Row ${rowNumber} was skipped because No (Employee Code) is blank.`);
+      return;
+    }
+    const codeKey = employeeCode.toLocaleLowerCase();
+    if (employeeCodes.has(codeKey)) {
+      errors.push(`Row ${rowNumber} was skipped because Employee Code ${employeeCode} is duplicated in this file.`);
+      return;
+    }
+    employeeCodes.add(codeKey);
+
+    const named = value("Master Data Name").trim();
+    const company = value("Working Company").trim();
+    const wpsSponsor = value("WPS Sponsor").trim();
+    const designation = value("Designation").trim();
+    const department = value("LOB").trim();
+    const joiningDate = normalizedDate(value("Date of Joining"));
+    const gender = value("Gender").trim();
+    if (!named) errors.push(`Row ${rowNumber} was skipped because Master Data Name is blank.`);
+    if (!company) errors.push(`Row ${rowNumber} was skipped because Working Company is blank.`);
+    if (!wpsSponsor) errors.push(`Row ${rowNumber} was skipped because WPS Sponsor is blank.`);
+    if (!designation) errors.push(`Row ${rowNumber} was skipped because Designation is blank.`);
+    if (!department) errors.push(`Row ${rowNumber} was skipped because LOB is blank.`);
+    if (!joiningDate) errors.push(`Row ${rowNumber} was skipped because Date of Joining must be a valid date.`);
+    if (!(["Male", "Female", "Other"] as string[]).includes(gender)) errors.push(`Row ${rowNumber} was skipped because Gender must be Male, Female, or Other.`);
+    const errorsBeforeAmounts = errors.length;
+    const basic = cashAmount(value("BASIC"), "BASIC", rowNumber, errors);
+    const hra = componentAmount(value("HRA"), "HRA", rowNumber, errors);
+    const conveyance = componentAmount(value("CONVEYANCE"), "CONVEYANCE", rowNumber, errors);
+    const mobile = componentAmount(value("MOBILE"), "MOBILE", rowNumber, errors);
+    const food = componentAmount(value("Food"), "Food", rowNumber, errors);
+    const fuel = componentAmount(value("Fuel"), "Fuel", rowNumber, errors);
+    const other = componentAmount(value("OTHER"), "OTHER", rowNumber, errors);
+    const gross = cashAmount(value("GROSS SALARY"), "GROSS SALARY", rowNumber, errors);
+    if (!named || !company || !wpsSponsor || !designation || !department || !joiningDate || !(["Male", "Female", "Other"] as string[]).includes(gender) || errors.length !== errorsBeforeAmounts) return;
+
+    parsed.push({
+      "Employee Code": employeeCode,
+      "Full Name": named,
+      Company: company,
+      "Working Company Name": company,
+      "WPS Sponsor": wpsSponsor,
+      Department: department,
+      Designation: designation,
+      "Joining Date": joiningDate,
+      Gender: gender,
+      Basic: basic.amount,
+      HRA: hra.amount,
+      "Conveyance Allowance": conveyance.amount,
+      "Mobile Allowance": mobile.amount,
+      "Food Allowance": food.amount,
+      "Fuel Allowance": fuel.amount,
+      "Other Allowance": other.amount,
+      "Gross Adjustment": decimal(gross.value - basic.value - hra.value - conveyance.value - mobile.value - food.value - fuel.value - other.value),
+      Total: gross.amount,
+      "Company Conveyance": conveyance.companyProvided ? "Yes" : "No",
+      "Company Fuel": fuel.companyProvided ? "Yes" : "No",
+      "Company Other": other.companyProvided ? "Yes" : "No"
+    });
+  });
+
+  return { rows: parsed, skipped: errors.length, errors, format: "master-data" };
+}
+
+function cashAmount(value: string, header: string, rowNumber: number, errors: string[]) {
+  return componentAmount(value, header, rowNumber, errors, false);
+}
+
+function componentAmount(value: string, header: string, rowNumber: number, errors: string[], acceptsCompany = true) {
+  const text = value.trim().replaceAll(",", "");
+  if (!text) return { amount: "0", value: 0, companyProvided: false };
+  if (acceptsCompany && /^(comp|company)$/i.test(text)) return { amount: "0", value: 0, companyProvided: true };
+  const number = Number(text);
+  if (!Number.isFinite(number) || number < 0) {
+    errors.push(`Row ${rowNumber} was skipped because ${header} must be a non-negative amount${acceptsCompany ? " or Comp" : ""}.`);
+    return { amount: "0", value: 0, companyProvided: false };
+  }
+  return { amount: decimal(number), value: number, companyProvided: false };
+}
+
+function decimal(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : "0.00";
+}
+
+function normalizedDate(value: string) {
+  const text = value.trim();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/.exec(text);
+  const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(text);
+  const parts = iso ? [Number(iso[1]), Number(iso[2]), Number(iso[3])] : dmy ? [Number(dmy[3]), Number(dmy[2]), Number(dmy[1])] : undefined;
+  if (!parts) return "";
+  const [year, month, day] = parts;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+    : "";
 }
 
 function recordsFromRows(rows: string[][]) {

@@ -28,7 +28,7 @@ const { PerformanceReviewsService } = require('../dist/modules/performance-revie
 const { SystemService } = require('../dist/modules/system/system.service');
 const { SystemController } = require('../dist/modules/system/system.controller');
 const { AuditController } = require('../dist/modules/audit/audit.controller');
-const { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } = require('../dist/common/decorators/permissions.decorator');
+const { ANY_PERMISSIONS_KEY, PAYROLL_ROLES_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } = require('../dist/common/decorators/permissions.decorator');
 const { IS_PUBLIC_KEY } = require('../dist/common/decorators/public.decorator');
 
 function user(overrides = {}) {
@@ -75,6 +75,7 @@ function reflector(metadata = {}) {
       if (key === ANY_PERMISSIONS_KEY) return metadata.any;
       if (key === SUPER_ADMIN_ONLY_KEY) return metadata.superAdminOnly;
       if (key === SYSTEM_ADMINISTRATOR_ONLY_KEY) return metadata.systemAdministratorOnly;
+      if (key === PAYROLL_ROLES_KEY) return metadata.payrollRoles;
       return undefined;
     },
   };
@@ -139,6 +140,14 @@ test('permissions guard is default-deny and implements all/any without an admini
   await assert.rejects(guard({ all: ['payroll.generate'] }).canActivate(executionContext(actor)), /Insufficient permission/);
   assert.equal(await guard({ all: ['employee.self.read', 'leave.self.read'] }).canActivate(executionContext(actor)), true);
   assert.equal(await guard({ any: ['payroll.generate', 'leave.self.read'] }).canActivate(executionContext(actor)), true);
+});
+
+test('payroll access is limited to HR, CPO, and COO regardless of permission grants', async () => {
+  const guard = new PermissionsGuard(reflector({ all: ['payroll.read'], payrollRoles: ['HR', 'CPO', 'COO'] }), {}, audit);
+  await assert.rejects(guard.canActivate(executionContext(user({ roles: ['ADMIN'], permissions: ['payroll.read'] }))), /Payroll access is limited/);
+  await assert.rejects(guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: true, permissions: ['payroll.read'] }))), /Payroll access is limited/);
+  assert.equal(await guard.canActivate(executionContext(user({ roles: ['HR'], permissions: ['payroll.read'] }))), true);
+  assert.equal(await guard.canActivate(executionContext(user({ roles: ['CPO'], permissions: ['payroll.read'] }))), true);
 });
 
 test('Super Administrators bypass step-up authentication while other roles do not', () => {
