@@ -50,7 +50,19 @@ export class SystemService {
     });
     if (requestedRoles.length !== new Set(dto.roleIds).size) throw new BadRequestException('One or more roles do not exist or are inactive');
     this.assertAssignableRoles(requestedRoles, actor, false);
-    if (dto.employeeId) {
+    let employeeId = dto.employeeId;
+    if (dto.microsoftLoginEnabled !== false) {
+      const employee = await this.prisma.employee.findFirst({
+        where: dto.employeeId
+          ? { id: dto.employeeId, deletedAt: null }
+          : { email: { equals: email, mode: 'insensitive' }, deletedAt: null },
+        select: { id: true, email: true, userId: true },
+      });
+      if (!employee) throw new NotFoundException('No active employee matches the Microsoft email address');
+      if (employee.email.trim().toLowerCase() !== email) throw new BadRequestException('Employee email must match the Microsoft email address');
+      if (employee.userId) throw new ConflictException('Employee is already linked to a user');
+      employeeId = employee.id;
+    } else if (dto.employeeId) {
       const employee = await this.prisma.employee.findFirst({
         where: { id: dto.employeeId, deletedAt: null },
         select: { id: true, userId: true },
@@ -65,8 +77,8 @@ export class SystemService {
       const roles = await tx.role.findMany({ where: { id: { in: dto.roleIds }, isActive: true }, select: { id: true, code: true, protection: true } });
       if (roles.length !== new Set(dto.roleIds).size) throw new BadRequestException('One or more roles do not exist or are inactive');
       this.assertAssignableRoles(roles, actor, false);
-      if (dto.employeeId) {
-        const employee = await tx.employee.findFirst({ where: { id: dto.employeeId, deletedAt: null }, select: { id: true, userId: true } });
+      if (employeeId) {
+        const employee = await tx.employee.findFirst({ where: { id: employeeId, deletedAt: null }, select: { id: true, userId: true } });
         if (!employee) throw new NotFoundException('Employee not found');
         if (employee.userId) throw new ConflictException('Employee is already linked to a user');
       }
@@ -79,7 +91,7 @@ export class SystemService {
           microsoftObjectId: microsoftProvisioning?.objectId,
         },
       });
-      if (dto.employeeId) await tx.employee.update({ where: { id: dto.employeeId }, data: { userId: account.id } });
+      if (employeeId) await tx.employee.update({ where: { id: employeeId }, data: { userId: account.id } });
       await tx.userRole.createMany({ data: roles.map((role) => ({ userId: account.id, roleId: role.id, assignedById: actor.id, reason: dto.reason })) });
       await this.audit.record(tx, actor, {
         action: AuditAction.CREATE, resourceType: 'User', resourceId: account.id, targetUserId: account.id,
