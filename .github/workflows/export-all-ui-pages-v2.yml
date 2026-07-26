@@ -1,0 +1,147 @@
+name: Export complete redesigned UI v2
+
+on:
+  pull_request:
+    branches:
+      - agent/uiux-pro-max-redesign
+    paths:
+      - .github/workflows/export-all-ui-pages-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and start
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          nohup npm run dev -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/frontend.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173 >/dev/null && exit 0; sleep 2; done
+          cat /tmp/frontend.log
+          exit 1
+      - name: Capture all pages
+        run: |
+          rm -rf ui-captures-v2
+          mkdir -p ui-captures-v2/desktop ui-captures-v2/mobile
+          cat > capture-ui-v2.mjs <<'EOF'
+          import { chromium } from '@playwright/test';
+          import fs from 'node:fs/promises';
+
+          const base = 'http://127.0.0.1:4173';
+          const sessionKey = 'medtech-hr-erp-backend-session-v2';
+          const routes = [
+            ['01-dashboard','/'],['02-my-hr','/me'],['03-team','/team'],['04-employees','/employees'],
+            ['05-attendance','/attendance'],['06-leave','/leave'],['07-business-trips','/business-trips'],
+            ['08-expenses','/expenses'],['09-loans','/loans'],['10-payroll','/payroll'],
+            ['11-recruitment','/recruitment'],['12-eos','/eos'],['13-documents','/documents'],
+            ['14-reports','/reports'],['15-audit','/audit'],['16-system','/system'],['17-settings','/settings']
+          ];
+
+          const permissions = [
+            'session.self.read','session.manage','employee.self.read','employee.team.read','employee.management.read','employee.hr.read','employee.read_all',
+            'employee.hr.create','employee.hr.update','employee.hr.terminate','employee.hr.read_sensitive','employee.self.read_compensation',
+            'department.read','department.manage','position.manage','organization.read','settings.read','settings.manage',
+            'attendance.self.read','attendance.team.read','attendance.management.read','attendance.hr.read','attendance.audit.read','attendance.read_all','attendance.hr.manage',
+            'leave.self.read','leave.team.read','leave.management.read','leave.hr.read','leave.audit.read','leave.read_all','leave.configure',
+            'trip.self.read','trip.team.read','trip.management.read','trip.hr.read','trip.read_all',
+            'expense.self.read','expense.team.read','expense.management.read','expense.hr.read','expense.read_all',
+            'loan.self.read','loan.hr.read','loan.audit.read','loan.read_all','loan.hr.manage',
+            'payroll.self.read_payslip','payroll.payslip.read_all','payroll.read','payroll.audit.read','payroll.generate','payroll.approve','payroll.read_compensation','payroll.configure','payroll.export',
+            'service_request.self.read','service_request.hr.approve','service_request.hr.reject','recruitment.read','eos.read',
+            'document.self.read','document.hr.read','document.read_all','report.read','report.export','audit.read','audit.export','import.run','notification.self.read',
+            'user.read','user.manage','user.deactivate','user.delete_soft','role.read','role.manage','role.assign',
+            'permission.read','permission.assign','workflow.policy.read','workflow.policy.manage','workflow.delegation.read','workflow.delegation.manage'
+          ];
+
+          const session = {
+            id:'screenshot-admin',email:'screenshots@medtech.qa',displayName:'Screenshot Administrator',
+            roles:['SUPER_ADMIN','HR','CPO','COO'],permissions,departmentScopeIds:[],sessionId:'screenshot-session',
+            authProvider:'local',authorizationVersion:1,employeeId:null,csrfToken:'screenshot-csrf-token'
+          };
+          const sessionEnvelope = { csrfToken: session.csrfToken, user: session };
+          const sampleRole = { id:'role-super',code:'SUPER_ADMIN',displayName:'Super Administrator',description:'Full protected administration',version:1,isBuiltIn:true,isActive:true,protection:'SUPER_ADMIN',permissions:[] };
+          const sampleUser = { id:'user-hr',email:'hr.manager@medtech.qa',isActive:true,localLoginEnabled:false,microsoftLoginEnabled:true,authorizationVersion:3,roles:[{role:sampleRole}],permissionOverrides:[] };
+          const preflight = {
+            ready:true,runType:'REGULAR',policy:{prorationBasis:'FIXED_30',requireBankDetails:true,requireAttendance:true,varianceThreshold:'10'},
+            summary:{employees:0,errors:0,warnings:0,grossPay:'0',deductions:'0',netPay:'0',adjustments:0},issues:[]
+          };
+          const workflowPolicy = { id:'policy-hr',workflowType:'LEAVE',stage:'HR',mode:'ANY_ONE',version:1,primaryUser:null,members:[] };
+
+          function payload(path, url) {
+            if (path === '/auth/me' || path === '/auth/login') return { data: sessionEnvelope };
+            if (path === '/organization-settings') return { data:{name:'MedTech',legalName:'MedTech Corporation Trading W.L.L.',tagline:'People operations, made precise.',address:'Doha, Qatar',phone:'+974 4000 0000',email:'hr@medtech.qa',website:'www.med-tech.com',currency:'QAR'} };
+            if (path === '/approvals/inbox') return { data:{leave:[],certificates:[],payroll:[]} };
+            if (path === '/payroll/preflight') return { data:preflight };
+            if (path === '/system/users') return { data:[sampleUser],meta:{total:1,page:1,limit:100,totalPages:1} };
+            if (path === '/system/roles') return { data:[sampleRole],meta:{total:1,page:1,limit:100,totalPages:1} };
+            if (path === '/system/permissions') return { data:[{id:'perm-1',code:'employee.hr.read',displayName:'Read employee records',category:'Employees',isProtected:false,isDeprecated:false}] };
+            if (path === '/system/sessions') return { data:[{id:'session-1',provider:'microsoft',lastSeenAt:'2026-07-26T10:00:00.000Z',user:{id:'user-hr',email:'hr.manager@medtech.qa'}}],meta:{total:1,page:1,limit:25,totalPages:1} };
+            if (path === '/system/workflow-policy') return { data:[workflowPolicy],meta:{total:1,page:1,limit:100,totalPages:1} };
+            if (path === '/system/delegations') return { data:[],meta:{total:0,page:1,limit:100,totalPages:1} };
+            if (path === '/auth/sessions') return { data:[] };
+            if (path.includes('/summary') || path.includes('/stats')) return { data:{} };
+            return { data:[],meta:{total:0,page:1,limit:100,totalPages:1} };
+          }
+
+          const browser = await chromium.launch({headless:true});
+          const manifest=[]; const failures=[];
+
+          async function setup(viewport, authenticated) {
+            const context=await browser.newContext({viewport,deviceScaleFactor:1,colorScheme:'light',reducedMotion:'reduce'});
+            if(authenticated) await context.addInitScript(({key,value})=>sessionStorage.setItem(key,JSON.stringify(value)),{key:sessionKey,value:session});
+            const page=await context.newPage();
+            page.setDefaultTimeout(10000); page.setDefaultNavigationTimeout(15000);
+            await page.route('**/api/v1/**',async route=>{
+              const u=new URL(route.request().url()); const path=u.pathname.replace(/^\/api\/v1/,'');
+              if(path==='/auth/me'&&!authenticated){await route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({success:false,message:'Unauthorized'})});return;}
+              const result=payload(path,u);
+              await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,...result})});
+            });
+            return {context,page};
+          }
+
+          async function login(folder,viewport){
+            const {context,page}=await setup(viewport,false);
+            try{await page.goto(base,{waitUntil:'domcontentloaded'});await page.getByLabel('Email').waitFor();await page.waitForTimeout(350);await page.screenshot({path:`ui-captures-v2/${folder}/00-login.png`});}
+            catch(error){failures.push({folder,name:'login',message:String(error)});} finally{await context.close();}
+          }
+
+          async function pages(folder,viewport,mobile=false){
+            const {context,page}=await setup(viewport,true);
+            page.on('pageerror',e=>console.error(folder,e.message));
+            for(const [name,route] of routes){
+              try{await page.goto(base+route,{waitUntil:'domcontentloaded'});await page.locator('.topbar').waitFor();await page.waitForTimeout(450);const heading=(await page.locator('.page-title h1').textContent().catch(()=>name))?.trim()||name;const output=`ui-captures-v2/${folder}/${name}.png`;await page.screenshot({path:output});manifest.push({folder,name,route,heading,viewport,output});}
+              catch(error){failures.push({folder,name,route,message:error instanceof Error?error.message:String(error),url:page.url()});await page.screenshot({path:`ui-captures-v2/${folder}/${name}-error.png`}).catch(()=>{});}
+            }
+            if(mobile){try{await page.goto(base,{waitUntil:'domcontentloaded'});await page.locator('.topbar').waitFor();await page.getByRole('button',{name:'Open menu'}).click();await page.locator('.sidebar.open').waitFor();await page.screenshot({path:`ui-captures-v2/${folder}/18-navigation-open.png`});}catch(error){failures.push({folder,name:'navigation',message:String(error)});}}
+            await context.close();
+          }
+
+          await login('desktop',{width:1440,height:1000});
+          await pages('desktop',{width:1440,height:1000});
+          await login('mobile',{width:390,height:844});
+          await pages('mobile',{width:390,height:844},true);
+          await fs.writeFile('ui-captures-v2/manifest.json',JSON.stringify(manifest,null,2));
+          await fs.writeFile('ui-captures-v2/failures.json',JSON.stringify(failures,null,2));
+          await browser.close();
+          console.log(JSON.stringify({captured:manifest.length,failures:failures.length}));
+          EOF
+          node capture-ui-v2.mjs > ui-captures-v2/capture.log 2> ui-captures-v2/error.log
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: medtech-hr-all-pages-v2
+          path: ui-captures-v2/
+          if-no-files-found: error
+          retention-days: 7
