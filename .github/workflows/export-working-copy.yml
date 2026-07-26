@@ -1,0 +1,28 @@
+name: Export working copy
+
+on:
+  push:
+    branches:
+      - agent/uiux-pro-max-redesign
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create source archive
+        run: |
+          tar --exclude='.git' --exclude='node_modules' -czf /tmp/hr-new-source.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-new-source
+          path: /tmp/hr-new-source.tar.gz
+          retention-days: 1
