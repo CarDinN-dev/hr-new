@@ -356,6 +356,23 @@ test('database throttling survives service recreation and session cookies remain
   assert.equal('accessToken' in first.browserSession({ user: user(), accessToken: 'secret', csrfToken: 'csrf' }), false);
 });
 
+test('signed-in devices only include active sessions', async () => {
+  let where;
+  const service = new AuthService({}, {}, { get: (_key, fallback) => fallback }, {
+    authSession: {
+      findMany: async (args) => {
+        where = args.where;
+        return [{ id: 'active-session', provider: 'microsoft', createdAt: new Date(), lastSeenAt: new Date(), expiresAt: new Date(Date.now() + 60_000), revokedAt: null }];
+      },
+    },
+  }, {}, audit);
+  const sessions = await service.listOwnSessions(user());
+  assert.equal(sessions.length, 1);
+  assert.equal(where.userId, 'user-1');
+  assert.equal(where.revokedAt, null);
+  assert.ok(where.expiresAt.gt instanceof Date);
+});
+
 test('JWT validation rejects revoked, expired, altered, and legacy sessions', async () => {
   const token = 'test-token';
   const session = {

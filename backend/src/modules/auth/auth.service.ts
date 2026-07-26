@@ -168,8 +168,9 @@ export class AuthService {
   }
 
   async listOwnSessions(user: RequestUser) {
+    const now = new Date();
     return this.prisma.authSession.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, revokedAt: null, expiresAt: { gt: now } },
       select: { id: true, provider: true, userAgent: true, createdAt: true, lastSeenAt: true, expiresAt: true, revokedAt: true },
       orderBy: { lastSeenAt: 'desc' },
     }).then((sessions) => sessions.map((session) => ({ ...session, current: session.id === user.sessionId })));
