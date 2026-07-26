@@ -90,7 +90,7 @@ deploy() {
   "${compose[@]}" up -d --no-deps hr-erp
   wait_healthy medtech-hr-erp-hr-erp-1
   curl --fail --silent --show-error http://127.0.0.1:8080/healthz >/dev/null
-  curl --fail --silent --show-error http://127.0.0.1/api/v1/health >/dev/null
+  curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/health >/dev/null
   if [[ -n ${DEPLOYED_COMMIT:-} ]]; then
     printf '%s\n' "$DEPLOYED_COMMIT" >"$project_dir/.deployed-commit"
   fi
