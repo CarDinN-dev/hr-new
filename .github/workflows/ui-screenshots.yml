@@ -40,7 +40,7 @@ jobs:
       AUDIT_HMAC_KEY: screenshot_validation_audit_key_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
       INITIAL_SUPER_ADMIN_EMAIL: screenshots@medtech.local
       INITIAL_SUPER_ADMIN_PASSWORD: Screenshot-Only-Admin-2026!
-      SEED_TEST_PERSONAS: "true"
+      SEED_TEST_PERSONAS: "false"
       PORT: "3100"
       CORS_ORIGIN: http://127.0.0.1:4173
       MICROSOFT_TENANT_ID: screenshot-tenant
