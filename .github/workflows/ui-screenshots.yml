@@ -3,19 +3,15 @@ name: Capture redesigned UI screenshots
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - .github/workflows/ui-screenshots.yml
       - src/**
+      - backend/**
       - index.html
-      - Dockerfile
-      - docker-compose.yml
   push:
-    branches:
-      - agent/uiux-pro-max-redesign
-    paths:
-      - .github/workflows/ui-screenshots.yml
+    branches: [agent/uiux-pro-max-redesign]
+    paths: [.github/workflows/ui-screenshots.yml]
 
 permissions:
   contents: read
@@ -29,23 +25,23 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: screenshot-only-db-password-2026
+          POSTGRES_PASSWORD: screenshot-db-password
           POSTGRES_DB: hr_erp
         ports:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d hr_erp"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
     env:
-      NODE_ENV: development
-      PORT: "3100"
-      DATABASE_URL: postgresql://postgres:screenshot-only-db-password-2026@127.0.0.1:5432/hr_erp?schema=public
+      DATABASE_URL: postgresql://postgres:screenshot-db-password@127.0.0.1:5432/hr_erp?schema=public
       JWT_SECRET: screenshot_validation_jwt_secret_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
       AUDIT_HMAC_KEY: screenshot_validation_audit_key_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      INITIAL_SUPER_ADMIN_EMAIL: screenshots@medtech.local
+      INITIAL_SUPER_ADMIN_PASSWORD: Screenshot-Only-Admin-2026!
       SEED_TEST_PERSONAS: "true"
-      TEST_PERSONA_PASSWORD: Screenshot-Persona-2026!
+      PORT: "3100"
       CORS_ORIGIN: http://127.0.0.1:4173
       MICROSOFT_TENANT_ID: screenshot-tenant
       MICROSOFT_CLIENT_ID: screenshot-client
@@ -53,6 +49,7 @@ jobs:
       MICROSOFT_REDIRECT_URI: http://127.0.0.1:3100/api/v1/auth/microsoft/callback
       MICROSOFT_PROVISIONING_ENABLED: "false"
       DOCUMENT_SCAN_ENABLED: "false"
+      VITE_API_URL: http://127.0.0.1:3100/api/v1
     steps:
       - uses: actions/checkout@v4
 
@@ -61,113 +58,81 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install frontend and browser dependencies
+      - name: Install frontend and browser
         run: |
           npm ci
           npx playwright install --with-deps chromium
 
-      - name: Install, migrate and seed backend
+      - name: Build and start backend
         working-directory: backend
         run: |
           npm ci
           npm run prisma:generate
-          npx prisma migrate deploy
+          npm run prisma:deploy
           npm run seed
           npm run build
-
-      - name: Start application services
-        run: |
-          nohup node backend/dist/main.js > /tmp/medtech-backend.log 2>&1 &
-          nohup env VITE_API_URL=http://127.0.0.1:3100/api/v1 npm run dev -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/medtech-frontend.log 2>&1 &
+          nohup npm run start:prod > /tmp/backend.log 2>&1 &
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null && curl -fsS http://127.0.0.1:4173 >/dev/null; then
-              exit 0
-            fi
+            if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null; then exit 0; fi
             sleep 2
           done
-          cat /tmp/medtech-backend.log || true
-          cat /tmp/medtech-frontend.log || true
+          cat /tmp/backend.log
           exit 1
 
-      - name: Capture every route at desktop and mobile widths
+      - name: Start frontend
         run: |
-          mkdir -p screenshots/desktop screenshots/mobile
+          nohup npm run dev -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/frontend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/frontend.log
+          exit 1
+
+      - name: Capture every route
+        run: |
+          mkdir -p screenshots
           cat > /tmp/capture.mjs <<'EOF'
-          import { chromium } from '@playwright/test';
+          import { chromium } from 'playwright';
           import fs from 'node:fs/promises';
 
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 1440, height: 1000 },
+            deviceScaleFactor: 1,
+            colorScheme: 'light',
+            reducedMotion: 'reduce'
+          });
+          const page = await context.newPage();
           const base = 'http://127.0.0.1:4173';
-          const email = 'rbac.super_admin@example.invalid';
-          const password = process.env.TEST_PERSONA_PASSWORD;
+
+          await page.goto(base, { waitUntil: 'networkidle' });
+          await page.screenshot({ path: 'screenshots/00-login.png', fullPage: true });
+          await page.getByLabel('Email').fill(process.env.INITIAL_SUPER_ADMIN_EMAIL);
+          await page.getByLabel('Password').fill(process.env.INITIAL_SUPER_ADMIN_PASSWORD);
+          await page.getByRole('button', { name: /^Sign in$/ }).click();
+          await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+
           const routes = [
-            ['01-dashboard', '/'],
-            ['02-my-hr', '/me'],
-            ['03-team', '/team'],
-            ['04-employees', '/employees'],
-            ['05-attendance', '/attendance'],
-            ['06-leave', '/leave'],
-            ['07-business-trips', '/business-trips'],
-            ['08-expenses', '/expenses'],
-            ['09-loans', '/loans'],
-            ['10-payroll', '/payroll'],
-            ['11-recruitment', '/recruitment'],
-            ['12-eos', '/eos'],
-            ['13-documents', '/documents'],
-            ['14-reports', '/reports'],
-            ['15-audit', '/audit'],
-            ['16-system', '/system'],
-            ['17-settings', '/settings']
+            ['01-dashboard', '/'], ['02-my-hr', '/me'], ['03-team', '/team'],
+            ['04-employees', '/employees'], ['05-attendance', '/attendance'],
+            ['06-leave', '/leave'], ['07-business-trips', '/business-trips'],
+            ['08-expenses', '/expenses'], ['09-loans', '/loans'],
+            ['10-payroll', '/payroll'], ['11-recruitment', '/recruitment'],
+            ['12-eos', '/eos'], ['13-documents', '/documents'],
+            ['14-reports', '/reports'], ['15-audit', '/audit'],
+            ['16-system', '/system'], ['17-settings', '/settings']
           ];
 
-          const browser = await chromium.launch({ headless: true });
           const manifest = [];
-
-          async function signIn(page) {
-            await page.goto(base, { waitUntil: 'networkidle' });
-            await page.getByLabel('Email').fill(email);
-            await page.getByLabel('Password').fill(password);
-            await page.getByRole('button', { name: /^Sign in$/ }).click();
+          for (const [name, route] of routes) {
+            await page.goto(base + route, { waitUntil: 'networkidle' });
             await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+            await page.waitForTimeout(500);
+            const heading = await page.locator('.page-title h1').textContent().catch(() => name);
+            await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
+            manifest.push({ name, route, heading });
           }
-
-          async function captureSet(folder, viewport, includeMobileMenu = false) {
-            const context = await browser.newContext({
-              viewport,
-              deviceScaleFactor: 1,
-              colorScheme: 'light',
-              reducedMotion: 'reduce'
-            });
-            const page = await context.newPage();
-            page.on('console', message => {
-              if (message.type() === 'error') console.error(`${folder}-console:`, message.text());
-            });
-
-            await page.goto(base, { waitUntil: 'networkidle' });
-            await page.screenshot({ path: `screenshots/${folder}/00-login.png`, fullPage: true });
-            await signIn(page);
-
-            for (const [name, route] of routes) {
-              await page.goto(base + route, { waitUntil: 'networkidle' });
-              await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
-              await page.waitForTimeout(600);
-              const heading = (await page.locator('.page-title h1').textContent().catch(() => name))?.trim() || name;
-              const output = `screenshots/${folder}/${name}.png`;
-              await page.screenshot({ path: output, fullPage: true });
-              manifest.push({ folder, name, route, heading, viewport, output });
-            }
-
-            if (includeMobileMenu) {
-              await page.goto(base, { waitUntil: 'networkidle' });
-              await page.getByRole('button', { name: 'Open menu' }).click();
-              await page.locator('.sidebar.open').waitFor({ state: 'visible' });
-              await page.screenshot({ path: `screenshots/${folder}/18-navigation-open.png`, fullPage: true });
-            }
-            await context.close();
-          }
-
-          await captureSet('desktop', { width: 1440, height: 1000 });
-          await captureSet('mobile', { width: 390, height: 844 }, true);
-
           await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
           await browser.close();
           EOF
@@ -180,8 +145,8 @@ jobs:
           path: screenshots/
           retention-days: 7
 
-      - name: Application diagnostics
+      - name: Diagnostics
         if: failure()
         run: |
-          cat /tmp/medtech-backend.log || true
-          cat /tmp/medtech-frontend.log || true
+          cat /tmp/backend.log 2>/dev/null || true
+          cat /tmp/frontend.log 2>/dev/null || true
