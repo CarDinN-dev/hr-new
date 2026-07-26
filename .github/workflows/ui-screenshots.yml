@@ -23,19 +23,34 @@ permissions:
 jobs:
   screenshots:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: screenshot-only-db-password-2026
+          POSTGRES_DB: hr_erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hr_erp"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
+      NODE_ENV: development
+      PORT: "3100"
+      DATABASE_URL: postgresql://postgres:screenshot-only-db-password-2026@127.0.0.1:5432/hr_erp?schema=public
       JWT_SECRET: screenshot_validation_jwt_secret_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
       AUDIT_HMAC_KEY: screenshot_validation_audit_key_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
-      POSTGRES_PASSWORD: screenshot-only-db-password-2026
-      INITIAL_SUPER_ADMIN_EMAIL: screenshots@medtech.local
-      INITIAL_SUPER_ADMIN_PASSWORD: Screenshot-Only-Admin-2026!
       SEED_TEST_PERSONAS: "true"
-      CORS_ORIGIN: ""
+      TEST_PERSONA_PASSWORD: Screenshot-Persona-2026!
+      CORS_ORIGIN: http://127.0.0.1:4173
       MICROSOFT_TENANT_ID: screenshot-tenant
       MICROSOFT_CLIENT_ID: screenshot-client
       MICROSOFT_CLIENT_SECRET: screenshot-client-secret
-      MICROSOFT_REDIRECT_URI: http://127.0.0.1:8080/api/v1/auth/microsoft/callback
+      MICROSOFT_REDIRECT_URI: http://127.0.0.1:3100/api/v1/auth/microsoft/callback
       MICROSOFT_PROVISIONING_ENABLED: "false"
       DOCUMENT_SCAN_ENABLED: "false"
     steps:
@@ -46,81 +61,44 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Start Docker application
+      - name: Install frontend and browser dependencies
         run: |
-          cat > .env <<EOF
-          JWT_SECRET=${JWT_SECRET}
-          AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY}
-          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-          INITIAL_SUPER_ADMIN_EMAIL=${INITIAL_SUPER_ADMIN_EMAIL}
-          INITIAL_SUPER_ADMIN_PASSWORD=${INITIAL_SUPER_ADMIN_PASSWORD}
-          SEED_TEST_PERSONAS=${SEED_TEST_PERSONAS}
-          CORS_ORIGIN=${CORS_ORIGIN}
-          MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID}
-          MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID}
-          MICROSOFT_CLIENT_SECRET=${MICROSOFT_CLIENT_SECRET}
-          MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI}
-          MICROSOFT_PROVISIONING_ENABLED=${MICROSOFT_PROVISIONING_ENABLED}
-          DOCUMENT_SCAN_ENABLED=${DOCUMENT_SCAN_ENABLED}
-          EOF
-          cat > docker-compose.screenshots.yml <<'EOF'
-          services:
-            clamav:
-              healthcheck:
-                test: ["CMD", "true"]
-                interval: 1s
-                timeout: 1s
-                retries: 1
-                start_period: 0s
-          EOF
-          docker compose -f docker-compose.yml -f docker-compose.screenshots.yml up -d --build
-          for i in $(seq 1 120); do
-            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null && curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Install, migrate and seed backend
+        working-directory: backend
+        run: |
+          npm ci
+          npm run prisma:generate
+          npx prisma migrate deploy
+          npm run seed
+          npm run build
+
+      - name: Start application services
+        run: |
+          nohup node backend/dist/main.js > /tmp/medtech-backend.log 2>&1 &
+          nohup env VITE_API_URL=http://127.0.0.1:3100/api/v1 npm run dev -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/medtech-frontend.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null && curl -fsS http://127.0.0.1:4173 >/dev/null; then
               exit 0
             fi
-            sleep 3
+            sleep 2
           done
-          docker compose -f docker-compose.yml -f docker-compose.screenshots.yml ps
-          docker compose -f docker-compose.yml -f docker-compose.screenshots.yml logs --tail=200
+          cat /tmp/medtech-backend.log || true
+          cat /tmp/medtech-frontend.log || true
           exit 1
 
-      - name: Seed screenshot account and sample data
-        run: docker compose -f docker-compose.yml -f docker-compose.screenshots.yml run --rm api npm run seed
-
-      - name: Capture every route
+      - name: Capture every route at desktop and mobile widths
         run: |
-          mkdir -p screenshots
+          mkdir -p screenshots/desktop screenshots/mobile
           cat > /tmp/capture.mjs <<'EOF'
-          import { chromium } from 'playwright';
+          import { chromium } from '@playwright/test';
           import fs from 'node:fs/promises';
 
-          const browser = await chromium.launch({ headless: true });
-          const context = await browser.newContext({
-            viewport: { width: 1440, height: 1000 },
-            deviceScaleFactor: 1,
-            colorScheme: 'light',
-            reducedMotion: 'reduce'
-          });
-          const page = await context.newPage();
-          page.on('console', message => {
-            if (message.type() === 'error') console.error('browser-console:', message.text());
-          });
-
-          const base = 'http://127.0.0.1:8080';
-          await page.goto(base, { waitUntil: 'networkidle' });
-          await page.screenshot({ path: 'screenshots/00-login.png', fullPage: true });
-
-          await page.getByLabel('Email').fill(process.env.INITIAL_SUPER_ADMIN_EMAIL);
-          await page.getByLabel('Password').fill(process.env.INITIAL_SUPER_ADMIN_PASSWORD);
-          await page.getByRole('button', { name: /^Sign in$/ }).click();
-          await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
-
+          const base = 'http://127.0.0.1:4173';
+          const email = 'rbac.super_admin@example.invalid';
+          const password = process.env.TEST_PERSONA_PASSWORD;
           const routes = [
             ['01-dashboard', '/'],
             ['02-my-hr', '/me'],
@@ -141,15 +119,54 @@ jobs:
             ['17-settings', '/settings']
           ];
 
+          const browser = await chromium.launch({ headless: true });
           const manifest = [];
-          for (const [name, route] of routes) {
-            await page.goto(base + route, { waitUntil: 'networkidle' });
+
+          async function signIn(page) {
+            await page.goto(base, { waitUntil: 'networkidle' });
+            await page.getByLabel('Email').fill(email);
+            await page.getByLabel('Password').fill(password);
+            await page.getByRole('button', { name: /^Sign in$/ }).click();
             await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
-            await page.waitForTimeout(500);
-            const heading = await page.locator('.page-title h1').textContent().catch(() => name);
-            await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
-            manifest.push({ name, route, heading });
           }
+
+          async function captureSet(folder, viewport, includeMobileMenu = false) {
+            const context = await browser.newContext({
+              viewport,
+              deviceScaleFactor: 1,
+              colorScheme: 'light',
+              reducedMotion: 'reduce'
+            });
+            const page = await context.newPage();
+            page.on('console', message => {
+              if (message.type() === 'error') console.error(`${folder}-console:`, message.text());
+            });
+
+            await page.goto(base, { waitUntil: 'networkidle' });
+            await page.screenshot({ path: `screenshots/${folder}/00-login.png`, fullPage: true });
+            await signIn(page);
+
+            for (const [name, route] of routes) {
+              await page.goto(base + route, { waitUntil: 'networkidle' });
+              await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+              await page.waitForTimeout(600);
+              const heading = (await page.locator('.page-title h1').textContent().catch(() => name))?.trim() || name;
+              const output = `screenshots/${folder}/${name}.png`;
+              await page.screenshot({ path: output, fullPage: true });
+              manifest.push({ folder, name, route, heading, viewport, output });
+            }
+
+            if (includeMobileMenu) {
+              await page.goto(base, { waitUntil: 'networkidle' });
+              await page.getByRole('button', { name: 'Open menu' }).click();
+              await page.locator('.sidebar.open').waitFor({ state: 'visible' });
+              await page.screenshot({ path: `screenshots/${folder}/18-navigation-open.png`, fullPage: true });
+            }
+            await context.close();
+          }
+
+          await captureSet('desktop', { width: 1440, height: 1000 });
+          await captureSet('mobile', { width: 390, height: 844 }, true);
 
           await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
           await browser.close();
@@ -163,6 +180,8 @@ jobs:
           path: screenshots/
           retention-days: 7
 
-      - name: Docker diagnostics
+      - name: Application diagnostics
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.screenshots.yml logs --tail=300
+        run: |
+          cat /tmp/medtech-backend.log || true
+          cat /tmp/medtech-frontend.log || true
