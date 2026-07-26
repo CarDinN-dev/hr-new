@@ -44,9 +44,10 @@ jobs:
 
       - name: Capture every route
         run: |
-          mkdir -p screenshots
-          cat > /tmp/capture.mjs <<'EOF'
-          import { chromium } from 'playwright';
+          rm -rf ui-screenshots-output
+          mkdir -p ui-screenshots-output
+          cat > capture-ui.mjs <<'EOF'
+          import { chromium } from '@playwright/test';
           import fs from 'node:fs/promises';
 
           const permissions = [
@@ -111,7 +112,7 @@ jobs:
           const base = 'http://127.0.0.1:4173';
           await page.goto(base, { waitUntil: 'networkidle' });
           await page.getByLabel('Email').waitFor({ state: 'visible', timeout: 30000 });
-          await page.screenshot({ path: 'screenshots/00-login.png', fullPage: true });
+          await page.screenshot({ path: 'ui-screenshots-output/00-login.png', fullPage: true });
           await page.getByLabel('Email').fill('screenshots@medtech.local');
           await page.getByLabel('Password').fill('Screenshot-Only-Admin-2026!');
           await page.getByRole('button', { name: /^Sign in$/ }).click();
@@ -134,23 +135,25 @@ jobs:
             await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
             await page.waitForTimeout(500);
             const heading = await page.locator('.page-title h1').textContent().catch(() => name);
-            await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
+            await page.screenshot({ path: `ui-screenshots-output/${name}.png`, fullPage: true });
             manifest.push({ name, route, heading });
           }
 
-          await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
+          await fs.writeFile('ui-screenshots-output/manifest.json', JSON.stringify(manifest, null, 2));
           await browser.close();
           EOF
-          node /tmp/capture.mjs > screenshots/capture.log 2> screenshots/error.log || true
+          node capture-ui.mjs > ui-screenshots-output/capture.log 2> ui-screenshots-output/error.log
 
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: medtech-hr-redesign-screenshots
-          path: screenshots/
+          path: ui-screenshots-output/
           retention-days: 7
 
       - name: Diagnostics
         if: failure()
-        run: cat /tmp/frontend.log 2>/dev/null || true
+        run: |
+          cat ui-screenshots-output/error.log 2>/dev/null || true
+          cat /tmp/frontend.log 2>/dev/null || true
