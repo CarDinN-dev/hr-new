@@ -1,0 +1,141 @@
+name: Capture redesigned UI screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/uiux-pro-max-redesign
+    paths:
+      - .github/workflows/ui-screenshots.yml
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JWT_SECRET: screenshot_validation_jwt_secret_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      AUDIT_HMAC_KEY: screenshot_validation_audit_key_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      POSTGRES_PASSWORD: screenshot-only-db-password-2026
+      INITIAL_SUPER_ADMIN_EMAIL: screenshots@medtech.local
+      INITIAL_SUPER_ADMIN_PASSWORD: Screenshot-Only-Admin-2026!
+      SEED_TEST_PERSONAS: "true"
+      CORS_ORIGIN: ""
+      MICROSOFT_PROVISIONING_ENABLED: "false"
+      DOCUMENT_SCAN_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Docker application
+        run: |
+          cat > .env <<EOF
+          JWT_SECRET=${JWT_SECRET}
+          AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          INITIAL_SUPER_ADMIN_EMAIL=${INITIAL_SUPER_ADMIN_EMAIL}
+          INITIAL_SUPER_ADMIN_PASSWORD=${INITIAL_SUPER_ADMIN_PASSWORD}
+          SEED_TEST_PERSONAS=${SEED_TEST_PERSONAS}
+          CORS_ORIGIN=${CORS_ORIGIN}
+          MICROSOFT_PROVISIONING_ENABLED=${MICROSOFT_PROVISIONING_ENABLED}
+          DOCUMENT_SCAN_ENABLED=${DOCUMENT_SCAN_ENABLED}
+          EOF
+          docker compose up -d --build
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null && curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose ps
+          docker compose logs --tail=200
+          exit 1
+
+      - name: Seed screenshot account and sample data
+        run: docker compose run --rm api npm run seed
+
+      - name: Capture every route
+        run: |
+          mkdir -p screenshots
+          cat > /tmp/capture.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs/promises';
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 1440, height: 1000 },
+            deviceScaleFactor: 1,
+            colorScheme: 'light',
+            reducedMotion: 'reduce'
+          });
+          const page = await context.newPage();
+          page.on('console', message => {
+            if (message.type() === 'error') console.error('browser-console:', message.text());
+          });
+
+          const base = 'http://127.0.0.1:8080';
+          await page.goto(base, { waitUntil: 'networkidle' });
+          await page.screenshot({ path: 'screenshots/00-login.png', fullPage: true });
+
+          await page.getByLabel('Email').fill(process.env.INITIAL_SUPER_ADMIN_EMAIL);
+          await page.getByLabel('Password').fill(process.env.INITIAL_SUPER_ADMIN_PASSWORD);
+          await page.getByRole('button', { name: /^Sign in$/ }).click();
+          await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+
+          const routes = [
+            ['01-dashboard', '/'],
+            ['02-my-hr', '/me'],
+            ['03-team', '/team'],
+            ['04-employees', '/employees'],
+            ['05-attendance', '/attendance'],
+            ['06-leave', '/leave'],
+            ['07-business-trips', '/business-trips'],
+            ['08-expenses', '/expenses'],
+            ['09-loans', '/loans'],
+            ['10-payroll', '/payroll'],
+            ['11-recruitment', '/recruitment'],
+            ['12-eos', '/eos'],
+            ['13-documents', '/documents'],
+            ['14-reports', '/reports'],
+            ['15-audit', '/audit'],
+            ['16-system', '/system'],
+            ['17-settings', '/settings']
+          ];
+
+          const manifest = [];
+          for (const [name, route] of routes) {
+            await page.goto(base + route, { waitUntil: 'networkidle' });
+            await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+            await page.waitForTimeout(500);
+            const heading = await page.locator('.page-title h1').textContent().catch(() => name);
+            await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
+            manifest.push({ name, route, heading });
+          }
+
+          await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
+          await browser.close();
+          EOF
+          node /tmp/capture.mjs
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: medtech-hr-redesign-screenshots
+          path: screenshots/
+          retention-days: 7
+
+      - name: Docker diagnostics
+        if: failure()
+        run: docker compose logs --tail=300
