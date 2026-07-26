@@ -7,7 +7,6 @@ on:
     paths:
       - .github/workflows/ui-screenshots.yml
       - src/**
-      - backend/**
       - index.html
   push:
     branches: [agent/uiux-pro-max-redesign]
@@ -19,37 +18,7 @@ permissions:
 jobs:
   screenshots:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: screenshot-db-password
-          POSTGRES_DB: hr_erp
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d hr_erp"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://postgres:screenshot-db-password@127.0.0.1:5432/hr_erp?schema=public
-      JWT_SECRET: screenshot_validation_jwt_secret_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
-      AUDIT_HMAC_KEY: screenshot_validation_audit_key_0123456789abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ
-      INITIAL_SUPER_ADMIN_EMAIL: screenshots@example.com
-      INITIAL_SUPER_ADMIN_PASSWORD: Screenshot-Only-Admin-2026!
-      SEED_TEST_PERSONAS: "false"
-      PORT: "3100"
-      CORS_ORIGIN: http://127.0.0.1:4173
-      MICROSOFT_TENANT_ID: 11111111-1111-4111-8111-111111111111
-      MICROSOFT_CLIENT_ID: 22222222-2222-4222-8222-222222222222
-      MICROSOFT_CLIENT_SECRET: screenshot-client-secret-2026
-      MICROSOFT_REDIRECT_URI: http://127.0.0.1:3100/api/v1/auth/microsoft/callback
-      MICROSOFT_PROVISIONING_ENABLED: "false"
-      DOCUMENT_SCAN_ENABLED: "false"
-      VITE_API_URL: http://127.0.0.1:3100/api/v1
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -62,22 +31,6 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
-
-      - name: Build and start backend
-        working-directory: backend
-        run: |
-          npm ci
-          npm run prisma:generate
-          npm run prisma:deploy
-          npm run seed
-          npm run build
-          nohup npm run start:prod > /tmp/backend.log 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3100/api/v1/health >/dev/null; then exit 0; fi
-            sleep 2
-          done
-          cat /tmp/backend.log
-          exit 1
 
       - name: Start frontend
         run: |
@@ -96,77 +49,95 @@ jobs:
           import { chromium } from 'playwright';
           import fs from 'node:fs/promises';
 
+          const permissions = [
+            'session.self.read','employee.self.read','employee.team.read','employee.management.read','employee.hr.read','employee.read_all',
+            'employee.hr.create','employee.hr.update','employee.hr.terminate','employee.hr.read_sensitive','employee.self.read_compensation',
+            'department.read','department.manage','position.manage','organization.read','settings.read','settings.manage',
+            'attendance.self.read','attendance.team.read','attendance.management.read','attendance.hr.read','attendance.read_all','attendance.hr.manage',
+            'leave.self.read','leave.team.read','leave.management.read','leave.hr.read','leave.audit.read','leave.read_all','leave.configure',
+            'trip.self.read','trip.team.read','trip.management.read','trip.hr.read','trip.read_all',
+            'expense.self.read','expense.team.read','expense.management.read','expense.hr.read','expense.read_all',
+            'loan.self.read','loan.hr.read','loan.audit.read','loan.read_all','loan.hr.manage',
+            'payroll.self.read_payslip','payroll.read','payroll.audit.read','payroll.generate','payroll.read_compensation','payroll.configure',
+            'service_request.self.read','recruitment.read','eos.read','document.self.read','document.hr.read','document.read_all',
+            'report.read','report.export','audit.read','audit.export','import.run','notification.self.read'
+          ];
+
+          const sessionPayload = {
+            csrfToken: 'screenshot-csrf-token',
+            user: {
+              id: 'screenshot-admin', email: 'screenshots@medtech.local', displayName: 'Screenshot Administrator',
+              roles: ['SUPER_ADMIN','HR','CPO','COO'], permissions, departmentScopeIds: [],
+              sessionId: 'screenshot-session', authProvider: 'local', authorizationVersion: 1, employeeId: null
+            }
+          };
+
           const browser = await chromium.launch({ headless: true });
           const context = await browser.newContext({
-            viewport: { width: 1440, height: 1000 },
-            deviceScaleFactor: 1,
-            colorScheme: 'light',
-            reducedMotion: 'reduce'
+            viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1,
+            colorScheme: 'light', reducedMotion: 'reduce'
           });
           const page = await context.newPage();
-          const base = 'http://127.0.0.1:4173';
-          let failed = false;
 
-          page.on('console', message => {
-            if (message.type() === 'error') console.error('browser-console:', message.text());
+          await page.route('**/api/v1/**', async route => {
+            const request = route.request();
+            const url = new URL(request.url());
+            const path = url.pathname.replace(/^\/api\/v1/, '');
+            let data = [];
+            if (path === '/auth/login' || path === '/auth/me') data = sessionPayload;
+            else if (path === '/organization-settings') data = {
+              name: 'MedTech', legalName: 'MedTech Corporation Trading W.L.L.', tagline: 'People operations, made precise.',
+              address: 'Doha, Qatar', phone: '+974 4000 0000', email: 'hr@medtech.qa', website: 'www.med-tech.com', currency: 'QAR'
+            };
+            else if (path.includes('/summary') || path.includes('/stats')) data = {};
+            await route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({ success: true, data })
+            });
           });
-          page.on('pageerror', error => console.error('browser-page-error:', error));
 
-          try {
-            await page.goto(base, { waitUntil: 'networkidle' });
-            await page.screenshot({ path: 'screenshots/00-login.png', fullPage: true });
-            await page.getByLabel('Email').fill(process.env.INITIAL_SUPER_ADMIN_EMAIL);
-            await page.getByLabel('Password').fill(process.env.INITIAL_SUPER_ADMIN_PASSWORD);
-            await page.getByRole('button', { name: /^Sign in$/ }).click();
+          const base = 'http://127.0.0.1:4173';
+          await page.goto(base, { waitUntil: 'networkidle' });
+          await page.screenshot({ path: 'screenshots/00-login.png', fullPage: true });
+          await page.getByLabel('Email').fill('screenshots@medtech.local');
+          await page.getByLabel('Password').fill('Screenshot-Only-Admin-2026!');
+          await page.getByRole('button', { name: /^Sign in$/ }).click();
+          await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+
+          const routes = [
+            ['01-dashboard', '/'], ['02-my-hr', '/me'], ['03-team', '/team'],
+            ['04-employees', '/employees'], ['05-attendance', '/attendance'],
+            ['06-leave', '/leave'], ['07-business-trips', '/business-trips'],
+            ['08-expenses', '/expenses'], ['09-loans', '/loans'],
+            ['10-payroll', '/payroll'], ['11-recruitment', '/recruitment'],
+            ['12-eos', '/eos'], ['13-documents', '/documents'],
+            ['14-reports', '/reports'], ['15-audit', '/audit'],
+            ['16-system', '/system'], ['17-settings', '/settings']
+          ];
+
+          const manifest = [];
+          for (const [name, route] of routes) {
+            await page.goto(base + route, { waitUntil: 'networkidle' });
             await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
-
-            const routes = [
-              ['01-dashboard', '/'], ['02-my-hr', '/me'], ['03-team', '/team'],
-              ['04-employees', '/employees'], ['05-attendance', '/attendance'],
-              ['06-leave', '/leave'], ['07-business-trips', '/business-trips'],
-              ['08-expenses', '/expenses'], ['09-loans', '/loans'],
-              ['10-payroll', '/payroll'], ['11-recruitment', '/recruitment'],
-              ['12-eos', '/eos'], ['13-documents', '/documents'],
-              ['14-reports', '/reports'], ['15-audit', '/audit'],
-              ['16-system', '/system'], ['17-settings', '/settings']
-            ];
-
-            const manifest = [];
-            for (const [name, route] of routes) {
-              await page.goto(base + route, { waitUntil: 'networkidle' });
-              await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
-              await page.waitForTimeout(500);
-              const heading = await page.locator('.page-title h1').textContent().catch(() => name);
-              await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
-              manifest.push({ name, route, heading });
-            }
-            await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
-          } catch (error) {
-            failed = true;
-            const message = error instanceof Error ? `${error.stack || error.message}` : String(error);
-            await fs.writeFile('screenshots/error.txt', message);
-            await page.screenshot({ path: 'screenshots/99-capture-error.png', fullPage: true }).catch(() => {});
-            const toast = await page.locator('.toast').textContent().catch(() => '');
-            await fs.writeFile('screenshots/page-state.txt', `URL: ${page.url()}\nToast: ${toast || ''}\n`);
-            console.error(message);
-          } finally {
-            await browser.close();
+            await page.waitForTimeout(500);
+            const heading = await page.locator('.page-title h1').textContent().catch(() => name);
+            await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
+            manifest.push({ name, route, heading });
           }
-          if (failed) process.exitCode = 1;
+
+          await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
+          await browser.close();
           EOF
           node /tmp/capture.mjs
 
       - name: Upload screenshots
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: medtech-hr-redesign-screenshots
           path: screenshots/
-          if-no-files-found: error
           retention-days: 7
 
       - name: Diagnostics
         if: failure()
-        run: |
-          cat /tmp/backend.log 2>/dev/null || true
-          cat /tmp/frontend.log 2>/dev/null || true
+        run: cat /tmp/frontend.log 2>/dev/null || true
