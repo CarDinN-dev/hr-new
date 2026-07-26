@@ -1,0 +1,228 @@
+name: Export every redesigned UI page
+
+on:
+  pull_request:
+    branches:
+      - agent/uiux-pro-max-redesign
+    paths:
+      - .github/workflows/export-all-ui-pages.yml
+      - src/**
+      - index.html
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install application and Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Start redesigned frontend
+        run: |
+          nohup npm run dev -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/frontend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/frontend.log
+          exit 1
+
+      - name: Capture desktop and mobile pages
+        run: |
+          rm -rf ui-captures
+          mkdir -p ui-captures/desktop ui-captures/mobile
+          cat > capture-ui.mjs <<'EOF'
+          import { chromium } from '@playwright/test';
+          import fs from 'node:fs/promises';
+
+          const base = 'http://127.0.0.1:4173';
+          const routes = [
+            ['01-dashboard', '/'],
+            ['02-my-hr', '/me'],
+            ['03-team', '/team'],
+            ['04-employees', '/employees'],
+            ['05-attendance', '/attendance'],
+            ['06-leave', '/leave'],
+            ['07-business-trips', '/business-trips'],
+            ['08-expenses', '/expenses'],
+            ['09-loans', '/loans'],
+            ['10-payroll', '/payroll'],
+            ['11-recruitment', '/recruitment'],
+            ['12-eos', '/eos'],
+            ['13-documents', '/documents'],
+            ['14-reports', '/reports'],
+            ['15-audit', '/audit'],
+            ['16-system', '/system'],
+            ['17-settings', '/settings']
+          ];
+
+          const permissions = [
+            'session.self.read','employee.self.read','employee.team.read','employee.management.read','employee.hr.read','employee.read_all',
+            'employee.hr.create','employee.hr.update','employee.hr.terminate','employee.hr.read_sensitive','employee.self.read_compensation',
+            'department.read','department.manage','position.manage','organization.read','settings.read','settings.manage',
+            'attendance.self.read','attendance.team.read','attendance.management.read','attendance.hr.read','attendance.read_all','attendance.hr.manage',
+            'leave.self.read','leave.team.read','leave.management.read','leave.hr.read','leave.audit.read','leave.read_all','leave.configure',
+            'trip.self.read','trip.team.read','trip.management.read','trip.hr.read','trip.read_all',
+            'expense.self.read','expense.team.read','expense.management.read','expense.hr.read','expense.read_all',
+            'loan.self.read','loan.hr.read','loan.audit.read','loan.read_all','loan.hr.manage',
+            'payroll.self.read_payslip','payroll.read','payroll.audit.read','payroll.generate','payroll.read_compensation','payroll.configure',
+            'service_request.self.read','recruitment.read','eos.read','document.self.read','document.hr.read','document.read_all',
+            'report.read','report.export','audit.read','audit.export','import.run','notification.self.read'
+          ];
+
+          const sessionPayload = {
+            csrfToken: 'screenshot-csrf-token',
+            user: {
+              id: 'screenshot-admin',
+              email: 'screenshots@medtech.qa',
+              displayName: 'Screenshot Administrator',
+              roles: ['SUPER_ADMIN','HR','CPO','COO'],
+              permissions,
+              departmentScopeIds: [],
+              sessionId: 'screenshot-session',
+              authProvider: 'local',
+              authorizationVersion: 1,
+              employeeId: null
+            }
+          };
+
+          const browser = await chromium.launch({ headless: true });
+          const manifest = [];
+          const failures = [];
+
+          async function preparePage(viewport) {
+            const context = await browser.newContext({
+              viewport,
+              deviceScaleFactor: 1,
+              colorScheme: 'light',
+              reducedMotion: 'reduce'
+            });
+            const page = await context.newPage();
+            let loggedIn = false;
+
+            page.on('console', message => {
+              if (message.type() === 'error') console.error('browser-console:', message.text());
+            });
+            page.on('pageerror', error => console.error('browser-page-error:', error.message));
+
+            await page.route('**/api/v1/**', async route => {
+              const url = new URL(route.request().url());
+              const path = url.pathname.replace(/^\/api\/v1/, '');
+              if (path === '/auth/me' && !loggedIn) {
+                await route.fulfill({
+                  status: 401,
+                  contentType: 'application/json',
+                  body: JSON.stringify({ success: false, message: 'Unauthorized' })
+                });
+                return;
+              }
+
+              let data = [];
+              if (path === '/auth/login') {
+                loggedIn = true;
+                data = sessionPayload;
+              } else if (path === '/auth/me') {
+                data = sessionPayload;
+              } else if (path === '/organization-settings') {
+                data = {
+                  name: 'MedTech',
+                  legalName: 'MedTech Corporation Trading W.L.L.',
+                  tagline: 'People operations, made precise.',
+                  address: 'Doha, Qatar',
+                  phone: '+974 4000 0000',
+                  email: 'hr@medtech.qa',
+                  website: 'www.med-tech.com',
+                  currency: 'QAR'
+                };
+              } else if (path.includes('/summary') || path.includes('/stats')) {
+                data = {};
+              }
+
+              await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ success: true, data })
+              });
+            });
+
+            return { context, page };
+          }
+
+          async function captureSet(folder, viewport, includeNavigation = false) {
+            const { context, page } = await preparePage(viewport);
+            try {
+              await page.goto(base, { waitUntil: 'domcontentloaded' });
+              await page.getByLabel('Email').waitFor({ state: 'visible', timeout: 30000 });
+              await page.waitForTimeout(700);
+              await page.screenshot({ path: `ui-captures/${folder}/00-login.png`, fullPage: true });
+
+              await page.getByLabel('Email').fill('screenshots@medtech.qa');
+              await page.getByLabel('Password').fill('Screenshot-Only-Admin-2026!');
+              await page.getByRole('button', { name: /^Sign in$/ }).click();
+              await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+
+              for (const [name, route] of routes) {
+                await page.goto(base + route, { waitUntil: 'domcontentloaded' });
+                await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+                await page.waitForTimeout(700);
+                const heading = (await page.locator('.page-title h1').textContent().catch(() => name))?.trim() || name;
+                const output = `ui-captures/${folder}/${name}.png`;
+                await page.screenshot({ path: output, fullPage: true });
+                manifest.push({ folder, name, route, heading, viewport, output });
+              }
+
+              if (includeNavigation) {
+                await page.goto(base, { waitUntil: 'domcontentloaded' });
+                await page.locator('.topbar').waitFor({ state: 'visible', timeout: 30000 });
+                await page.getByRole('button', { name: 'Open menu' }).click();
+                await page.locator('.sidebar.open').waitFor({ state: 'visible', timeout: 10000 });
+                await page.screenshot({ path: `ui-captures/${folder}/18-navigation-open.png`, fullPage: true });
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.stack || error.message : String(error);
+              failures.push({ folder, message, url: page.url() });
+              await fs.writeFile(`ui-captures/${folder}/error.txt`, `${message}\nURL: ${page.url()}\n`);
+              await page.screenshot({ path: `ui-captures/${folder}/99-error.png`, fullPage: true }).catch(() => {});
+            } finally {
+              await context.close();
+            }
+          }
+
+          await captureSet('desktop', { width: 1440, height: 1000 });
+          await captureSet('mobile', { width: 390, height: 844 }, true);
+          await fs.writeFile('ui-captures/manifest.json', JSON.stringify(manifest, null, 2));
+          await fs.writeFile('ui-captures/failures.json', JSON.stringify(failures, null, 2));
+          await browser.close();
+
+          if (failures.length) {
+            console.error(JSON.stringify(failures, null, 2));
+            process.exitCode = 1;
+          }
+          EOF
+          node capture-ui.mjs > ui-captures/capture.log 2> ui-captures/error.log
+
+      - name: Upload full-page screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: medtech-hr-all-pages
+          path: ui-captures/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Frontend diagnostics
+        if: failure()
+        run: cat /tmp/frontend.log 2>/dev/null || true
