@@ -45,8 +45,8 @@ jobs:
       - name: Capture every route
         run: |
           mkdir -p screenshots
-          cat > capture.mjs <<'EOF'
-          import { chromium } from '@playwright/test';
+          cat > /tmp/capture.mjs <<'EOF'
+          import { chromium } from 'playwright';
           import fs from 'node:fs/promises';
 
           const permissions = [
@@ -141,9 +141,10 @@ jobs:
           await fs.writeFile('screenshots/manifest.json', JSON.stringify(manifest, null, 2));
           await browser.close();
           EOF
-          node capture.mjs
+          node /tmp/capture.mjs > screenshots/capture.log 2> screenshots/error.log || true
 
       - name: Upload screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: medtech-hr-redesign-screenshots
