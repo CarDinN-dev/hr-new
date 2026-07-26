@@ -36,13 +36,13 @@ export class EmployeesService {
     await this.validateRelations(dto);
     const email = dto.email.trim().toLowerCase();
     return this.prisma.$transaction(async (tx) => {
-      const microsoftUser = await tx.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' }, microsoftLoginEnabled: true, isActive: true, deletedAt: null },
+      const matchingUser = await tx.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' }, isActive: true, deletedAt: null },
         select: { id: true, employee: { select: { id: true } } },
       });
-      if (microsoftUser?.employee) throw new ConflictException('Microsoft user is already linked to an employee');
+      if (matchingUser?.employee) throw new ConflictException('User is already linked to an employee');
       const employee = await tx.employee.create({
-        data: { ...dto, email, userId: microsoftUser?.id, salary: ZERO_MONEY },
+        data: { ...dto, email, userId: matchingUser?.id, salary: ZERO_MONEY },
         select: this.projection(user, false),
       });
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Employee', entityId: employee.id, summary: 'Employee created' });

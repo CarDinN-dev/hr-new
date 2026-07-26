@@ -397,14 +397,16 @@ function App() {
       const next = stateRef.current;
       if (JSON.stringify(previous) === JSON.stringify(next)) return session;
       await persistNormalizedStateDelta(previous, next, session);
-      const loaded = await loadBackendState(next, session);
+      const linkedEmployee = next.employees.find(employee => employee.fields["E-Mail ID (Work)"].trim().toLowerCase() === session.email.toLowerCase());
+      const nextSession = (linkedEmployee && linkedEmployee.id !== session.employeeId ? await restoreBackendSession() : null) ?? session;
+      const loaded = await loadBackendState(next, nextSession);
       const hydrated = hydrateState(loaded.state);
       persistedStateRef.current = hydrated;
       stateRef.current = hydrated;
       setState(hydrated);
-      const nextSession = session;
       if (backendSessionRef.current && backendSessionMarker(backendSessionRef.current) === backendSessionMarker(session)) {
         backendSessionRef.current = nextSession;
+        setBackendSession(nextSession);
       }
       queryClient.setQueryData(workspaceQueryKey(nextSession), { state: hydrated });
       setSyncError("");
@@ -973,6 +975,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
                   <div className="employee-card-details">
                     <span><b>Department</b>{employee.fields.Department || "-"}</span>
                     <span><b>Manager</b>{employee.fields["Reporting Manager Employee Code/Name"] || "-"}</span>
+                    <span><b>Login email</b>{employee.fields["E-Mail ID (Work)"] || "-"}</span>
                     <span><b>Joined</b>{formatDate(employee.fields["Joining Date"])}</span>
                     {canViewSalary && <span><b>Total pay</b>{formatMoney(salary.total, state.settings.company.currency)}</span>}
                   </div>
@@ -1157,8 +1160,9 @@ function EmployeeEditor({ state, employee, save, close, notify }: {
   }
 
   function submit() {
-    if (!draft.fields["Employee Code"].trim() || !draft.fields["Full Name"].trim()) {
-      notify("Employee code and full name are required.");
+    const email = draft.fields["E-Mail ID (Work)"].trim();
+    if (!draft.fields["Employee Code"].trim() || !draft.fields["Full Name"].trim() || (!employee && !/^\S+@\S+\.\S+$/.test(email))) {
+      notify("Employee code, full name, and login email are required.");
       return;
     }
     save(draft);

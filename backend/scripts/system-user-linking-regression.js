@@ -82,14 +82,23 @@ test('Local-only user creation remains allowed without an employee match', async
   assert.equal(calls.employeeUpdates.length, 0);
 });
 
-test('Employee creation links a matching Microsoft user by normalized email', async () => {
+test('Local user creation links a matching employee email', async () => {
+  const { service, calls } = setup({ employee: { id: 'employee-1', email: 'employee@example.com', userId: null } });
+  await service.createUser(dto({ localLoginEnabled: true, microsoftLoginEnabled: false, password: 'LocalAccount123!' }), actor);
+  assert.deepEqual(calls.employeeUpdates, [{ where: { id: 'employee-1' }, data: { userId: 'user-1' } }]);
+});
+
+test('Employee creation links a matching user by normalized email', async () => {
   const calls = [];
   const microsoftUser = { id: 'user-1', employee: null };
   const prisma = {
     department: { findFirst: async () => null },
     jobPosition: { findFirst: async () => null },
     $transaction: async (operation) => operation({
-      user: { findFirst: async () => microsoftUser },
+      user: { findFirst: async (args) => {
+        assert.equal(args.where.microsoftLoginEnabled, undefined);
+        return microsoftUser;
+      } },
       employee: { create: async (args) => { calls.push(args); return { id: 'employee-1' }; } },
     }),
   };
