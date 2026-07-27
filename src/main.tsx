@@ -71,7 +71,6 @@ import {
   companyLoanDeductionCap,
   decideAttendance,
   createEosRecord,
-  documentNumber,
   employeeName,
   employeeSalary,
   eosSummary,
@@ -94,8 +93,7 @@ import {
   todayISO,
   tripTotal,
   upcomingBirthdays,
-  upsertEmployee,
-  withNextDocumentSeq
+  upsertEmployee
 } from "./domain";
 import {
   backendSessionKey,
@@ -269,6 +267,7 @@ function App() {
   const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(() => loadBackendSession() ?? undefined);
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
   const [syncError, setSyncError] = useState("");
+  const [syncAlertDismissed, setSyncAlertDismissed] = useState(false);
   const backendReady = useRef(false);
   const hydratedWorkspaceSession = useRef("");
   const backendSessionRef = useRef<BackendSession | null | undefined>(backendSession);
@@ -360,6 +359,7 @@ function App() {
       void saveBackendNow().catch(error => {
         backendReady.current = false;
         setSyncError(errorMessage(error));
+        setSyncAlertDismissed(false);
       });
     }, 900);
     return () => window.clearTimeout(timer);
@@ -431,27 +431,10 @@ function App() {
     queryClient.setQueryData(workspaceQueryKey(session), { state: hydrated });
   }
 
-  function savePdf(file: GeneratedPdf | undefined, template: PdfTemplate, employeeId = "") {
+  function savePdf(file: GeneratedPdf | undefined, _template: PdfTemplate, _employeeId = "") {
     if (!file) return;
-    setState(prev => {
-      const number = documentNumber(prev);
-      const next = withNextDocumentSeq(prev);
-      return {
-        ...next,
-        documents: [...next.documents, {
-          id: newId(),
-          employeeId,
-          template,
-          documentNumber: number,
-          generatedOn: todayISO(),
-          status: "Generated",
-          filename: file.filename,
-          dataUrl: file.dataUrl,
-          sizeBytes: file.sizeBytes
-        }]
-      };
-    });
-    notify(`${file.filename} saved and added to Documents.`);
+    // ponytail: a browser download must not mutate HR data; document archival uses the Documents upload flow.
+    notify(`${file.filename} downloaded.`);
   }
 
   function toggleTheme() {
@@ -478,6 +461,7 @@ function App() {
     } catch (error) {
       backendReady.current = false;
       setSyncError(errorMessage(error));
+      setSyncAlertDismissed(false);
     }
   }
 
@@ -562,9 +546,10 @@ function App() {
       </aside>
 
       <main className="workspace">
-        {syncError && <div className="sync-alert" role="alert">
+        {syncError && !syncAlertDismissed && <div className="sync-alert" role="alert">
           <span><strong>Changes are not saved.</strong> {syncError}</span>
           <button type="button" onClick={() => void retrySave()}>Retry save</button>
+          <button type="button" aria-label="Dismiss save error" title="Dismiss" onClick={() => setSyncAlertDismissed(true)}><X size={16} /></button>
         </div>}
         <header className="topbar">
           <button className="mobile-menu" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
