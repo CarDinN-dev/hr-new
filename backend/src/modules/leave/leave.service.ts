@@ -213,6 +213,7 @@ export class LeaveService {
       });
       await this.createWorkflowSteps(tx, request.id, workflowVersion, workflow.steps);
       await this.notifyWorkflow(tx, request.id, workflow.blocked, workflow.steps);
+      if (employee.userId !== user.id) await tx.notification.create({ data: { userId: employee.userId, type: 'LEAVE_SUBMITTED_ON_BEHALF', title: 'Leave submitted on your behalf', message: 'HR submitted a leave request on your behalf.', resourceType: 'LeaveRequest', resourceId: request.id } });
       await this.audit.record(tx, user, {
         action: AuditAction.CREATE, resourceType: 'LeaveRequest', resourceId: request.id, workflowId: request.id,
         workflowStage: request.currentStage ?? undefined, workflowStatus: request.status,
@@ -233,7 +234,7 @@ export class LeaveService {
   async listMine(query: QueryLeaveRequestsDto, user: RequestUser) {
     if (!user.employeeId) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
     if (!this.authorization.permissionAllowedForScope(user, 'leave.self.read', AccessScopeType.SELF, user.employeeId)) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
-    return this.listWithWhere(query, { employeeId: user.employeeId, requesterUserId: user.id });
+    return this.listWithWhere(query, { employeeId: user.employeeId });
   }
 
   async inbox(query: QueryLeaveRequestsDto, user: RequestUser) {
@@ -437,13 +438,15 @@ export class LeaveService {
   }
 
   override(id: string, dto: OverrideLeaveDto, key: string | undefined, user: RequestUser) {
-    if (!hasActiveSuperAdminRole(user)) throw new ForbiddenException('Super Administrator override is required');
-    this.authorization.requireRecentStepUp(user);
+    const superOverride = hasActiveSuperAdminRole(user);
+    if (!superOverride && !this.authorization.has(user, 'leave.hr.override')) throw new ForbiddenException('Leave override permission is required');
+    if (!superOverride && dto.targetStatus !== LeaveRequestStatus.APPROVED) throw new ForbiddenException('HR override may only approve leave');
     if (!([LeaveRequestStatus.APPROVED, LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED] as LeaveRequestStatus[]).includes(dto.targetStatus)) throw new BadRequestException('Invalid override target status');
     return this.leaveTransaction(async (tx) => {
       const duplicate = await this.idempotentResult(tx, user, 'leave.override', key, { id, dto });
       if (duplicate) return duplicate;
       const request = await this.ensureRequest(id, tx);
+      if (!superOverride && request.employeeId === user.employeeId) throw new ForbiddenException('HR cannot override its own leave');
       this.assertExpectedVersion(request.version, dto.expectedVersion);
       if (!([...activePendingStatuses, LeaveRequestStatus.APPROVED] as LeaveRequestStatus[]).includes(request.status)) throw new BadRequestException('Terminal leave requests cannot be overridden');
       if (dto.targetStatus === LeaveRequestStatus.APPROVED) await this.finalizeBalance(tx, request);
@@ -453,9 +456,12 @@ export class LeaveService {
       if (step) await tx.leaveApprovalStep.update({ where: { id: step.id }, data: { status: dto.targetStatus === LeaveRequestStatus.APPROVED ? LeaveStepStatus.APPROVED : LeaveStepStatus.REJECTED, decisionType: LeaveDecisionType.OVERRIDE, decidedByUserId: user.id, decidedAt: new Date(), reason: dto.reason, version: { increment: 1 } } });
       await tx.leaveRequest.update({ where: { id }, data: { status: dto.targetStatus, currentStage: null, finalDecisionAt: new Date(), rejectionReason: dto.targetStatus === LeaveRequestStatus.REJECTED ? dto.reason : null, version: { increment: 1 } } });
       await tx.leaveDecision.create({ data: { requestId: id, stepId: step?.id, actorUserId: user.id, stage: request.currentStage, decisionType: LeaveDecisionType.OVERRIDE, fromStatus: request.status, toStatus: dto.targetStatus, reason: dto.reason, idempotencyKey: key, isOverride: true } });
-      const hrUsers = await tx.user.findMany({ where: { isActive: true, deletedAt: null, roles: { some: { revokedAt: null, role: { isActive: true, permissions: { some: { permission: { code: 'leave.hr.read', isDeprecated: false } } } } } } }, select: { id: true } });
-      const recipients = [...new Set([request.requesterUserId, ...(step?.assignees.map(({ userId }) => userId) ?? []), ...hrUsers.map(({ id: userId }) => userId), ...pendingSteps.flatMap((pending) => pending.assignees.map(({ userId }) => userId))])].filter((userId) => userId !== user.id);
-      if (recipients.length) await tx.notification.createMany({ data: recipients.map((userId) => ({ userId, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden', message: 'A Super Administrator changed a leave workflow decision.', resourceType: 'LeaveRequest', resourceId: id })) });
+      const [hrUsers, subject] = await Promise.all([
+        tx.user.findMany({ where: { isActive: true, deletedAt: null, roles: { some: { revokedAt: null, role: { isActive: true, permissions: { some: { permission: { code: 'leave.hr.read', isDeprecated: false } } } } } } }, select: { id: true } }),
+        tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } }),
+      ]);
+      const recipients = [...new Set([request.requesterUserId, subject?.userId, ...(step?.assignees.map(({ userId }) => userId) ?? []), ...hrUsers.map(({ id: userId }) => userId), ...pendingSteps.flatMap((pending) => pending.assignees.map(({ userId }) => userId))])].filter((userId): userId is string => Boolean(userId) && userId !== user.id);
+      if (recipients.length) await tx.notification.createMany({ data: recipients.map((userId) => ({ userId, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden', message: superOverride ? 'A Super Administrator changed a leave workflow decision.' : 'HR approved a leave request by override.', resourceType: 'LeaveRequest', resourceId: id })) });
       await this.audit.record(tx, user, { action: AuditAction.OVERRIDE, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: request.currentStage ?? undefined, workflowStatus: dto.targetStatus, summary: 'Leave workflow overridden', reason: dto.reason, subjectEmployeeId: request.employeeId, isOverride: true, before: { status: request.status, currentStage: request.currentStage, version: request.version }, after: { status: dto.targetStatus, currentStage: null, version: request.version + 1 }, metadata: { skippedStages: pendingSteps.map((pending) => pending.stage), affectedUserIds: recipients }, changes: [{ field: 'status', previousValue: request.status, nextValue: dto.targetStatus }] });
       await this.saveIdempotency(tx, user, 'leave.override', key, { id, dto }, id);
       return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
@@ -528,7 +534,9 @@ export class LeaveService {
       const assignees = await tx.leaveApprovalStepAssignee.findMany({ where: { stepId: nextStep.id, isActive: true, revokedAt: null }, select: { userId: true } });
       if (assignees.length) await tx.notification.createMany({ data: assignees.map(({ userId }) => ({ userId, type: 'LEAVE_APPROVAL', title: 'Leave approval required', message: 'A leave request is waiting for your decision.', resourceType: 'LeaveRequest', resourceId: request.id })) });
     }
-    await tx.notification.create({ data: { userId: request.requesterUserId, type: 'LEAVE_STATUS', title: 'Leave request updated', message: `Your leave request is now ${nextStatus.replaceAll('_', ' ').toLowerCase()}.`, resourceType: 'LeaveRequest', resourceId: request.id } });
+    const subject = await tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } });
+    const recipients = [...new Set([request.requesterUserId, subject?.userId])].filter((userId): userId is string => Boolean(userId));
+    await tx.notification.createMany({ data: recipients.map((userId) => ({ userId, type: 'LEAVE_STATUS', title: 'Leave request updated', message: `Your leave request is now ${nextStatus.replaceAll('_', ' ').toLowerCase()}.`, resourceType: 'LeaveRequest', resourceId: request.id })) });
     await this.audit.record(tx, user, {
       action: AuditAction.TRANSITION, resourceType: 'LeaveRequest', resourceId: request.id, workflowId: request.id,
       workflowStage: step.stage, workflowStatus: nextStatus,

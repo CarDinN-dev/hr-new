@@ -85,6 +85,7 @@ deploy() {
   wait_healthy medtech-hr-erp-clamav-1 180
   "${compose[@]}" build api hr-erp
   "${compose[@]}" run --rm --no-deps api npx prisma migrate deploy
+  "${compose[@]}" run --rm --no-deps api npm run rbac:sync
   "${compose[@]}" up -d --no-deps api
   wait_healthy medtech-hr-erp-api-1
   "${compose[@]}" up -d --no-deps hr-erp

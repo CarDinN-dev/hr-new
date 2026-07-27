@@ -57,6 +57,8 @@ test('role inheritance and business separation match the production matrix', () 
   assert.equal(manager.has('leave.management.approve_manager'), true);
   assert.equal(manager.has('leave.team.approve_line_manager'), false);
   assert.equal(hr.has('leave.hr.approve'), true);
+  assert.equal(hr.has('leave.hr.override'), true);
+  assert.equal(hr.has('leave.override'), false);
   assert.equal(cpo.has('leave.executive.approve_cpo'), true);
   assert.equal(coo.has('leave.executive.approve_coo'), true);
 
@@ -91,6 +93,7 @@ test('every permission is assigned and protected permissions are explicit', () =
   for (const permission of ['role.assign_protected', 'permission.assign_protected', 'leave.override', 'service_request.override', 'payroll.override']) {
     assert.equal(protectedSet.has(permission), true);
   }
+  assert.equal(protectedSet.has('leave.hr.override'), false);
 });
 
 test('every controller permission is declared in the catalogue', () => {

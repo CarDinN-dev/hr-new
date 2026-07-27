@@ -301,6 +301,26 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(duplicateSubmit.data.id, submitted.data.id);
   assert.equal((await mutate(`/leave/${submitted.data.id}/approve`, sessions.EMPLOYEE, { expectedVersion: submitted.data.version })).status, 403);
 
+  const delegatedLeave = await mutate('/leave/submit', sessions.HR, {
+    employeeId: sessions.EMPLOYEE.user.employeeId, leaveTypeId: annualLeave.id, startDate: '2099-04-20', endDate: '2099-04-20', reason: 'HR delegated leave submission',
+  });
+  assert.equal(delegatedLeave.status, 201, JSON.stringify(delegatedLeave.payload));
+  assert.equal(delegatedLeave.data.status, 'PENDING_LINE_MANAGER');
+  const employeeLeaves = await api('/leave/mine?limit=100', {}, sessions.EMPLOYEE);
+  assert.equal(employeeLeaves.data.some((request) => request.id === delegatedLeave.data.id), true);
+  const employeeNotifications = await api('/notifications?limit=100', {}, sessions.EMPLOYEE);
+  assert.equal(employeeNotifications.data.some((notification) => notification.resourceId === delegatedLeave.data.id && notification.type === 'LEAVE_SUBMITTED_ON_BEHALF'), true);
+  for (const targetStatus of ['REJECTED', 'CANCELLED']) {
+    assert.equal((await mutate(`/leave/${delegatedLeave.data.id}/override`, sessions.HR, { expectedVersion: delegatedLeave.data.version, targetStatus, reason: 'HR approval override restriction test' })).status, 403);
+  }
+  const delegatedApproved = await mutate(`/leave/${delegatedLeave.data.id}/override`, sessions.HR, { expectedVersion: delegatedLeave.data.version, targetStatus: 'APPROVED', reason: 'HR immediate approval' });
+  assert.equal(delegatedApproved.status, 201, JSON.stringify(delegatedApproved.payload));
+  assert.equal(delegatedApproved.data.status, 'APPROVED');
+  assert.equal(delegatedApproved.data.currentStage, null);
+  const delegatedOverrideAudit = await prisma.auditEvent.findFirst({ where: { workflowId: delegatedLeave.data.id, isOverride: true }, orderBy: { sequence: 'desc' } });
+  assert.equal(delegatedOverrideAudit?.metadataJson?.skippedStages.includes('LINE_MANAGER'), true);
+  assert.equal((await api('/notifications?limit=100', {}, sessions.EMPLOYEE)).data.some((notification) => notification.resourceId === delegatedLeave.data.id && notification.type === 'LEAVE_OVERRIDE'), true);
+
   const managerInbox = await api('/approvals/inbox', {}, sessions.LINE_MANAGER);
   assert.equal(managerInbox.status, 200);
   assert.equal(managerInbox.data.leave.some((request) => request.id === submitted.data.id), true);
