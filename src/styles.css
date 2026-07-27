@@ -5724,6 +5724,10 @@ summary {
   transform: translateY(-1px);
 }
 
+.app .panel:hover {
+  transform: none;
+}
+
 .app button,
 .app .button-like,
 :root[data-theme="dark"] .app button {
