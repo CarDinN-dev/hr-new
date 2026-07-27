@@ -20,7 +20,7 @@ const routePermissions: Record<NavItem, string[]> = {
   Reports: ["report.read"],
   Audit: ["audit.read"],
   System: [],
-  Settings: ["settings.read", "settings.manage", "department.manage", "position.manage", "leave.configure"]
+  Settings: ["session.self.read", "settings.read", "settings.manage", "department.manage", "position.manage", "leave.configure"]
 };
 
 export type AuthorizationContextValue = {

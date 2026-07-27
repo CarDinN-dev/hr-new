@@ -53,3 +53,48 @@ test("HR submits for an employee and immediately approves without a password", a
   await dialog.getByRole("button", { name: "Confirm" }).click();
   expect(JSON.parse((await overridden).postData() || "{}")).toMatchObject({ targetStatus: "APPROVED", reason: "Immediate HR approval" });
 });
+
+test("employee submits their own leave and uses My HR and Settings safely", async ({ page }) => {
+  const self = { id: "employee-self", employeeCode: "EMP-SELF", firstName: "Noor", lastName: "Ahmed", email: "noor@example.invalid" };
+  const employeeUser = { id: "employee-user", email: self.email, displayName: "Noor Ahmed", roles: ["EMPLOYEE"], permissions: ["session.self.read", "session.self.revoke", "employee.self.read", "employee.self.update_basic", "leave.self.read", "leave.self.create", "leave.self.cancel", "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download"], departmentScopeIds: [], sessionId: "employee-session", authProvider: "local", authorizationVersion: 1, employeeId: self.id };
+  const ownLeave = { ...leave, id: "own-leave", requesterUserId: employeeUser.id, employeeId: self.id, employee: self, status: "PENDING_LINE_MANAGER" };
+
+  await page.route("**/api/v1/**", async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace("/api/v1", "");
+    const body = request.postDataJSON?.() as Record<string, unknown> | undefined;
+    const json = (data: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(envelope(data)) });
+    if (path === "/auth/me") return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false, message: "Not signed in" }) });
+    if (path === "/auth/login") return json({ csrfToken: "csrf-token", user: employeeUser }, 201);
+    if (path === "/employees") return json([self]);
+    if (path === "/leave/mine") return json([ownLeave]);
+    if (path === "/leave/types") return json([{ id: "annual", name: "Annual leave", annualAllowanceDays: "30" }]);
+    if (path === "/leave/submit" && request.method() === "POST") return json({ ...ownLeave, id: "submitted-own-leave", reason: body?.reason }, 201);
+    if (path === "/auth/sessions") return json([{ id: employeeUser.sessionId, provider: "local", userAgent: "Test browser", current: true }]);
+    return json([]);
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Email").fill(self.email);
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Leave", exact: true }).click();
+
+  await expect(page.getByLabel("Employee")).toHaveCount(0);
+  await page.getByLabel("Reason").first().fill("Annual leave request");
+  const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
+  await page.getByRole("button", { name: "Submit request" }).click();
+  expect(JSON.parse((await submitted).postData() || "{}")).not.toHaveProperty("employeeId");
+  await expect(page.getByText("Pending Line Manager", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "My HR", exact: true }).click();
+  await expect(page.getByText("Current leave application", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pending Line Manager", { exact: true })).toBeVisible();
+  await expect(page.getByText("Bank details", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Signed-in devices", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByText("Signed-in devices", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save settings", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Company Profile", { exact: true })).toHaveCount(0);
+});

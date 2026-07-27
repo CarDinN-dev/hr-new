@@ -16,13 +16,11 @@ export class UpdateSelfBasicProfileDto {
   profilePhoto?: string;
 }
 
-export class UpdateSelfBankDto {
+export class UpdatePayrollBankDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(50) bankCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64) iban?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(64) accountNumber?: string;
 }
-
-export class UpdatePayrollBankDto extends UpdateSelfBankDto {}
 
 export class UpdateHrSensitiveDetailsDto extends UpdateEmployeeDetailsDto {
   @ApiPropertyOptional({ example: '1992-04-15' }) @IsOptional() @Type(() => Date) @IsDate() dateOfBirth?: Date;

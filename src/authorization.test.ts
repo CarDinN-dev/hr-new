@@ -33,4 +33,8 @@ describe("System route authorization", () => {
     expect(canAccessRoute(admin, "Audit")).toBe(true);
     expect(canAccessRoute(admin, "Settings")).toBe(true);
   });
+
+  it("allows employee Settings for signed-in device management", () => {
+    expect(canAccessRoute(session(["EMPLOYEE"], ["session.self.read"]), "Settings")).toBe(true);
+  });
 });

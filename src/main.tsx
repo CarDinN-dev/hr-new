@@ -121,7 +121,7 @@ import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
-import { ApprovalInboxPanel, LeaveWorkflowPage, MyPayslipsPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
+import { ApprovalInboxPanel, LeaveWorkflowPage, MyLeaveStatusPanel, MyPayslipsPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { SystemAccessPage } from "./features/system-access";
 import { AuditHistoryPage } from "./features/audit-page";
 import { NotificationsPanel } from "./features/notifications-panel";
@@ -586,7 +586,7 @@ function App() {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
-          {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} />}
+          {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={() => setNav("Leave")} />}
           {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
           {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
@@ -601,7 +601,7 @@ function App() {
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
-          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} refreshWorkspace={refreshWorkspace} />}
+          {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
         </div>
       </main>
 
@@ -662,20 +662,9 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
   </section></main>;
 }
 
-type AuthSessionRecord = {
-  id: string; provider: string; userAgent?: string | null; createdAt: string; lastSeenAt: string;
-  expiresAt: string; revokedAt?: string | null; current?: boolean;
-};
-
-function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void> }) {
+function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void>; onOpenLeave: () => void }) {
   const employee = state.employees.find(item => item.id === session.employeeId);
   const [basic, setBasic] = useState({ firstName: "", lastName: "", phone: "", address: "", emergencyContactName: "", emergencyContactPhone: "" });
-  const [bank, setBank] = useState({ bankCode: "", iban: "", accountNumber: "" });
-  const sessions = useQuery({
-    queryKey: ["auth-sessions", session.sessionId, session.authorizationVersion],
-    queryFn: () => apiRequest<AuthSessionRecord[]>("/auth/sessions"),
-    enabled: hasPermission(session, "session.self.read")
-  });
 
   useEffect(() => {
     if (!employee) return;
@@ -684,26 +673,12 @@ function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState
       phone: employee.fields["Personal Mobile No."] || "", address: employee.fields["Local Building/Villa #"] || "",
       emergencyContactName: employee.fields["Emergency Contact Name"] || "", emergencyContactPhone: employee.fields["Emergency Contact Mobile No."] || ""
     });
-    setBank({ bankCode: employee.fields["Bank Code"] || "", iban: employee.fields["IBAN No."] || "", accountNumber: employee.fields["Account No."] || "" });
   }, [employee?.id]);
 
   async function saveBasic() {
     await apiRequest("/employees/me/basic", { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify(basic) });
     await refreshWorkspace();
     notify("Your profile was updated.");
-  }
-
-  async function saveBank() {
-    await apiRequest("/employees/me/bank", { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify(bank) });
-    await refreshWorkspace();
-    notify("Your bank details were updated.");
-  }
-
-  async function revoke(id: string) {
-    await apiRequest(`/auth/sessions/${id}`, { method: "DELETE", csrfToken: session.csrfToken });
-    if (id === session.sessionId) window.dispatchEvent(new Event(authorizationExpiredEvent));
-    else await sessions.refetch();
-    notify("Session revoked.");
   }
 
   return <div className="dashboard-grid">
@@ -714,13 +689,7 @@ function MyHrPage({ state, session, notify, refreshWorkspace }: { state: HrState
         {hasPermission(session, "employee.self.update_basic") && <div className="form-actions"><button className="primary" type="button" onClick={() => void saveBasic().catch(error => notify(errorMessage(error)))}>Save personal details</button></div>}
       </div>}
     </section>
-    {hasPermission(session, "employee.self.read_bank") && <section className="panel"><div className="panel-head"><div><h3>Bank details</h3><span>Used for salary payment.</span></div></div>{!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
-      {(["bankCode", "iban", "accountNumber"] as const).map(key => <label key={key}>{({ bankCode: "Bank code", iban: "IBAN", accountNumber: "Account number" } as const)[key]}<input value={bank[key]} onChange={event => setBank(value => ({ ...value, [key]: event.target.value }))} /></label>)}
-      {hasPermission(session, "employee.self.update_bank") && <div className="form-actions"><button className="primary" type="button" onClick={() => void saveBank().catch(error => notify(errorMessage(error)))}>Save bank details</button></div>}
-    </div>}</section>}
-    <section className="panel"><div className="panel-head"><div><h3>Signed-in devices</h3><span>Revoke sessions you no longer use.</span></div></div>
-      {sessions.isPending ? <p className="muted">Loading sessions...</p> : sessions.isError ? <p className="muted">{errorMessage(sessions.error)}</p> : <div className="list-stack">{sessions.data?.map(item => <div className="list-row" key={item.id}><div><strong>{item.current ? "This device" : item.provider}</strong><span>{item.userAgent || "Unknown browser"}</span></div>{!item.revokedAt && <button type="button" onClick={() => void revoke(item.id).catch(error => notify(errorMessage(error)))}>Revoke</button>}</div>)}</div>}
-    </section>
+    <MyLeaveStatusPanel session={session} onOpenLeave={onOpenLeave} />
     <ServiceRequestsPanel session={session} notify={notify} />
     <MyPayslipsPanel session={session} notify={notify} />
   </div>;
@@ -877,7 +846,7 @@ function EmployeeAvatar({ employee, small = false }: { employee: EmployeeRecord;
 function pageDescription(nav: NavItem) {
   const descriptions: Record<NavItem, string> = {
     Dashboard: "Attendance, leave, payroll and employee totals.",
-    "My HR": "Your profile, bank details and signed-in devices.",
+    "My HR": "Your personal details, leave application, certificates and payslips.",
     Team: "Direct reports and managed department work.",
     Employees: "Employee records.",
     Attendance: "Daily attendance and monthly totals.",
@@ -892,7 +861,7 @@ function pageDescription(nav: NavItem) {
     Reports: "Employee, attendance, leave and payroll reports.",
     Audit: "Security and business activity history.",
     System: "Users, access roles, permissions and sessions.",
-    Settings: "Company and HR settings."
+    Settings: "Signed-in devices and company settings."
   };
   return descriptions[nav];
 }
@@ -2153,14 +2122,12 @@ function SettingsPage({
   state,
   setState,
   notify,
-  backendSession,
-  refreshWorkspace
+  backendSession
 }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   notify: (message: string) => void;
   backendSession: BackendSession | null;
-  refreshWorkspace: () => Promise<void>;
 }) {
   const canConfigureSystem = Boolean(backendSession && hasPermission(backendSession, "system.configure"));
   const canManageDepartments = Boolean(backendSession && hasPermission(backendSession, "department.manage"));
@@ -2176,6 +2143,7 @@ function SettingsPage({
   const [payrollRequireBankDetails, setPayrollRequireBankDetails] = useState(state.settings.payrollRequireBankDetails);
   const [payrollRequireAttendance, setPayrollRequireAttendance] = useState(state.settings.payrollRequireAttendance);
   const [payrollVarianceThreshold, setPayrollVarianceThreshold] = useState(state.settings.payrollVarianceThreshold);
+  const canSaveOrganizationSettings = canConfigureSystem || canManageDepartments || canConfigureLeave;
 
   function saveSettings() {
     const nextDepartments = departments.split("\n").map(item => item.trim()).filter(Boolean);
@@ -2194,7 +2162,7 @@ function SettingsPage({
   }
 
   return <section className="settings-grid">
-    {backendSession && <ProfilePhotoPanel employee={state.employees.find(item => item.id === backendSession.employeeId)} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} />}
+    {backendSession && <SignedInDevicesPanel session={backendSession} notify={notify} />}
     {canConfigureSystem && <div className="panel">
       <div className="panel-head"><h3>Data Protection</h3><span>Managed on Google Cloud</span></div>
       <p className="muted">The database and private document bucket are backed up by the server schedule. Restore operations are restricted to administrators with server access.</p>
@@ -2210,7 +2178,32 @@ function SettingsPage({
     {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>}
     {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>}
     {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Payroll Controls</h3><span>These values are snapshotted on every run.</span></div><div className="form-grid compact"><label>Proration basis<select value={payrollProrationBasis} onChange={event => setPayrollProrationBasis(event.target.value as "Fixed 30" | "Calendar Days")}><option>Fixed 30</option><option>Calendar Days</option></select></label><label>Net pay variance warning (%)<input type="number" min="0" max="1000" step="0.01" value={payrollVarianceThreshold} onChange={event => setPayrollVarianceThreshold(Number(event.target.value) || 0)} /></label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireBankDetails} onChange={event => setPayrollRequireBankDetails(event.target.checked)} /> Require bank details before payroll</label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireAttendance} onChange={event => setPayrollRequireAttendance(event.target.checked)} /> Block payroll when attendance is missing</label></div><p className="muted">Bank data is required by default. Attendance can remain a warning while the rollout is in progress.</p></div>}
-    <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>
+    {canSaveOrganizationSettings && <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>}
+  </section>;
+}
+
+type AuthSessionRecord = {
+  id: string; provider: string; userAgent?: string | null; createdAt: string; lastSeenAt: string;
+  expiresAt: string; revokedAt?: string | null; current?: boolean;
+};
+
+function SignedInDevicesPanel({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
+  const sessions = useQuery({
+    queryKey: ["auth-sessions", session.sessionId, session.authorizationVersion],
+    queryFn: () => apiRequest<AuthSessionRecord[]>("/auth/sessions"),
+    enabled: hasPermission(session, "session.self.read")
+  });
+
+  async function revoke(id: string) {
+    await apiRequest(`/auth/sessions/${id}`, { method: "DELETE", csrfToken: session.csrfToken });
+    if (id === session.sessionId) window.dispatchEvent(new Event(authorizationExpiredEvent));
+    else await sessions.refetch();
+    notify("Session revoked.");
+  }
+
+  if (!hasPermission(session, "session.self.read")) return null;
+  return <section className="panel"><div className="panel-head"><div><h3>Signed-in devices</h3><span>Revoke sessions you no longer use.</span></div></div>
+    {sessions.isPending ? <p className="muted">Loading sessions...</p> : sessions.isError ? <p className="muted">{errorMessage(sessions.error)}</p> : <div className="list-stack">{sessions.data?.map(item => <div className="list-row" key={item.id}><div><strong>{item.current ? "This device" : item.provider}</strong><span>{item.userAgent || "Unknown browser"}</span></div>{!item.revokedAt && hasPermission(session, "session.self.revoke") && <button type="button" onClick={() => void revoke(item.id).catch(error => notify(errorMessage(error)))}>Revoke</button>}</div>)}</div>}
   </section>;
 }
 

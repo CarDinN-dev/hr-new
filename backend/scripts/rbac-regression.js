@@ -52,6 +52,9 @@ test('role inheritance and business separation match the production matrix', () 
   for (const permission of ['employee.self.read', 'leave.self.create', 'announcement.read', 'notification.self.read']) {
     assert.equal(employee.has(permission), true, `EMPLOYEE requires ${permission}`);
   }
+  for (const permission of ['employee.self.read_bank', 'employee.self.update_bank']) {
+    assert.equal(employee.has(permission), false, `EMPLOYEE must not access self-service bank details`);
+  }
   assert.equal(lineManager.has('leave.team.approve_line_manager'), true);
   assert.equal(lineManager.has('leave.management.approve_manager'), false);
   assert.equal(manager.has('leave.management.approve_manager'), true);
@@ -106,6 +109,11 @@ test('every controller permission is declared in the catalogue', () => {
   }
   const declared = new Set(catalog.permissions);
   assert.deepEqual([...used].filter((permission) => !declared.has(permission)).sort(), []);
+});
+
+test('employee self-service bank update endpoint is absent', () => {
+  const employees = fs.readFileSync(path.join(backendSource, 'modules/employees/employees.controller.ts'), 'utf8');
+  assert.doesNotMatch(employees, /me\/bank/u);
 });
 
 test('every HTTP endpoint has an explicit public or permission policy', () => {

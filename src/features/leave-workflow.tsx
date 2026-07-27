@@ -38,6 +38,20 @@ type EligibleAssignee = { id: string; email: string; employee?: { firstName: str
 type DecisionAction = "approve" | "self-approve" | "reject" | "return" | "cancel" | "reassign" | "override" | "correct-resubmit";
 type Decision = { request: LeaveRecord; action: DecisionAction; reasonRequired: boolean };
 
+export function MyLeaveStatusPanel({ session, onOpenLeave }: { session: BackendSession; onOpenLeave: () => void }) {
+  const requests = useQuery({
+    queryKey: workflowKey(session, "my-leave-status"),
+    queryFn: () => apiList<LeaveRecord>("/leave/mine"),
+    enabled: Boolean(session.employeeId) && hasPermission(session, "leave.self.read"),
+  });
+  if (!hasPermission(session, "leave.self.read")) return null;
+  const current = requests.data?.find(request => !["APPROVED", "REJECTED", "CANCELLED"].includes(request.status)) ?? requests.data?.[0];
+
+  return <section className="panel span-2"><div className="panel-head"><div><h3>Current leave application</h3><span>Your latest active request, or most recent completed request.</span></div><button type="button" onClick={onOpenLeave}>View Leave</button></div>
+    {requests.isPending ? <p className="muted">Loading leave application...</p> : requests.isError ? <p className="sync-alert">{requests.error.message}</p> : !current ? <div className="empty compact">No leave applications yet.</div> : <div className="list-row"><div><strong>{current.leaveType.name}</strong><span>{displayDate(current.startDate)} – {displayDate(current.endDate)} · {current.totalDays} day(s)</span></div><span className="badge neutral">{displayTitle(current.status)}</span></div>}
+  </section>;
+}
+
 export function LeaveWorkflowPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
   const client = useQueryClient();
   const isSuperAdmin = hasActiveSuperAdminRole(session);
@@ -102,7 +116,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
 
   return <section className="stack">
     {Boolean(session.employeeId) && hasPermission(session, "leave.self.create") && <div className="panel"><div className="panel-head"><div><h3>Request leave</h3><span>Approval routing is assigned by the server.</span></div></div><div className="form-grid compact">{canSubmitForEmployee && <label>Employee<select aria-label="Employee" value={form.employeeId} onChange={event => setForm(previous => ({ ...previous, employeeId: event.target.value }))}><option value="">Select employee</option>{employees.data?.map(employee => <option value={employee.id} key={employee.id}>{employee.employeeCode} — {employee.firstName} {employee.lastName}</option>)}</select></label>}<label>Leave type<select value={form.leaveTypeId} onChange={event => setForm(previous => ({ ...previous, leaveTypeId: event.target.value }))}>{leaveTypes.data?.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>From<input type="date" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value }))} /></label><label>To<input type="date" value={form.endDate} onChange={event => setForm(previous => ({ ...previous, endDate: event.target.value }))} /></label><label>Duration<select value={form.isHalfDay ? "half" : "full"} onChange={event => setForm(previous => ({ ...previous, isHalfDay: event.target.value === "half" }))}><option value="full">Full day(s)</option><option value="half">Half day</option></select></label><label className="wide">Reason<textarea maxLength={2000} value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))} /></label></div><div className="form-actions"><button className="primary" disabled={submit.isPending || !leaveTypes.data?.length || (canSubmitForEmployee && !form.employeeId)} onClick={() => submit.mutate()}>{submit.isPending ? "Submitting…" : "Submit request"}</button></div>{submit.isError && <p className="sync-alert" role="alert">{submit.error.message}</p>}</div>}
-    <div className="panel"><div className="panel-head"><div><h3>Leave requests</h3><span>{inbox.data?.length ?? 0} assigned to you</span></div></div>{records.isPending || inbox.isPending ? <p className="muted">Loading leave requests…</p> : records.isError ? <p className="sync-alert">{records.error.message}</p> : <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Leave</th><th>Dates</th><th>Status</th><th>Actions</th></tr></thead><tbody>{all.map(request => {
+    <div className="panel"><div className="panel-head"><div><h3>Leave requests</h3><span>{inbox.data?.length ?? 0} assigned to you</span></div></div>{records.isPending || (canInbox && inbox.isPending) ? <p className="muted">Loading leave requests…</p> : records.isError ? <p className="sync-alert">{records.error.message}</p> : <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Leave</th><th>Dates</th><th>Status</th><th>Actions</th></tr></thead><tbody>{all.map(request => {
       const own = request.employeeId === session.employeeId;
       const ownRequest = own && request.requesterUserId === session.id;
       const assigned = inboxIds.has(request.id);

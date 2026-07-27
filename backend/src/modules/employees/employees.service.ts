@@ -9,7 +9,7 @@ import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { AuditService } from '../audit/audit.service';
 import { money, nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
-import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
+import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 import { AuthorizationService } from '../authorization/authorization.service';
 
 const managerSummarySelect = {
@@ -192,20 +192,6 @@ export class EmployeesService {
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: user.employeeId!, summary: 'Self-service profile updated' });
       return updated;
-    });
-  }
-
-  async updateSelfBank(dto: UpdateSelfBankDto, user: RequestUser) {
-    if (!user.employeeId) throw new NotFoundException('No employee profile is linked to this user');
-    return this.prisma.$transaction(async (tx) => {
-      const bank = await tx.employeeBankAccount.upsert({
-        where: { employeeId: user.employeeId! },
-        create: { employeeId: user.employeeId!, ...dto },
-        update: { ...dto, version: { increment: 1 } },
-        select: { employeeId: true, bankCode: true, iban: true, accountNumber: true, version: true, updatedAt: true },
-      });
-      await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'EmployeeBankAccount', entityId: user.employeeId!, summary: 'Self-service bank details updated' });
-      return bank;
     });
   }
 
@@ -465,7 +451,7 @@ export class EmployeesService {
       Object.assign(select, { salary: true, salaryRecords: { where: { deletedAt: null }, orderBy: { effectiveFrom: 'desc' } } });
     }
     const bankRule = this.authorization.scopeRule(user, 'payroll.read_bank', AccessScopeType.ALL_EMPLOYEES);
-    if ((employeeId ? this.authorization.permissionAllowedForScope(user, 'payroll.read_bank', AccessScopeType.ALL_EMPLOYEES, employeeId) : bankRule.unrestricted && bankRule.excludeIds.length === 0) || (self && employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read_bank', AccessScopeType.SELF, employeeId))) {
+    if (employeeId ? this.authorization.permissionAllowedForScope(user, 'payroll.read_bank', AccessScopeType.ALL_EMPLOYEES, employeeId) : bankRule.unrestricted && bankRule.excludeIds.length === 0) {
       Object.assign(select, { bankAccount: true });
     }
     return select;

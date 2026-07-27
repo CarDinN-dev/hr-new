@@ -7,7 +7,7 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { ImportEmployeeMasterDataDto } from './dto/import-employee-master-data.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
-import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
+import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 import { EmployeesService } from './employees.service';
 
 @ApiTags('Employees')
@@ -44,12 +44,6 @@ export class EmployeesController {
   @Patch('me/basic')
   updateMyBasic(@Body() dto: UpdateSelfBasicProfileDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.updateSelfBasic(dto, user);
-  }
-
-  @Permissions('employee.self.update_bank')
-  @Patch('me/bank')
-  updateMyBank(@Body() dto: UpdateSelfBankDto, @CurrentUser() user: RequestUser) {
-    return this.employeesService.updateSelfBank(dto, user);
   }
 
   @Permissions('payroll.update_bank')
