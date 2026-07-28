@@ -588,7 +588,17 @@ function App() {
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
-          {nav === "Hierarchy" && <HierarchyPage session={backendSession} />}
+          {nav === "Hierarchy" && <HierarchyPage session={backendSession} notify={notify} employees={state.employees} onAddNode={(role, parent) => {
+            const draft = createEmptyEmployee(nextEmployeeCode(state.employees));
+            draft.fields = {
+              ...draft.fields,
+              Designation: ({ HR: "HR", MANAGER: "Manager", LINE_MANAGER: "Line manager", EMPLOYEE: "Employee" } as const)[role],
+              Department: parent?.fields.Department || "",
+              "Joining Date": todayISO(),
+              "Reporting Manager Employee Code/Name": parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
+            };
+            setModal(<EmployeeEditor state={state} template={draft} close={closeModal} notify={notify} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
+          }} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
           {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
         </div>
@@ -1088,14 +1098,15 @@ function masterDataImportRow(row: Record<string, string>) {
   };
 }
 
-function EmployeeEditor({ state, employee, save, close, notify }: {
+function EmployeeEditor({ state, employee, template, save, close, notify }: {
   state: HrState;
   employee?: EmployeeRecord;
+  template?: EmployeeRecord;
   save: (employee: EmployeeRecord) => void;
   close: () => void;
   notify: (message: string) => void;
 }) {
-  const [draft, setDraft] = useState<EmployeeRecord>(() => structuredClone(employee ?? createEmptyEmployee(nextEmployeeCode(state.employees))));
+  const [draft, setDraft] = useState<EmployeeRecord>(() => structuredClone(employee ?? template ?? createEmptyEmployee(nextEmployeeCode(state.employees))));
   const setField = (field: string, value: string) => setDraft(prev => ({
     ...prev,
     fields: {

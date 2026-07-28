@@ -2794,6 +2794,183 @@ summary {
   flex: 1;
 }
 
+.organization-chart {
+  overflow-x: auto;
+  padding: 0.5rem 0.25rem 0.25rem;
+}
+
+.organization-spine {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+}
+
+.organization-spine > .organization-node:not(:last-child)::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 1rem;
+  background: var(--line-strong);
+  content: "";
+}
+
+.organization-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 142px;
+  min-height: 72px;
+  padding: 0.75rem 1.8rem 0.75rem 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  text-align: center;
+}
+
+.organization-node strong,
+.organization-node span {
+  display: block;
+}
+
+.organization-node span {
+  max-width: 170px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-node-add {
+  position: absolute;
+  right: -0.45rem;
+  bottom: -0.25rem;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+}
+
+.organization-branches {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2.4rem;
+  width: max-content;
+  min-width: 100%;
+  margin-top: 2rem;
+}
+
+.organization-branches::before {
+  position: absolute;
+  top: -1rem;
+  right: 7%;
+  left: 7%;
+  height: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.organization-manager-branch,
+.organization-line-branch {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1.5rem;
+}
+
+.organization-manager-branch::before,
+.organization-line-branch::before {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: 1px;
+  height: 1rem;
+  background: var(--line-strong);
+  content: "";
+}
+
+.organization-children,
+.organization-employees {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.organization-children::before,
+.organization-employees::before {
+  position: absolute;
+  top: -0.75rem;
+  right: 10%;
+  left: 10%;
+  height: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.organization-employees .organization-node {
+  min-width: 118px;
+  min-height: 56px;
+  padding: 0.55rem 0.8rem;
+}
+
+.organization-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  margin: 1.5rem auto 0;
+  color: var(--muted);
+}
+
+.organization-empty button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.organization-unassigned {
+  max-width: 680px;
+  margin: 1.25rem auto 0;
+}
+
+.organization-unassigned p {
+  margin: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.organization-unassigned div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.organization-unassigned span {
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 0.72rem;
+}
+
+.hierarchy-access-note {
+  margin: 0.8rem 0 0;
+  text-align: center;
+}
+
 .role-branch-filter {
   overflow: hidden;
   margin-bottom: 0.8rem;
@@ -2893,6 +3070,18 @@ summary {
   font-weight: 760;
 }
 
+.role-branch-custom-role {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.role-branch-inherits {
+  max-width: 180px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
 .system-user-filter-summary {
   margin: 0 0 0.55rem;
 }
@@ -2907,6 +3096,22 @@ summary {
   .system-user-filters {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .organization-branches,
+  .organization-children,
+  .organization-employees {
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+  }
+
+  .organization-branches::before,
+  .organization-children::before,
+  .organization-employees::before,
+  .organization-manager-branch::before,
+  .organization-line-branch::before {
+    display: none;
   }
 
   .role-branch-level {
