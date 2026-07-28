@@ -21,11 +21,14 @@ describe("System route authorization", () => {
   it("allows active ADMIN and SUPER_ADMIN session roles", () => {
     expect(canAccessRoute(session(["SUPER_ADMIN"], []), "System")).toBe(true);
     expect(canAccessRoute(session(["ADMIN"], []), "System")).toBe(true);
+    expect(canAccessRoute(session(["SUPER_ADMIN"], []), "Hierarchy")).toBe(true);
+    expect(canAccessRoute(session(["ADMIN"], []), "Hierarchy")).toBe(true);
   });
 
   it("denies direct System permissions without an administrator role", () => {
     const systemPermissions = ["system.configure", "user.read", "role.read", "permission.read", "session.manage"];
     expect(canAccessRoute(session(["CUSTOM_ROLE"], systemPermissions), "System")).toBe(false);
+    expect(canAccessRoute(session(["CUSTOM_ROLE"], systemPermissions), "Hierarchy")).toBe(false);
   });
 
   it("leaves non-System route permission checks unchanged", () => {

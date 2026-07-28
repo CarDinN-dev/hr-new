@@ -295,6 +295,7 @@ export const navItems = [
   "Documents",
   "Reports",
   "Audit",
+  "Hierarchy",
   "System",
   "Settings"
 ] as const;

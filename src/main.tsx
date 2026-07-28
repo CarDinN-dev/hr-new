@@ -20,6 +20,7 @@ import {
   Download,
   Eye,
   FileText,
+  GitBranch,
   HandCoins,
   ImagePlus,
   LayoutDashboard,
@@ -121,6 +122,7 @@ import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, LeaveWorkflowPage, MyLeaveStatusPanel, MyPayslipsPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { SystemAccessPage } from "./features/system-access";
+import { HierarchyPage } from "./features/hierarchy-page";
 import { AuditHistoryPage } from "./features/audit-page";
 import { NotificationsPanel } from "./features/notifications-panel";
 import "./styles.css";
@@ -184,6 +186,7 @@ const navIcon = {
   Documents: FileText,
   Reports: BarChart3,
   Audit: ShieldCheck,
+  Hierarchy: GitBranch,
   System: Settings,
   Settings
 };
@@ -585,6 +588,7 @@ function App() {
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
+          {nav === "Hierarchy" && <HierarchyPage session={backendSession} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
           {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
         </div>
@@ -845,6 +849,7 @@ function pageDescription(nav: NavItem) {
     Documents: "HR letters and PDFs.",
     Reports: "Employee, attendance, leave and payroll reports.",
     Audit: "Security and business activity history.",
+    Hierarchy: "Role inheritance and the users assigned to each branch.",
     System: "Users, access roles, permissions and sessions.",
     Settings: "Signed-in devices and company settings."
   };
@@ -2312,6 +2317,7 @@ const eosRoute = createRoute({ getParentRoute: () => shellRoute, path: "eos" });
 const documentsRoute = createRoute({ getParentRoute: () => shellRoute, path: "documents" });
 const reportsRoute = createRoute({ getParentRoute: () => shellRoute, path: "reports" });
 const auditRoute = createRoute({ getParentRoute: () => shellRoute, path: "audit" });
+const hierarchyRoute = createRoute({ getParentRoute: () => shellRoute, path: "hierarchy" });
 const systemRoute = createRoute({ getParentRoute: () => shellRoute, path: "system" });
 const settingsRoute = createRoute({ getParentRoute: () => shellRoute, path: "settings" });
 const routeTree = rootRoute.addChildren([
@@ -2331,6 +2337,7 @@ const routeTree = rootRoute.addChildren([
     documentsRoute,
     reportsRoute,
     auditRoute,
+    hierarchyRoute,
     systemRoute,
     settingsRoute
   ])

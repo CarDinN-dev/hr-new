@@ -16,6 +16,7 @@ export const navPaths = {
   Documents: "/documents",
   Reports: "/reports",
   Audit: "/audit",
+  Hierarchy: "/hierarchy",
   System: "/system",
   Settings: "/settings"
 } as const satisfies Record<NavItem, string>;

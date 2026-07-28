@@ -19,6 +19,7 @@ const routePermissions: Record<NavItem, string[]> = {
   Documents: ["document.self.read", "document.hr.read", "document.read_all"],
   Reports: ["report.read"],
   Audit: ["audit.read"],
+  Hierarchy: [],
   System: [],
   Settings: ["session.self.read", "settings.read", "settings.manage", "department.manage", "position.manage", "leave.configure"]
 };
@@ -54,6 +55,7 @@ export function useAuthorization() {
 
 export function canAccessRoute(session: BackendSession, route: NavItem) {
   if (route === "System") return hasActiveSystemAdministratorRole(session);
+  if (route === "Hierarchy") return hasActiveSystemAdministratorRole(session);
   if (route === "Payroll") return ["HR", "CPO", "COO"].some(role => session.roles.includes(role));
   return hasAnyPermission(session, ...routePermissions[route]);
 }

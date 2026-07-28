@@ -18,8 +18,8 @@ function envelope(data: unknown, meta?: unknown) {
   return { success: true, data, ...(meta === undefined ? {} : { meta }) };
 }
 
-async function installSystemApi(page: Page) {
-  const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: ["SUPER_ADMIN"], permissions: ["session.self.read", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
+async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"]) {
+  const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
   const target: User = { id: "target-user", email: "target@example.invalid", isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[1] }], permissionOverrides: [] };
   const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[2] }], permissionOverrides: [] }];
   const policies = [
@@ -116,10 +116,24 @@ test("Super Admin can create a local account without Entra provisioning", async 
   await expect(page.getByText("Email address is already in use")).toBeVisible();
 });
 
+test("Hierarchy is hidden and denied for non-administrators", async ({ page }) => {
+  await installSystemApi(page, ["EMPLOYEE"]);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("super.admin@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Hierarchy" })).toHaveCount(0);
+  await page.goto("/hierarchy");
+  await expect(page.getByRole("heading", { name: "Access not available" })).toBeVisible();
+});
+
 test("Super Admin System controls submit mutations and protect invalid actions", async ({ page }) => {
   await loginAndOpenSystem(page);
   await expect(page.getByRole("button", { name: "Create user" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Revoke all" })).toBeEnabled();
+  await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Hierarchy" }).click();
+  await expect(page.getByRole("heading", { name: "Role hierarchy" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toBeVisible();
   const roleFiltered = page.waitForRequest(request => request.url().includes("/api/v1/system/users?") && request.url().includes("roleId=role-hr"));
   await page.getByRole("button", { name: "Filter users by HR role" }).click();
@@ -130,7 +144,8 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await page.getByLabel("Find users").fill("target");
   await combinedFilter;
   await expect(page.getByText("1 user found with HR.")).toBeVisible();
-  await page.getByRole("button", { name: "Clear user filters" }).click();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.getByRole("link", { name: "System" }).click();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid.*Current user/ })).toBeVisible();
   const searched = page.waitForRequest(request => request.url().includes("/api/v1/system/sessions?") && request.url().includes("search=target"));
   await page.getByLabel("Email search").fill("target");
