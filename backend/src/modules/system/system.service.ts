@@ -5,6 +5,8 @@ import {
   RoleProtection, WorkflowType,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import * as bcrypt from 'bcrypt';
 import { hasActiveSuperAdminRole } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
@@ -25,6 +27,10 @@ const activeAssignmentWhere = (now: Date): Prisma.UserRoleWhereInput => ({
   OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
   role: { isActive: true },
 });
+const rbacCatalog = JSON.parse(readFileSync(join(__dirname, '../../../prisma/rbac-catalog.json'), 'utf8')) as {
+  roles: Array<{ code: string; inherits: string[] }>;
+};
+const roleInheritance = new Map(rbacCatalog.roles.map((role) => [role.code, role.inherits]));
 
 @Injectable()
 export class SystemService {
@@ -317,9 +323,9 @@ export class SystemService {
     });
   }
 
-  listRoles(actor: RequestUser) {
+  async listRoles(actor: RequestUser) {
     const access = this.authorization.scopeRule(actor, 'role.read', AccessScopeType.ALL_SYSTEM);
-    return this.prisma.role.findMany({
+    const roles = await this.prisma.role.findMany({
       where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } },
       select: {
         id: true, code: true, displayName: true, description: true, isBuiltIn: true, protection: true,
@@ -328,6 +334,7 @@ export class SystemService {
       },
       orderBy: [{ isBuiltIn: 'desc' }, { code: 'asc' }],
     });
+    return roles.map((role) => ({ ...role, inherits: roleInheritance.get(role.code) ?? [] }));
   }
 
   createRole(dto: CreateRoleDto, actor: RequestUser) {

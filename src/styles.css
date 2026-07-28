@@ -2783,6 +2783,146 @@ summary {
   }
 }
 
+.system-user-filters {
+  display: flex;
+  align-items: end;
+  gap: 0.65rem;
+  margin-bottom: 0.8rem;
+}
+
+.system-user-filters label {
+  flex: 1;
+}
+
+.role-branch-filter {
+  overflow: hidden;
+  margin-bottom: 0.8rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.role-branch-filter > p {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.role-branch-levels {
+  position: relative;
+  display: grid;
+  gap: 1.2rem;
+  margin-top: 1.2rem;
+}
+
+.role-branch-levels::before {
+  position: absolute;
+  inset: -1.2rem 50% 0;
+  width: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.role-branch-level {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.role-branch-level::before {
+  position: absolute;
+  top: 50%;
+  right: 12%;
+  left: 12%;
+  z-index: -1;
+  height: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.role-branch-node {
+  display: grid;
+  min-width: 132px;
+  min-height: 58px;
+  padding: 0.55rem 0.8rem;
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: center;
+}
+
+.role-branch-node strong,
+.role-branch-node span {
+  display: block;
+}
+
+.role-branch-node span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.045em;
+}
+
+.role-branch-node.selected {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--panel));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 14%, transparent);
+}
+
+.role-branch-root {
+  position: relative;
+  z-index: 2;
+  margin-inline: auto;
+}
+
+.role-branch-custom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.role-branch-custom > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.system-user-filter-summary {
+  margin: 0 0 0.55rem;
+}
+
+.system-user-empty {
+  padding-block: 1.4rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .system-user-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .role-branch-level {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .role-branch-level::before {
+    display: none;
+  }
+
+  .role-branch-node {
+    width: 100%;
+  }
+}
+
 .checkbox-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
