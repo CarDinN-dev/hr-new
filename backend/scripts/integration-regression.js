@@ -284,7 +284,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const leaveTypes = await api('/leave/types?limit=100', {}, sessions.HR);
   assert.equal(leaveTypes.status, 200);
   const annualLeave = leaveTypes.data.find((type) => type.code === 'ANNUAL');
-  for (const employeeId of [sessions.EMPLOYEE.user.employeeId, sessions.COO.user.employeeId, blockedUser.employee.id]) {
+  for (const employeeId of [sessions.EMPLOYEE.user.employeeId, sessions.CPO.user.employeeId, sessions.COO.user.employeeId, blockedUser.employee.id]) {
     const balance = await api('/leave/balances', {
       method: 'POST', body: { employeeId, leaveTypeId: annualLeave.id, year: 2099, totalDays: 30 },
     }, sessions.HR);
@@ -347,11 +347,19 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(String(balanceRecord.usedDays), '2');
   assert.equal(String(balanceRecord.pendingDays), '0');
 
+  const cpoLeave = await mutate('/leave/submit', sessions.CPO, {
+    leaveTypeId: annualLeave.id, startDate: '2099-05-09', endDate: '2099-05-09', reason: 'CPO executive route',
+  });
+  assert.equal(cpoLeave.status, 201);
+  assert.equal(cpoLeave.data.status, 'PENDING_COO');
+  assert.deepEqual(cpoLeave.data.steps.map((step) => step.stage), ['COO']);
+
   const cooLeave = await mutate('/leave/submit', sessions.COO, {
     leaveTypeId: annualLeave.id, startDate: '2099-05-10', endDate: '2099-05-10', reason: 'Protected self approval',
   });
   assert.equal(cooLeave.status, 201);
   assert.equal(cooLeave.data.status, 'PENDING_COO');
+  assert.deepEqual(cooLeave.data.steps.map((step) => step.stage), ['COO']);
   assert.equal((await mutate(`/leave/${cooLeave.data.id}/approve`, sessions.COO, { expectedVersion: cooLeave.data.version })).status, 403);
   await prisma.authSession.update({ where: { id: sessions.COO.user.sessionId }, data: { reauthenticatedAt: new Date(0) } });
   assert.equal((await mutate(`/leave/${cooLeave.data.id}/self-approve`, sessions.COO, { expectedVersion: cooLeave.data.version }, idempotency('stale-step-up'))).status, 403);
@@ -360,8 +368,19 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(selfApproved.status, 201);
   assert.equal(selfApproved.data.status, 'APPROVED');
 
+  for (const [managerRole, day] of [['CPO', '11'], ['COO', '12']]) {
+    await prisma.employee.update({ where: { id: blockedUser.employee.id }, data: { managerId: sessions[managerRole].user.employeeId } });
+    const executiveReportLeave = await mutate('/leave/submit', blocked, {
+      leaveTypeId: annualLeave.id, startDate: `2099-06-${day}`, endDate: `2099-06-${day}`, reason: `${managerRole} direct-report route`,
+    });
+    assert.equal(executiveReportLeave.status, 201);
+    assert.equal(executiveReportLeave.data.status, 'PENDING_HR');
+    assert.deepEqual(executiveReportLeave.data.steps.map((step) => step.stage), ['HR', 'CPO', 'COO']);
+  }
+  await prisma.employee.update({ where: { id: blockedUser.employee.id }, data: { managerId: null } });
+
   const blockedLeave = await mutate('/leave/submit', blocked, {
-    leaveTypeId: annualLeave.id, startDate: '2099-06-10', endDate: '2099-06-10', reason: 'Missing approver test',
+    leaveTypeId: annualLeave.id, startDate: '2099-06-13', endDate: '2099-06-13', reason: 'Missing approver test',
   });
   assert.equal(blockedLeave.status, 201);
   assert.equal(blockedLeave.data.status, 'BLOCKED_APPROVER_MISSING');

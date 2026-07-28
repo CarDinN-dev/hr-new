@@ -565,6 +565,13 @@ export class LeaveService {
     else if (organizationalRole === 'MANAGER') stages = [LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
     else if (organizationalRole === 'LINE_MANAGER') stages = [LeaveApprovalStage.MANAGER, LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
     else stages = [LeaveApprovalStage.LINE_MANAGER, LeaveApprovalStage.MANAGER, LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
+    if (!['CPO', 'COO'].includes(organizationalRole) && employee.managerId) {
+      const directManager = await tx.employee.findFirst({ where: { id: employee.managerId, deletedAt: null }, select: { userId: true } });
+      const directManagerRoles = directManager?.userId ? await this.activeRoleCodes(tx, directManager.userId) : [];
+      if (directManagerRoles.some((role) => role === 'CPO' || role === 'COO')) {
+        stages = [LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
+      }
+    }
 
     const steps: WorkflowStepPlan[] = [];
     let lineManagerEmployeeId: string | undefined;
