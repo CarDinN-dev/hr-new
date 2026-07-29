@@ -33,6 +33,8 @@ export const employeeTemplateColumns: readonly TemplateColumn[] = [
   { header: "Grade/Band", column: "Grade/Band" },
   { header: "Date of Birth", column: "Date of Birth" },
   { header: "Joining Date", column: "Joining Date" },
+  { header: "Line Manager Employee Code/Name", column: "Line Manager Employee Code/Name" },
+  { header: "Manager Employee Code/Name", column: "Manager Employee Code/Name" },
   { header: "Reporting Manager Employee Code/Name", column: "Reporting Manager Employee Code/Name" },
   { header: "Family Status(Yes/No)", column: "Family Status (Yes/No)" },
   { header: "Leave Policy", column: "Leave Policy" },
@@ -117,6 +119,11 @@ const canonicalColumnsByHeader = new Map<string, EmployeeImportColumn>(
 
 const legacyColumnsByHeader = new Map<string, EmployeeImportColumn>([
   ["lob", "Department"],
+  ["linemanager", "Line Manager Employee Code/Name"],
+  ["linemanageremployeecodename", "Line Manager Employee Code/Name"],
+  ["manager", "Manager Employee Code/Name"],
+  ["manageremployeecodename", "Manager Employee Code/Name"],
+  ["reportingmanageremployeecodename", "Line Manager Employee Code/Name"],
   ["familystatusyesno", "Family Status (Yes/No)"],
   ["rpidnumber", "RP/ID Number"],
   ["salarypaytypecashbanktransferpaycard", "Salary Pay Type"],
@@ -139,7 +146,7 @@ export async function parseEmployeeWorkbook(file: File): Promise<EmployeeWorkboo
 export function parseEmployeeWorkbookRows(rows: ReadonlyArray<ReadonlyArray<unknown>>): EmployeeWorkbookImport {
   const [headerRow = [], ...body] = rows;
   const headers = headerRow.map(cellText);
-  if (isMasterDataWorkbook(headers)) return parseMasterDataWorkbook(body);
+  if (isMasterDataWorkbook(headers)) return parseMasterDataWorkbook(headers, body);
   const columns = resolveWorkbookColumns(headers);
   const employeeCodeIndex = columns.findIndex(column => column === "Employee Code");
 
@@ -217,6 +224,7 @@ function resolveWorkbookColumns(headers: string[]) {
   return headers.map(header => {
     const normalized = normalizedHeader(header);
     if (normalized === "status") return "Status";
+    if (normalized === "reportingmanageremployeecodename") return "Line Manager Employee Code/Name";
     return canonicalColumnsByHeader.get(normalized) ?? legacyColumnsByHeader.get(normalized);
   });
 }
@@ -226,6 +234,25 @@ const masterDataHeaders = [
   "BASIC", "HRA", "CONVEYANCE", "MOBILE", "Food", "Fuel", "OTHER", "GROSS SALARY"
 ] as const;
 
+const masterDataHeaderAliases: Record<typeof masterDataHeaders[number], string[]> = {
+  "No": ["no", "empno", "employeecode"],
+  "Master Data Name": ["masterdataname", "employeenamesponsor", "fullname"],
+  "WPS Sponsor": ["wpssponsor"],
+  "Working Company": ["workingcompany", "company"],
+  "Designation": ["designation"],
+  "LOB": ["lob", "department"],
+  "Date of Joining": ["dateofjoining", "joiningdate"],
+  "Gender": ["gender"],
+  "BASIC": ["basic", "basicsalary"],
+  "HRA": ["hra"],
+  "CONVEYANCE": ["conveyance", "conveyanceallowance"],
+  "MOBILE": ["mobile", "mobileallowance"],
+  "Food": ["food", "foodallowance"],
+  "Fuel": ["fuel", "fuelallowance"],
+  "OTHER": ["other", "otherallowance"],
+  "GROSS SALARY": ["grosssalary", "total"],
+};
+
 function isEmployeeTemplate(headers: string[]) {
   return headers.length >= employeeTemplateColumns.length && employeeTemplateColumns.every((column, index) => (
     normalizedHeader(headers[index]) === normalizedHeader(column.header)
@@ -233,19 +260,21 @@ function isEmployeeTemplate(headers: string[]) {
 }
 
 function isMasterDataWorkbook(headers: string[]) {
-  return headers.length >= masterDataHeaders.length && masterDataHeaders.every((header, index) => normalizedHeader(headers[index]) === normalizedHeader(header));
+  const available = new Set(headers.map(normalizedHeader));
+  return masterDataHeaders.every((header) => masterDataHeaderAliases[header].some((alias) => available.has(alias)));
 }
 
-function parseMasterDataWorkbook(body: ReadonlyArray<ReadonlyArray<unknown>>): EmployeeWorkbookImport {
+function parseMasterDataWorkbook(headers: string[], body: ReadonlyArray<ReadonlyArray<unknown>>): EmployeeWorkbookImport {
   const parsed: Array<Record<string, string>> = [];
   const errors: string[] = [];
   const employeeCodes = new Set<string>();
+  const headerIndexes = new Map(headers.map((header, index) => [normalizedHeader(header), index]));
 
   body.forEach((sourceRow, index) => {
     const values = sourceRow.map(cellText);
     if (!values.some(Boolean)) return;
     const rowNumber = index + 2;
-    const value = (header: typeof masterDataHeaders[number]) => values[masterDataHeaders.indexOf(header)] ?? "";
+    const value = (header: typeof masterDataHeaders[number]) => values[masterDataHeaderAliases[header].map((alias) => headerIndexes.get(alias)).find((index): index is number => index !== undefined) ?? -1] ?? "";
     const employeeCode = value("No").trim();
     if (!employeeCode) {
       errors.push(`Row ${rowNumber} was skipped because No (Employee Code) is blank.`);
@@ -304,7 +333,9 @@ function parseMasterDataWorkbook(body: ReadonlyArray<ReadonlyArray<unknown>>): E
       Total: gross.amount,
       "Company Conveyance": conveyance.companyProvided ? "Yes" : "No",
       "Company Fuel": fuel.companyProvided ? "Yes" : "No",
-      "Company Other": other.companyProvided ? "Yes" : "No"
+      "Company Other": other.companyProvided ? "Yes" : "No",
+      "Line Manager Employee Code/Name": values[headerIndexes.get("linemanager") ?? -1] ?? "",
+      "Manager Employee Code/Name": values[headerIndexes.get("manager") ?? -1] ?? ""
     });
   });
 

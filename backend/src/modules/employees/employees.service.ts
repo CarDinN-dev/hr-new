@@ -19,10 +19,13 @@ const managerSummarySelect = {
 const employeeSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
   phone: true, hireDate: true, employmentStatus: true, departmentId: true, positionId: true,
-  managerId: true, profilePhoto: true, version: true, createdAt: true, updatedAt: true,
+  managerId: true, lineManagerId: true, profilePhoto: true, version: true, createdAt: true, updatedAt: true,
   department: { select: { id: true, name: true, code: true } },
   position: { select: { id: true, title: true, code: true, level: true } },
   manager: {
+    select: managerSummarySelect,
+  },
+  lineManager: {
     select: managerSummarySelect,
   },
 } satisfies Prisma.EmployeeSelect;
@@ -118,11 +121,16 @@ export class EmployeesService {
         }
       }
 
+      const relationshipUpdates = await this.importRelationshipUpdates(tx, dto.rows);
+      for (const update of relationshipUpdates) {
+        await tx.employee.update({ where: { id: update.id }, data: { ...update.data, version: { increment: 1 } } });
+      }
+
       await this.audit.record(tx, user, {
         action: AuditAction.CREATE, resourceType: 'EmployeeMasterDataImport', summary: 'Employee master data import completed',
-        metadata: { created, updated, departmentCount: departments.size, positionCount: positions.size, recordCount: dto.rows.length },
+        metadata: { created, updated, relationshipUpdates: relationshipUpdates.length, departmentCount: departments.size, positionCount: positions.size, recordCount: dto.rows.length },
       });
-      return { created, updated, departments: departments.size, positions: positions.size };
+      return { created, updated, relationshipUpdates: relationshipUpdates.length, departments: departments.size, positions: positions.size };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -132,6 +140,7 @@ export class EmployeesService {
     if (query.departmentId) filters.push({ departmentId: query.departmentId });
     if (query.positionId) filters.push({ positionId: query.positionId });
     if (query.managerId) filters.push({ managerId: query.managerId });
+    if (query.lineManagerId) filters.push({ lineManagerId: query.lineManagerId });
     if (query.employmentStatus) filters.push({ employmentStatus: query.employmentStatus });
 
     const { page, limit, ...args } = listArgs(query, {
@@ -231,7 +240,7 @@ export class EmployeesService {
       const employee = await tx.employee.findFirst({ where: { id, deletedAt: null } });
       if (!employee) throw new NotFoundException('Employee not found');
       const [directReport, managedDepartment] = await Promise.all([
-        tx.employee.findFirst({ where: { managerId: id, deletedAt: null }, select: { id: true } }),
+        tx.employee.findFirst({ where: { OR: [{ managerId: id }, { lineManagerId: id }], deletedAt: null }, select: { id: true } }),
         tx.department.findFirst({ where: { managerId: id, deletedAt: null }, select: { id: true } }),
       ]);
       if (directReport || managedDepartment) {
@@ -420,7 +429,7 @@ export class EmployeesService {
     }
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ id: user.employeeId });
     if (user.employeeId && this.authorization.has(user, 'employee.team.read')) {
-      const directReports = await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } });
+      const directReports = await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } });
       const ids = directReports.map((employee) => employee.id).filter((id) => this.authorization.permissionAllowedForScope(user, 'employee.team.read', AccessScopeType.DIRECT_REPORTS, id));
       if (ids.length) scopes.push({ id: { in: ids } });
     }
@@ -468,9 +477,8 @@ export class EmployeesService {
     currentEmployeeId?: string,
     current?: { departmentId: string | null; positionId: string | null },
   ) {
-    if (dto.managerId && dto.managerId === currentEmployeeId) {
-      throw new ForbiddenException('Employee cannot be their own manager');
-    }
+    if (dto.managerId && dto.managerId === currentEmployeeId) throw new ForbiddenException('Employee cannot be their own manager');
+    if (dto.lineManagerId && dto.lineManagerId === currentEmployeeId) throw new ForbiddenException('Employee cannot be their own line manager');
 
     const departmentId = dto.departmentId ?? current?.departmentId ?? undefined;
     const positionId = dto.positionId ?? current?.positionId ?? undefined;
@@ -489,22 +497,82 @@ export class EmployeesService {
       throw new BadRequestException('The selected position belongs to a different department');
     }
 
-    if (dto.managerId) {
-      let managerId: string | null = dto.managerId;
-      for (let depth = 0; managerId && depth < 32; depth += 1) {
-        if (managerId === currentEmployeeId) {
-          throw new ForbiddenException('Reporting lines cannot contain a cycle');
-        }
-        const manager: { managerId: string | null } | null = await this.prisma.employee.findFirst({
-          where: { id: managerId, deletedAt: null },
-          select: { managerId: true },
-        });
-        if (!manager) throw new NotFoundException('Manager not found');
-        managerId = manager.managerId;
+    await this.validateReportingRelation(dto.managerId, currentEmployeeId, 'managerId', 'Manager');
+    await this.validateReportingRelation(dto.lineManagerId, currentEmployeeId, 'lineManagerId', 'Line manager');
+  }
+
+  private async validateReportingRelation(relationId: string | undefined, currentEmployeeId: string | undefined, field: 'managerId' | 'lineManagerId', label: string) {
+    let currentId: string | null = relationId ?? null;
+    for (let depth = 0; currentId && depth < 32; depth += 1) {
+      if (currentId === currentEmployeeId) throw new ForbiddenException(`${label} reporting lines cannot contain a cycle`);
+      const employee: Pick<Prisma.EmployeeGetPayload<{ select: { managerId: true; lineManagerId: true } }>, 'managerId' | 'lineManagerId'> | null = await this.prisma.employee.findFirst({
+        where: { id: currentId, deletedAt: null }, select: { managerId: true, lineManagerId: true },
+      });
+      if (!employee) throw new NotFoundException(`${label} not found`);
+      currentId = employee[field];
+    }
+    if (currentId) throw new BadRequestException(`${label} reporting line is too deep to validate safely`);
+  }
+
+  private async importRelationshipUpdates(tx: Prisma.TransactionClient, rows: ImportEmployeeMasterDataRowDto[]) {
+    const employees = await tx.employee.findMany({
+      where: { deletedAt: null }, select: { id: true, employeeCode: true, firstName: true, lastName: true, managerId: true, lineManagerId: true },
+    });
+    const byCode = this.importRelationshipIndex(employees, (employee) => employee.employeeCode);
+    const byName = this.importRelationshipIndex(employees, (employee) => `${employee.firstName} ${employee.lastName}`.trim());
+    const updates: Array<{ id: string; data: { managerId?: string | null; lineManagerId?: string | null } }> = [];
+
+    for (const row of rows) {
+      const employee = this.resolveImportedEmployee(row.employeeCode, byCode, byName, 'Employee Code');
+      const data: { managerId?: string | null; lineManagerId?: string | null } = {};
+      if (row.manager !== undefined) data.managerId = this.resolveImportedEmployee(row.manager, byCode, byName, 'Manager').id;
+      if (row.lineManager !== undefined) data.lineManagerId = this.resolveImportedEmployee(row.lineManager, byCode, byName, 'Line Manager').id;
+      if (data.managerId === employee.id) throw new BadRequestException(`Employee Code ${row.employeeCode} cannot be their own manager.`);
+      if (data.lineManagerId === employee.id) throw new BadRequestException(`Employee Code ${row.employeeCode} cannot be their own line manager.`);
+      if (Object.keys(data).length) updates.push({ id: employee.id, data });
+    }
+
+    this.assertImportedRelationshipCycles(employees, updates, 'managerId', 'Manager');
+    this.assertImportedRelationshipCycles(employees, updates, 'lineManagerId', 'Line Manager');
+    return updates;
+  }
+
+  private importRelationshipIndex<T extends { id: string }>(employees: T[], value: (employee: T) => string) {
+    const result = new Map<string, T[]>();
+    for (const employee of employees) {
+      const key = this.relationshipKey(value(employee));
+      if (key) result.set(key, [...(result.get(key) ?? []), employee]);
+    }
+    return result;
+  }
+
+  private resolveImportedEmployee(value: string, byCode: Map<string, Array<{ id: string }>>, byName: Map<string, Array<{ id: string }>>, label: string) {
+    const exact = this.relationshipKey(value);
+    const matches = [...new Map([...(byCode.get(exact) ?? []), ...(byName.get(exact) ?? [])].map((employee) => [employee.id, employee])).values()];
+    if (matches.length !== 1) throw new BadRequestException(`${label} ${value.trim() || '(blank)'} must match exactly one active employee code or full name.`);
+    return matches[0];
+  }
+
+  private assertImportedRelationshipCycles(
+    employees: Array<{ id: string; managerId: string | null; lineManagerId: string | null }>,
+    updates: Array<{ id: string; data: { managerId?: string | null; lineManagerId?: string | null } }>,
+    field: 'managerId' | 'lineManagerId', label: string,
+  ) {
+    const reporting = new Map(employees.map((employee) => [employee.id, employee[field]]));
+    for (const update of updates) if (field in update.data) reporting.set(update.id, update.data[field] ?? null);
+    for (const employee of employees) {
+      const visited = new Set<string>([employee.id]);
+      let currentId = reporting.get(employee.id) ?? null;
+      for (let depth = 0; currentId && depth < 32; depth += 1) {
+        if (visited.has(currentId)) throw new BadRequestException(`${label} reporting lines cannot contain a cycle.`);
+        visited.add(currentId);
+        currentId = reporting.get(currentId) ?? null;
       }
-      if (managerId) throw new BadRequestException('Reporting line is too deep to validate safely');
+      if (currentId) throw new BadRequestException(`${label} reporting line is too deep to validate safely.`);
     }
   }
+
+  private relationshipKey(value: string) { return value.trim().toLocaleLowerCase(); }
 
   private text(value: unknown) { const result = value == null ? '' : String(value).trim(); return result || undefined; }
   private date(value: unknown) { const text = this.text(value); if (!text) return undefined; const parsed = new Date(`${text.slice(0, 10)}T00:00:00.000Z`); return Number.isNaN(parsed.getTime()) ? undefined : parsed; }

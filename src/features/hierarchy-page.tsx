@@ -18,12 +18,20 @@ export function hierarchyNodeRole(employee: EmployeeRecord): OrganizationalRole 
   const designation = (employee.fields.Designation || "").trim().toLowerCase().replaceAll("_", " ");
   if (designation.includes("line manager")) return "LINE_MANAGER";
   if (/\bhr\b|human resources/.test(designation)) return "HR";
-  if (designation.includes("manager")) return "MANAGER";
+  if (designation.includes("manager") || designation.includes("cpo") || designation.includes("coo")) return "MANAGER";
   return "EMPLOYEE";
 }
 
 export function hierarchyManagerCode(employee: EmployeeRecord) {
-  return (employee.fields["Reporting Manager Employee Code/Name"] || "").split(" - ", 1)[0].trim().toLowerCase();
+  return (employee.fields["Manager Employee Code/Name"] || employee.fields["Reporting Manager Employee Code/Name"] || "").split(" - ", 1)[0].trim().toLowerCase();
+}
+
+export function hierarchyLineManagerCode(employee: EmployeeRecord) {
+  return (employee.fields["Line Manager Employee Code/Name"] || employee.fields["Reporting Manager Employee Code/Name"] || "").split(" - ", 1)[0].trim().toLowerCase();
+}
+
+export function hierarchyReportingPayload(lineManagerId: string, managerId: string) {
+  return { lineManagerId: lineManagerId || null, managerId: managerId || null };
 }
 
 export function hierarchyUserParams(search: string, roleId: string) {
@@ -37,11 +45,12 @@ export function hierarchyInheritancePayload(editor: InheritanceEditor) {
   return { parentRoleIds: [...editor.parentRoleIds], expectedVersion: editor.role.version, reason: editor.reason.trim() };
 }
 
-export function HierarchyPage({ session, notify, employees, onAddNode }: { session: BackendSession; notify: (message: string) => void; employees: EmployeeRecord[]; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void }) {
+export function HierarchyPage({ session, notify, employees, onAddNode, onUpdateReporting }: { session: BackendSession; notify: (message: string) => void; employees: EmployeeRecord[]; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onUpdateReporting: (employeeId: string, reporting: { lineManagerId: string | null; managerId: string | null }) => Promise<void> }) {
   const client = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [editor, setEditor] = useState<InheritanceEditor | null>(null);
+  const [reportingEmployee, setReportingEmployee] = useState<EmployeeRecord | null>(null);
   const params = hierarchyUserParams(search, selectedRoleId);
   const canManageHierarchy = hasActiveSystemAdministratorRole(session);
   const roles = useQuery({ queryKey: key(session, "hierarchy-roles"), queryFn: () => apiList<Role>("/system/roles"), enabled: canManageHierarchy });
@@ -56,9 +65,10 @@ export function HierarchyPage({ session, notify, employees, onAddNode }: { sessi
   return <section className="stack">
     <div className="panel">
       <div className="panel-head"><div><h3>Organizational hierarchy</h3><span>Select + to add the next reporting level: HR → manager → line manager → employee.</span></div></div>
-      <OrganizationChart employees={employees} canCreate={hasPermission(session, "employee.hr.create")} onAddNode={onAddNode} />
+      <OrganizationChart employees={employees} canCreate={hasPermission(session, "employee.hr.create")} canEdit={hasPermission(session, "employee.hr.update")} onAddNode={onAddNode} onEditReporting={setReportingEmployee} />
       <p className="muted hierarchy-access-note">This chart manages employee reporting lines. Login access remains controlled by roles in System.</p>
     </div>
+    {reportingEmployee && <ReportingEditor employee={reportingEmployee} employees={employees} onCancel={() => setReportingEmployee(null)} onSave={async reporting => { await onUpdateReporting(reportingEmployee.id, reporting); setReportingEmployee(null); }} />}
     <div className="panel">
       <div className="panel-head"><div><h3>Role hierarchy</h3><span>Explore inherited access and find the users assigned to each branch.</span></div></div>
       {roles.isPending ? <p className="muted">Loading role hierarchy…</p> : roles.isError ? <p className="sync-alert">{roles.error.message}</p> : <RoleBranchFilter roles={roles.data ?? []} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId} onEdit={role => setEditor({ role, parentRoleIds: new Set(role.inherits.map(code => roles.data?.find(item => item.code === code)?.id).filter((id): id is string => Boolean(id))), reason: "" })} />}
@@ -79,7 +89,7 @@ export function HierarchyPage({ session, notify, employees, onAddNode }: { sessi
   </section>;
 }
 
-function OrganizationChart({ employees, canCreate, onAddNode }: { employees: EmployeeRecord[]; canCreate: boolean; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void }) {
+function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditReporting }: { employees: EmployeeRecord[]; canCreate: boolean; canEdit: boolean; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onEditReporting: (employee: EmployeeRecord) => void }) {
   const active = employees.filter(employee => employee.status === "Active" || employee.status === "On Leave");
   const role = new Map(active.map(employee => [employee.id, hierarchyNodeRole(employee)]));
   const managers = active.filter(employee => role.get(employee.id) === "MANAGER");
@@ -87,10 +97,10 @@ function OrganizationChart({ employees, canCreate, onAddNode }: { employees: Emp
   const staff = active.filter(employee => role.get(employee.id) === "EMPLOYEE");
   const hrNames = active.filter(employee => role.get(employee.id) === "HR").map(employee => employee.fields["Full Name"]).filter(Boolean);
   const managerCodes = new Set(managers.map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
-  const lineManagerCodes = new Set(lineManagers.map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
+  const reportingCodes = new Set([...managers, ...lineManagers].map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
   const unassigned = [
     ...lineManagers.filter(employee => !managerCodes.has(hierarchyManagerCode(employee))),
-    ...staff.filter(employee => !lineManagerCodes.has(hierarchyManagerCode(employee))),
+    ...staff.filter(employee => !reportingCodes.has(hierarchyLineManagerCode(employee))),
   ];
 
   return <div className="organization-chart" aria-label="Organizational hierarchy">
@@ -103,23 +113,25 @@ function OrganizationChart({ employees, canCreate, onAddNode }: { employees: Emp
     {managers.length ? <div className="organization-branches">{managers.map(manager => {
       const managerCode = manager.fields["Employee Code"].trim().toLowerCase();
       const reports = lineManagers.filter(employee => hierarchyManagerCode(employee) === managerCode);
+      const directEmployees = staff.filter(employee => hierarchyLineManagerCode(employee) === managerCode);
       return <div className="organization-manager-branch" key={manager.id}>
-        <EmployeeHierarchyNode employee={manager} role="MANAGER" canCreate={canCreate} onAddNode={onAddNode} />
+        <EmployeeHierarchyNode employee={manager} role="MANAGER" canCreate={canCreate} canEdit={canEdit} onAddNode={onAddNode} onEditReporting={onEditReporting} />
         {reports.length > 0 && <div className="organization-children">{reports.map(lineManager => {
           const lineManagerCode = lineManager.fields["Employee Code"].trim().toLowerCase();
-          const employees = staff.filter(employee => hierarchyManagerCode(employee) === lineManagerCode);
+          const employees = staff.filter(employee => hierarchyLineManagerCode(employee) === lineManagerCode);
           return <div className="organization-line-branch" key={lineManager.id}>
-            <EmployeeHierarchyNode employee={lineManager} role="LINE_MANAGER" canCreate={canCreate} onAddNode={onAddNode} />
-            {employees.length > 0 && <div className="organization-employees">{employees.map(employee => <EmployeeHierarchyNode employee={employee} role="EMPLOYEE" canCreate={false} onAddNode={onAddNode} key={employee.id} />)}</div>}
+            <EmployeeHierarchyNode employee={lineManager} role="LINE_MANAGER" canCreate={canCreate} canEdit={canEdit} onAddNode={onAddNode} onEditReporting={onEditReporting} />
+            {employees.length > 0 && <div className="organization-employees">{employees.map(employee => <EmployeeHierarchyNode employee={employee} role="EMPLOYEE" canCreate={false} canEdit={canEdit} onAddNode={onAddNode} onEditReporting={onEditReporting} key={employee.id} />)}</div>}
           </div>;
         })}</div>}
+        {directEmployees.length > 0 && <div className="organization-employees">{directEmployees.map(employee => <EmployeeHierarchyNode employee={employee} role="EMPLOYEE" canCreate={false} canEdit={canEdit} onAddNode={onAddNode} onEditReporting={onEditReporting} key={employee.id} />)}</div>}
       </div>;
     })}</div> : <div className="organization-empty"><span>No manager nodes yet.</span>{canCreate && <button type="button" onClick={() => onAddNode("MANAGER")}><Plus size={16} /> Add manager</button>}</div>}
-    {unassigned.length > 0 && <details className="organization-unassigned"><summary>{unassigned.length} unassigned hierarchy node{unassigned.length === 1 ? "" : "s"}</summary><p>Set each node's reporting manager to place it in the chart.</p><div>{unassigned.map(employee => <span key={employee.id}>{employee.fields["Full Name"] || employee.fields["Employee Code"]}</span>)}</div></details>}
+    {unassigned.length > 0 && <details className="organization-unassigned"><summary>{unassigned.length} unassigned hierarchy node{unassigned.length === 1 ? "" : "s"}</summary><p>Set Manager for line managers and Line Manager for employees to place them in the chart.</p><div>{unassigned.map(employee => <span key={employee.id}>{employee.fields["Full Name"] || employee.fields["Employee Code"]}</span>)}</div></details>}
   </div>;
 }
 
-function EmployeeHierarchyNode({ employee, role, canCreate, onAddNode }: { employee: EmployeeRecord; role: OrganizationalRole; canCreate: boolean; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void }) {
+function EmployeeHierarchyNode({ employee, role, canCreate, canEdit, onAddNode, onEditReporting }: { employee: EmployeeRecord; role: OrganizationalRole; canCreate: boolean; canEdit: boolean; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onEditReporting: (employee: EmployeeRecord) => void }) {
   const nextRole = childRole[role];
   return <HierarchyRoleNode
     label={organizationalRoleLabel[role]}
@@ -127,14 +139,44 @@ function EmployeeHierarchyNode({ employee, role, canCreate, onAddNode }: { emplo
     role={role}
     canCreate={canCreate && Boolean(nextRole)}
     onAdd={nextRole ? () => onAddNode(nextRole, employee) : undefined}
+    canEdit={canEdit}
+    onEdit={() => onEditReporting(employee)}
   />;
 }
 
-function HierarchyRoleNode({ label, detail, role, canCreate = false, onAdd }: { label: string; detail?: string; role?: OrganizationalRole; canCreate?: boolean; onAdd?: () => void }) {
+function HierarchyRoleNode({ label, detail, role, canCreate = false, onAdd, canEdit = false, onEdit }: { label: string; detail?: string; role?: OrganizationalRole; canCreate?: boolean; onAdd?: () => void; canEdit?: boolean; onEdit?: () => void }) {
   const nextRole = role && childRole[role];
   return <div className="organization-node">
     <div><strong>{label}</strong>{detail && <span>{detail}</span>}</div>
+    {canEdit && onEdit && <button type="button" onClick={onEdit}>Edit reporting</button>}
     {canCreate && onAdd && nextRole && <button type="button" className="organization-node-add" aria-label={`Add ${organizationalRoleLabel[nextRole]} under ${detail || label}`} title={`Add ${organizationalRoleLabel[nextRole]}`} onClick={onAdd}><Plus size={16} /></button>}
+  </div>;
+}
+
+function ReportingEditor({ employee, employees, onCancel, onSave }: { employee: EmployeeRecord; employees: EmployeeRecord[]; onCancel: () => void; onSave: (reporting: { lineManagerId: string | null; managerId: string | null }) => Promise<void> }) {
+  const employeeByCode = new Map(employees.map(item => [item.fields["Employee Code"].trim().toLowerCase(), item]));
+  const currentLineManagerId = employeeByCode.get(hierarchyLineManagerCode(employee))?.id || "";
+  const currentManagerId = employeeByCode.get(hierarchyManagerCode(employee))?.id || "";
+  const [lineManagerId, setLineManagerId] = useState(currentLineManagerId);
+  const [managerId, setManagerId] = useState(currentManagerId);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const options = employees.filter(item => item.id !== employee.id && (item.status === "Active" || item.status === "On Leave"));
+  const save = async () => {
+    setSaving(true); setError("");
+    try { await onSave(hierarchyReportingPayload(lineManagerId, managerId)); }
+    catch (nextError) { setError(nextError instanceof Error ? nextError.message : "Reporting lines could not be updated."); }
+    finally { setSaving(false); }
+  };
+  const label = (item: EmployeeRecord) => `${item.fields["Employee Code"]} - ${item.fields["Full Name"] || item.fields["First Name"]}`;
+  return <div className="panel">
+    <div className="panel-head"><div><h3>Edit reporting: {employee.fields["Full Name"] || employee.fields["Employee Code"]}</h3><span>Saved here and in Employees as the same employee record.</span></div></div>
+    <div className="form-grid">
+      <label>Line Manager<select value={lineManagerId} onChange={event => setLineManagerId(event.target.value)}><option value="">None</option>{options.map(item => <option value={item.id} key={item.id}>{label(item)}</option>)}</select></label>
+      <label>Manager<select value={managerId} onChange={event => setManagerId(event.target.value)}><option value="">None</option>{options.map(item => <option value={item.id} key={item.id}>{label(item)}</option>)}</select></label>
+    </div>
+    <div className="form-actions"><button type="button" onClick={onCancel} disabled={saving}>Cancel</button><button type="button" className="primary" onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save reporting"}</button></div>
+    {error && <p className="sync-alert">{error}</p>}
   </div>;
 }
 

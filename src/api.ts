@@ -83,6 +83,7 @@ type BackendEmployee = {
   department?: BackendDepartment | null;
   position?: { title: string; code: string } | null;
   manager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
+  lineManager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
   profile?: Record<string, unknown> | null;
   bankAccount?: Record<string, unknown> | null;
   benefits?: Record<string, unknown> | null;
@@ -400,6 +401,9 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
   const manager = employee.manager
     ? `${employee.manager.employeeCode} - ${employee.manager.firstName} ${employee.manager.lastName}`.trim()
     : "";
+  const lineManager = employee.lineManager
+    ? `${employee.lineManager.employeeCode} - ${employee.lineManager.firstName} ${employee.lineManager.lastName}`.trim()
+    : "";
 
   return normalizeEmployee({
     id: employee.id,
@@ -419,7 +423,9 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
       "Date of Birth": dateOnly(employee.dateOfBirth),
       Gender: titleCase(employee.gender),
       "Joining Date": dateOnly(employee.hireDate),
-      "Reporting Manager Employee Code/Name": manager,
+      "Line Manager Employee Code/Name": lineManager,
+      "Manager Employee Code/Name": manager,
+      "Reporting Manager Employee Code/Name": lineManager,
       "Personal Mobile No.": employee.phone || "",
       "E-Mail ID (Work)": employee.email,
       "Emergency Contact Name": employee.emergencyContactName || "",

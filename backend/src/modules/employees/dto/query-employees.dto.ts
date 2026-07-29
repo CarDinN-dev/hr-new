@@ -19,6 +19,11 @@ export class QueryEmployeesDto extends PaginationQueryDto {
   @IsUUID()
   managerId?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  lineManagerId?: string;
+
   @ApiPropertyOptional({ enum: EmploymentStatus })
   @IsOptional()
   @IsEnum(EmploymentStatus)

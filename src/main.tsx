@@ -595,9 +595,15 @@ function App() {
               Designation: ({ HR: "HR", MANAGER: "Manager", LINE_MANAGER: "Line manager", EMPLOYEE: "Employee" } as const)[role],
               Department: parent?.fields.Department || "",
               "Joining Date": todayISO(),
-              "Reporting Manager Employee Code/Name": parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
+              "Line Manager Employee Code/Name": role === "EMPLOYEE" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
+              "Manager Employee Code/Name": role === "LINE_MANAGER" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : role === "EMPLOYEE" ? parent?.fields["Manager Employee Code/Name"] || "" : "",
+              "Reporting Manager Employee Code/Name": role === "EMPLOYEE" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
             };
             setModal(<EmployeeEditor state={state} template={draft} close={closeModal} notify={notify} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
+          }} onUpdateReporting={async (employeeId, reporting) => {
+            await apiRequest(`/employees/${employeeId}`, { method: "PATCH", csrfToken: backendSession.csrfToken, body: JSON.stringify(reporting) });
+            await refreshWorkspace();
+            notify("Reporting lines updated in Employees and Hierarchy.");
           }} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
           {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
@@ -1063,7 +1069,7 @@ function EmployeeMasterDataImportPreview({ rows, errors, existingEmployeeCodes, 
     setSubmitting(true);
     setSubmitError("");
     try {
-      const result = await apiRequest<{ created: number; updated: number; departments: number; positions: number }>("/employees/import-master-data", {
+      const result = await apiRequest<{ created: number; updated: number; relationshipUpdates: number; departments: number; positions: number }>("/employees/import-master-data", {
         method: "POST", csrfToken: session.csrfToken, body: JSON.stringify({ rows: rows.map(masterDataImportRow) })
       });
       await refreshWorkspace();
@@ -1094,7 +1100,8 @@ function masterDataImportRow(row: Record<string, string>) {
     employeeCode: row["Employee Code"], fullName: row["Full Name"], company: row.Company, wpsSponsor: row["WPS Sponsor"], designation: row.Designation,
     department: row.Department, joiningDate: row["Joining Date"], gender: row.Gender, basic: row.Basic, hra: row.HRA,
     conveyance: row["Conveyance Allowance"], mobile: row["Mobile Allowance"], food: row["Food Allowance"], fuel: row["Fuel Allowance"], other: row["Other Allowance"],
-    grossSalary: row.Total, companyConveyance: row["Company Conveyance"] === "Yes", companyFuel: row["Company Fuel"] === "Yes", companyOther: row["Company Other"] === "Yes"
+    grossSalary: row.Total, lineManager: row["Line Manager Employee Code/Name"] || undefined, manager: row["Manager Employee Code/Name"] || undefined,
+    companyConveyance: row["Company Conveyance"] === "Yes", companyFuel: row["Company Fuel"] === "Yes", companyOther: row["Company Other"] === "Yes"
   };
 }
 
@@ -1191,7 +1198,7 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
         <Badge value={employee.status} />
       </div>
       <section className="profile-grid">
-        {["Employee Code", "Joining Date", "Reporting Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", "Bank Code", "IBAN No."].map(field => (
+        {["Employee Code", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", "Bank Code", "IBAN No."].map(field => (
           <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
         ))}
         {canViewSalary && <div><span>Monthly Total</span><strong>{formatMoney(salary.total, state.settings.company.currency)}</strong></div>}

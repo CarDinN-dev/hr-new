@@ -234,21 +234,29 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   });
   assert.equal((await api('/employees/import-master-data', { method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-DENIED')] } }, sessions.EMPLOYEE)).status, 403);
   const importedMasterData = await api('/employees/import-master-data', {
-    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1'), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
+    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1', { lineManager: 'MTC-IMPORT-2', manager: 'Master Data Two' }), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
   }, systemAdmin);
   assert.equal(importedMasterData.status, 201, JSON.stringify(importedMasterData.payload));
-  assert.deepEqual(importedMasterData.data, { created: 2, updated: 0, departments: 1, positions: 1 });
+  assert.deepEqual(importedMasterData.data, { created: 2, updated: 0, relationshipUpdates: 1, departments: 1, positions: 1 });
   const importedEmployee = await prisma.employee.findUniqueOrThrow({ where: { employeeCode: 'MTC-IMPORT-1' }, include: { department: true, position: true, profile: true, benefits: true, salaryRecords: true } });
   assert.equal(importedEmployee.department.name, 'Master Data Testing');
   assert.equal(importedEmployee.position.title, 'Master Data Analyst');
   assert.equal(importedEmployee.profile.wpsSponsor, 'Medtech');
   assert.equal(importedEmployee.benefits.companyFuel, true);
   assert.equal(importedEmployee.salaryRecords[0].grossAdjustment.toFixed(2), '1200.00');
+  const importedManager = await prisma.employee.findUniqueOrThrow({ where: { employeeCode: 'MTC-IMPORT-2' } });
+  assert.equal(importedEmployee.lineManagerId, importedManager.id);
+  assert.equal(importedEmployee.managerId, importedManager.id);
+  const nonExactRelationshipImport = await api('/employees/import-master-data', {
+    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1', { lineManager: 'Master  Data Two' })] },
+  }, systemAdmin);
+  assert.equal(nonExactRelationshipImport.status, 400);
+  assert.equal((await prisma.employee.findUniqueOrThrow({ where: { employeeCode: 'MTC-IMPORT-1' } })).lineManagerId, importedManager.id);
   const reimportedMasterData = await api('/employees/import-master-data', {
     method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1', { grossSalary: '3200' }), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
   }, systemAdmin);
   assert.equal(reimportedMasterData.status, 201, JSON.stringify(reimportedMasterData.payload));
-  assert.deepEqual(reimportedMasterData.data, { created: 0, updated: 2, departments: 1, positions: 1 });
+  assert.deepEqual(reimportedMasterData.data, { created: 0, updated: 2, relationshipUpdates: 0, departments: 1, positions: 1 });
   assert.equal(await prisma.employee.count({ where: { employeeCode: { in: ['MTC-IMPORT-1', 'MTC-IMPORT-2'] } } }), 2);
   assert.equal((await prisma.salaryRecord.findFirstOrThrow({ where: { employeeId: importedEmployee.id, deletedAt: null } })).grossAdjustment.toFixed(2), '1400.00');
   const failedImport = await api('/employees/import-master-data', {
@@ -256,6 +264,11 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   }, systemAdmin);
   assert.equal(failedImport.status, 400);
   assert.equal(await prisma.employee.count({ where: { employeeCode: { in: ['MTC-ROLLBACK-1', 'MTC-ROLLBACK-2'] } } }), 0);
+  const failedRelationshipImport = await api('/employees/import-master-data', {
+    method: 'POST', body: { rows: [masterDataRow('MTC-RELATIONSHIP-ROLLBACK', { lineManager: 'Unknown Employee' })] },
+  }, systemAdmin);
+  assert.equal(failedRelationshipImport.status, 400);
+  assert.equal(await prisma.employee.count({ where: { employeeCode: 'MTC-RELATIONSHIP-ROLLBACK' } }), 0);
   const systemRoles = (await api('/system/roles', {}, systemAdmin)).data;
   const hrRole = systemRoles.find((role) => role.code === 'HR');
   const lineManagerRole = systemRoles.find((role) => role.code === 'LINE_MANAGER');
@@ -369,7 +382,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(selfApproved.data.status, 'APPROVED');
 
   for (const [managerRole, day] of [['CPO', '11'], ['COO', '12']]) {
-    await prisma.employee.update({ where: { id: blockedUser.employee.id }, data: { managerId: sessions[managerRole].user.employeeId } });
+    await prisma.employee.update({ where: { id: blockedUser.employee.id }, data: { lineManagerId: sessions[managerRole].user.employeeId } });
     const executiveReportLeave = await mutate('/leave/submit', blocked, {
       leaveTypeId: annualLeave.id, startDate: `2099-06-${day}`, endDate: `2099-06-${day}`, reason: `${managerRole} direct-report route`,
     });
@@ -377,7 +390,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     assert.equal(executiveReportLeave.data.status, 'PENDING_HR');
     assert.deepEqual(executiveReportLeave.data.steps.map((step) => step.stage), ['HR', 'CPO', 'COO']);
   }
-  await prisma.employee.update({ where: { id: blockedUser.employee.id }, data: { managerId: null } });
+  await prisma.employee.update({ where: { id: blockedUser.employee.id }, data: { lineManagerId: null } });
 
   const blockedLeave = await mutate('/leave/submit', blocked, {
     leaveTypeId: annualLeave.id, startDate: '2099-06-13', endDate: '2099-06-13', reason: 'Missing approver test',

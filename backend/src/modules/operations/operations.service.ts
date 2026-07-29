@@ -15,7 +15,7 @@ import {
   TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
 
-const employeeSummary = { id: true, employeeCode: true, firstName: true, lastName: true, departmentId: true, managerId: true };
+const employeeSummary = { id: true, employeeCode: true, firstName: true, lastName: true, departmentId: true, managerId: true, lineManagerId: true };
 
 @Injectable()
 export class OperationsService {
@@ -369,7 +369,7 @@ export class OperationsService {
     }
     if (!unrestricted && user.employeeId && this.authorization.permissionAllowedForScope(user, `${resource}.self.read`, AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
     if (!unrestricted && user.employeeId && this.authorization.has(user, `${resource}.team.read`)) {
-      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id)
+      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id)
         .filter((id) => this.authorization.permissionAllowedForScope(user, `${resource}.team.read`, AccessScopeType.DIRECT_REPORTS, id));
       if (ids.length) scopes.push({ employeeId: { in: ids } });
     }
@@ -387,9 +387,9 @@ export class OperationsService {
   private async assertManagerOrHr(employeeId: string, user: RequestUser, tx: Prisma.TransactionClient, resource: 'trip' | 'expense') {
     const hrPermission = resource === 'trip' ? 'trip.hr.manage' : 'expense.hr.approve';
     if (this.authorization.permissionAllowedForScope(user, hrPermission, AccessScopeType.ALL_EMPLOYEES, employeeId)) return;
-    const report = await tx.employee.findFirst({ where: { id: employeeId, deletedAt: null }, select: { managerId: true } });
+    const report = await tx.employee.findFirst({ where: { id: employeeId, deletedAt: null }, select: { lineManagerId: true } });
     if (!report) throw new NotFoundException('Record not found');
-    if (user.employeeId && report.managerId === user.employeeId && this.authorization.permissionAllowedForScope(user, `${resource}.team.approve_manager`, AccessScopeType.DIRECT_REPORTS, employeeId)) return;
+    if (user.employeeId && report.lineManagerId === user.employeeId && this.authorization.permissionAllowedForScope(user, `${resource}.team.approve_manager`, AccessScopeType.DIRECT_REPORTS, employeeId)) return;
     if (user.employeeId && await this.authorization.isInManagementTree(user.employeeId, employeeId) && this.authorization.permissionAllowedForScope(user, `${resource}.management.approve_manager`, AccessScopeType.MANAGEMENT_TREE, employeeId)) return;
     throw new NotFoundException('Record not found');
   }

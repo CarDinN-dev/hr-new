@@ -63,4 +63,9 @@ export class CreateEmployeeDto {
   @IsUUID()
   managerId?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  lineManagerId?: string;
+
 }

@@ -102,7 +102,7 @@ async function createTestPersonas(prisma, passwordHash) {
       });
       employees.set(roleCode, employee);
     }
-    await tx.employee.update({ where: { id: employees.get('EMPLOYEE').id }, data: { managerId: employees.get('LINE_MANAGER').id } });
+    await tx.employee.update({ where: { id: employees.get('EMPLOYEE').id }, data: { lineManagerId: employees.get('LINE_MANAGER').id, managerId: employees.get('MANAGER').id } });
     await tx.employee.update({ where: { id: employees.get('LINE_MANAGER').id }, data: { managerId: employees.get('MANAGER').id } });
     await tx.employee.update({ where: { id: employees.get('MANAGER').id }, data: { managerId: employees.get('CPO').id } });
     await tx.employee.update({ where: { id: employees.get('HR').id }, data: { managerId: employees.get('CPO').id } });

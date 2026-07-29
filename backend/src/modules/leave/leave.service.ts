@@ -48,7 +48,7 @@ const activePendingStatuses = [
 ];
 
 const leaveRequestInclude = {
-  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true, departmentId: true } },
+  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true, lineManagerId: true, departmentId: true } },
   requester: { select: { id: true, email: true } },
   leaveType: true,
   steps: {
@@ -62,7 +62,7 @@ const leaveRequestInclude = {
 } satisfies Prisma.LeaveRequestInclude;
 
 const leaveBalanceInclude = {
-  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true } },
+  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true, lineManagerId: true } },
   leaveType: true,
 } satisfies Prisma.LeaveBalanceInclude;
 
@@ -550,13 +550,13 @@ export class LeaveService {
 
   private async workflowPlan(
     tx: Prisma.TransactionClient,
-    employee: { id: string; managerId: string | null; departmentId: string | null },
+    employee: { id: string; managerId: string | null; lineManagerId: string | null; departmentId: string | null },
     requesterUserId: string,
     _version: number,
   ) {
     const roleCodes = await this.activeRoleCodes(tx, requesterUserId);
     const organizationalRole = ['COO', 'CPO', 'HR', 'MANAGER', 'LINE_MANAGER', 'EMPLOYEE'].find((role) => roleCodes.includes(role)) ?? 'EMPLOYEE';
-    const managerChain = await this.managerChain(tx, employee.id);
+    const managerChain = [employee.lineManagerId, employee.managerId].filter((id): id is string => Boolean(id));
     let routeType: LeaveRouteType = LeaveRouteType.STANDARD;
     let stages: LeaveApprovalStage[];
     if (organizationalRole === 'COO') { routeType = LeaveRouteType.COO_SELF; stages = [LeaveApprovalStage.COO]; }
@@ -565,8 +565,9 @@ export class LeaveService {
     else if (organizationalRole === 'MANAGER') stages = [LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
     else if (organizationalRole === 'LINE_MANAGER') stages = [LeaveApprovalStage.MANAGER, LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
     else stages = [LeaveApprovalStage.LINE_MANAGER, LeaveApprovalStage.MANAGER, LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
-    if (!['CPO', 'COO'].includes(organizationalRole) && employee.managerId) {
-      const directManager = await tx.employee.findFirst({ where: { id: employee.managerId, deletedAt: null }, select: { userId: true } });
+    const directManagerId = employee.lineManagerId ?? employee.managerId;
+    if (!['CPO', 'COO'].includes(organizationalRole) && directManagerId) {
+      const directManager = await tx.employee.findFirst({ where: { id: directManagerId, deletedAt: null }, select: { userId: true } });
       const directManagerRoles = directManager?.userId ? await this.activeRoleCodes(tx, directManager.userId) : [];
       if (directManagerRoles.some((role) => role === 'CPO' || role === 'COO')) {
         stages = [LeaveApprovalStage.HR, LeaveApprovalStage.CPO, LeaveApprovalStage.COO];
@@ -574,21 +575,16 @@ export class LeaveService {
     }
 
     const steps: WorkflowStepPlan[] = [];
-    let lineManagerEmployeeId: string | undefined;
     for (const stage of stages) {
       let assignees: string[] = [];
       const selfApprovalAllowed = routeType === LeaveRouteType.COO_SELF && stage === LeaveApprovalStage.COO;
       if (selfApprovalAllowed) assignees = [requesterUserId];
       else if (stage === LeaveApprovalStage.LINE_MANAGER) {
-        lineManagerEmployeeId = managerChain[0];
-        const userId = lineManagerEmployeeId ? await this.qualifiedUserByEmployee(tx, lineManagerEmployeeId, 'LINE_MANAGER', stagePermission[stage]) : null;
+        const userId = employee.lineManagerId ? await this.qualifiedUserByEmployee(tx, employee.lineManagerId, 'LINE_MANAGER', stagePermission[stage]) : null;
         if (userId) assignees = [userId];
       } else if (stage === LeaveApprovalStage.MANAGER) {
-        const startIndex = lineManagerEmployeeId ? managerChain.indexOf(lineManagerEmployeeId) + 1 : 0;
-        for (const employeeId of managerChain.slice(Math.max(0, startIndex))) {
-          const userId = await this.qualifiedUserByEmployee(tx, employeeId, 'MANAGER', stagePermission[stage]);
-          if (userId && userId !== requesterUserId) { assignees = [userId]; break; }
-        }
+        const userId = employee.managerId ? await this.qualifiedUserByEmployee(tx, employee.managerId, 'MANAGER', stagePermission[stage]) : null;
+        if (userId && userId !== requesterUserId) assignees = [userId];
       } else {
         assignees = await this.policyAssignees(tx, stage, requesterUserId);
       }
@@ -671,18 +667,6 @@ export class LeaveService {
     return roles.map((assignment) => assignment.role.code);
   }
 
-  private async managerChain(tx: Prisma.TransactionClient, employeeId: string) {
-    const result: string[] = [];
-    const visited = new Set([employeeId]);
-    let currentId = employeeId;
-    for (let depth = 0; depth < 32; depth += 1) {
-      const employee: { managerId: string | null } | null = await tx.employee.findFirst({ where: { id: currentId, deletedAt: null }, select: { managerId: true } });
-      if (!employee?.managerId || visited.has(employee.managerId)) break;
-      visited.add(employee.managerId); result.push(employee.managerId); currentId = employee.managerId;
-    }
-    return result;
-  }
-
   private async notifyWorkflow(tx: Prisma.TransactionClient, requestId: string, blocked: WorkflowStepPlan | undefined, steps: WorkflowStepPlan[]) {
     if (blocked) {
       const admins = await tx.user.findMany({ where: { isActive: true, deletedAt: null, roles: { some: { revokedAt: null, role: { code: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] }, isActive: true } } } }, select: { id: true } });
@@ -727,7 +711,7 @@ export class LeaveService {
     }
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'leave.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
     if (user.employeeId && this.authorization.has(user, 'leave.team.read')) {
-      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'leave.team.read', AccessScopeType.DIRECT_REPORTS, id));
+      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'leave.team.read', AccessScopeType.DIRECT_REPORTS, id));
       if (ids.length) scopes.push({ employeeId: { in: ids } });
     }
     if (user.employeeId && this.authorization.has(user, 'leave.management.read')) {
@@ -749,7 +733,7 @@ export class LeaveService {
   private async canAccessRequest(user: RequestUser, request: LeaveRequestView) {
     for (const permission of ['leave.read_all', 'leave.hr.read', 'leave.audit.read'] as const) if (this.authorization.permissionAllowedForScope(user, permission, AccessScopeType.ALL_EMPLOYEES, request.employeeId)) return true;
     if (request.employeeId === user.employeeId && this.authorization.permissionAllowedForScope(user, 'leave.self.read', AccessScopeType.SELF, request.employeeId)) return true;
-    if (request.employee.managerId === user.employeeId && this.authorization.permissionAllowedForScope(user, 'leave.team.read', AccessScopeType.DIRECT_REPORTS, request.employeeId)) return true;
+    if (request.employee.lineManagerId === user.employeeId && this.authorization.permissionAllowedForScope(user, 'leave.team.read', AccessScopeType.DIRECT_REPORTS, request.employeeId)) return true;
     if (user.employeeId && await this.authorization.isInManagementTree(user.employeeId, request.employeeId) && this.authorization.permissionAllowedForScope(user, 'leave.management.read', AccessScopeType.MANAGEMENT_TREE, request.employeeId)) return true;
     return request.steps.some((step) => step.workflowVersion === request.workflowVersion && step.stage === request.currentStage && step.assignees.some((assignee) => assignee.userId === user.id && assignee.isActive && !assignee.revokedAt) && this.authorization.permissionAllowedForScope(user, stagePermission[step.stage], AccessScopeType.ASSIGNED_APPROVALS, request.id));
   }
@@ -766,7 +750,7 @@ export class LeaveService {
     }
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'leave.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
     if (user.employeeId && this.authorization.has(user, 'leave.team.read')) {
-      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'leave.team.read', AccessScopeType.DIRECT_REPORTS, id));
+      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } })).map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'leave.team.read', AccessScopeType.DIRECT_REPORTS, id));
       if (ids.length) scopes.push({ employeeId: { in: ids } });
     }
     if (user.employeeId && this.authorization.has(user, 'leave.management.read')) {

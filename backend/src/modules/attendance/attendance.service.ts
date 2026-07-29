@@ -20,6 +20,7 @@ const attendanceInclude = {
       email: true,
       departmentId: true,
       managerId: true,
+      lineManagerId: true,
     },
   },
 };
@@ -286,7 +287,7 @@ export class AttendanceService {
     }
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'attendance.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
     if (user.employeeId && this.authorization.has(user, 'attendance.team.read')) {
-      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } }))
+      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } }))
         .map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'attendance.team.read', AccessScopeType.DIRECT_REPORTS, id));
       if (ids.length) scopes.push({ employeeId: { in: ids } });
     }

@@ -14,7 +14,7 @@ import { AuthorizationService } from '../authorization/authorization.service';
 import { DocumentMalwareScannerService } from './document-malware-scanner.service';
 
 const documentInclude = {
-  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true } },
+  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true, lineManagerId: true } },
   uploadedBy: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true } },
 };
 

@@ -12,7 +12,7 @@ import { AuthorizationService } from '../authorization/authorization.service';
 
 const contractInclude = {
   employee: {
-    select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true },
+    select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true, lineManagerId: true },
   },
 };
 
@@ -129,7 +129,7 @@ export class EmploymentContractsService {
       scopes.push({ employeeId: user.employeeId });
     }
     if (user.employeeId && this.authorization.has(user, 'contract.team.read')) {
-      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } }))
+      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } }))
         .map(({ id }) => id)
         .filter((employeeId) => this.authorization.permissionAllowedForScope(user, 'contract.team.read', AccessScopeType.DIRECT_REPORTS, employeeId));
       if (ids.length) scopes.push({ employeeId: { in: ids } });

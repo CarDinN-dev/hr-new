@@ -10,7 +10,7 @@ import { QueryPerformanceReviewsDto } from './dto/query-performance-reviews.dto'
 import { UpdatePerformanceReviewDto } from './dto/update-performance-review.dto';
 
 const reviewInclude = {
-  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true } },
+  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true, managerId: true, lineManagerId: true } },
   reviewer: { select: { id: true, employeeCode: true, firstName: true, lastName: true, email: true } },
 };
 
@@ -144,7 +144,7 @@ export class PerformanceReviewsService {
       scopes.push({ employeeId: user.employeeId, status: { not: ReviewStatus.DRAFT } });
     }
     if (user.employeeId && this.authorization.has(user, 'performance.team.read')) {
-      const ids = (await this.prisma.employee.findMany({ where: { managerId: user.employeeId, deletedAt: null }, select: { id: true } }))
+      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } }))
         .map(({ id }) => id)
         .filter((employeeId) => this.authorization.permissionAllowedForScope(user, 'performance.team.read', AccessScopeType.DIRECT_REPORTS, employeeId));
       if (ids.length) scopes.push({ employeeId: { in: ids } });
@@ -162,9 +162,9 @@ export class PerformanceReviewsService {
     if (!user.employeeId) {
       throw new ForbiddenException('Only managers and HR can create or update reviews');
     }
-    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, deletedAt: null }, select: { managerId: true } });
+    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, deletedAt: null }, select: { lineManagerId: true } });
     if (!employee) throw new NotFoundException('Record not found');
-    if (employee.managerId === user.employeeId
+    if (employee.lineManagerId === user.employeeId
       && this.authorization.permissionAllowedForScope(user, 'performance.team.manage', AccessScopeType.DIRECT_REPORTS, employeeId)) return;
     if (await this.authorization.isInManagementTree(user.employeeId, employeeId)
       && this.authorization.permissionAllowedForScope(user, 'performance.management.manage', AccessScopeType.MANAGEMENT_TREE, employeeId)) return;

@@ -99,6 +99,30 @@ describe("employee sheet import", () => {
     expect(imported.errors.join(" ")).toContain("duplicated");
   });
 
+  it("keeps separate line-manager and manager columns from a generic workbook", () => {
+    const imported = parseEmployeeWorkbookRows([
+      ["Employee Code", "Full Name", "Line Manager", "Manager"],
+      ["MTC001", "Employee One", "MTC010 - Line Lead", "MTC020 - Department Manager"],
+    ]);
+
+    expect(imported.rows).toEqual([expect.objectContaining({
+      "Line Manager Employee Code/Name": "MTC010 - Line Lead",
+      "Manager Employee Code/Name": "MTC020 - Department Manager",
+    })]);
+  });
+
+  it("maps Book1-style manager columns into master-data import rows", () => {
+    const headers = ["EMP No", "Employee Name - Sponsor", "WPS Sponsor", "Working Company", "Designation", "LOB", "Line Manager", "Manager", "Date of Joining", "Gender", "Basic", "HRA", "Conveyance", "Mobile", "Food", "Fuel", "Other", "Gross Salary"];
+    const imported = parseEmployeeWorkbookRows([headers, [
+      "MTC200", "Employee Two", "Medtech", "Medtech", "Analyst", "Medical", "MTC010", "MTC020", "2025-01-01", "Male", "1000", "0", "0", "0", "0", "0", "0", "1000",
+    ]]);
+
+    expect(imported.format).toBe("master-data");
+    expect(imported.rows[0]).toEqual(expect.objectContaining({
+      "Employee Code": "MTC200", "Line Manager Employee Code/Name": "MTC010", "Manager Employee Code/Name": "MTC020",
+    }));
+  });
+
   it("opens the exact downloadable .xlsx template through the browser file path", async () => {
     const bytes = await readFile("public/templates/MedTech-Employee-Import-Template.xlsx");
     const buffer = new Uint8Array(bytes).buffer;

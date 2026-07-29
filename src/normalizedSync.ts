@@ -120,15 +120,19 @@ function employeePayload(employee: EmployeeRecord, departmentIds: Map<string, st
   const departmentId = departmentIds.get(f.Department);
   const designation = f.Designation.trim();
   const positionId = departmentId && designation ? positionIds.get(`${departmentId}:${designation.toLocaleLowerCase()}`) : undefined;
-  const managerLabel = f["Reporting Manager Employee Code/Name"].trim();
+  const lineManagerLabel = (f["Line Manager Employee Code/Name"] || f["Reporting Manager Employee Code/Name"]).trim();
+  const managerLabel = f["Manager Employee Code/Name"].trim();
+  const lineManagerCode = lineManagerLabel.split(" - ", 1)[0].trim().toLocaleLowerCase();
   const managerCode = managerLabel.split(" - ", 1)[0].trim().toLocaleLowerCase();
+  const lineManagerId = lineManagerCode ? employeeIds.get(lineManagerCode) : undefined;
   const managerId = managerCode ? employeeIds.get(managerCode) : undefined;
   if (designation && departmentId && !positionId) throw new Error(`No active position matches ${designation} in ${f.Department}.`);
-  if (managerLabel && !managerId) throw new Error(`Reporting manager ${managerLabel} was not found.`);
+  if (lineManagerLabel && !lineManagerId) throw new Error(`Line manager ${lineManagerLabel} was not found.`);
+  if (managerLabel && !managerId) throw new Error(`Manager ${managerLabel} was not found.`);
   return compact({
     employeeCode: f["Employee Code"], firstName: f["First Name"], lastName: f["Last Name"],
     email: f["E-Mail ID (Work)"] || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
-    hireDate: f["Joining Date"], employmentStatus: status, departmentId, positionId, managerId
+    hireDate: f["Joining Date"], employmentStatus: status, departmentId, positionId, lineManagerId, managerId
   });
 }
 

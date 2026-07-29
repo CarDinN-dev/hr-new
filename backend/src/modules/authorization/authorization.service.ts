@@ -183,12 +183,12 @@ export class AuthorizationService {
   ) {
     const employee = await this.prisma.employee.findFirst({
       where: { id: employeeId, deletedAt: null },
-      select: { id: true, managerId: true, departmentId: true },
+      select: { id: true, managerId: true, lineManagerId: true, departmentId: true },
     });
     if (!employee) throw new NotFoundException('Record not found');
     if (scopes.all && this.permissionAllowedForScope(user, scopes.all, AccessScopeType.ALL_EMPLOYEES, employeeId)) return;
     if (scopes.self && employeeId === user.employeeId && this.permissionAllowedForScope(user, scopes.self, AccessScopeType.SELF, employeeId)) return;
-    if (scopes.team && employee.managerId === user.employeeId && this.permissionAllowedForScope(user, scopes.team, AccessScopeType.DIRECT_REPORTS, employeeId)) return;
+    if (scopes.team && employee.lineManagerId === user.employeeId && this.permissionAllowedForScope(user, scopes.team, AccessScopeType.DIRECT_REPORTS, employeeId)) return;
     if (scopes.department && employee.departmentId && user.departmentScopeIds.includes(employee.departmentId)
       && this.permissionAllowedForScope(user, scopes.department, AccessScopeType.MANAGEMENT_TREE, employeeId)) return;
     if (scopes.tree && user.employeeId && await this.isInManagementTree(user.employeeId, employeeId)

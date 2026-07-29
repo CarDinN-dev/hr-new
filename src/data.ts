@@ -2,7 +2,7 @@ import { newId } from "./id";
 
 export const employeeImportColumns = [
   "Employee Code", "Employee Category", "First Name", "Last Name", "Full Name", "Work Shift", "Company", "Sponsor Name", "WPS Sponsor",
-  "Department", "Designation", "Grade/Band", "Date of Birth", "Joining Date", "Reporting Manager Employee Code/Name", "Family Status (Yes/No)",
+  "Department", "Designation", "Grade/Band", "Date of Birth", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "Reporting Manager Employee Code/Name", "Family Status (Yes/No)",
   "Leave Policy", "Last Rejoin Date", "Annual Leave Balance (As on Date)", "Annual Leave Balance", "LOP Days (Loss of Pay)", "Business Unit",
   "Working Company Name", "Cost Centre", "Nationality", "RP/ID Number", "RP/ID Profession", "QID Expiry Date", "Visa Type", "Hire Type",
   "Confirmation Date", "ESB Date", "Gender", "Marital Status", "Office Mobile No.", "Personal Mobile No.", "E-Mail ID (Work)", "No. of Dependents",
@@ -18,7 +18,7 @@ export const employeeImportColumns = [
 ] as const;
 
 export const employeeProfileSections = [
-  { title: "Core Employment Details", fields: ["Employee Code", "Employee Category", "Full Name", "Work Shift", "Company", "Department", "Designation", "Grade/Band", "Joining Date", "Reporting Manager Employee Code/Name", "Business Unit", "Working Company Name", "Cost Centre", "Hire Type", "Confirmation Date", "ESB Date"] },
+  { title: "Core Employment Details", fields: ["Employee Code", "Employee Category", "Full Name", "Work Shift", "Company", "Department", "Designation", "Grade/Band", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "Reporting Manager Employee Code/Name", "Business Unit", "Working Company Name", "Cost Centre", "Hire Type", "Confirmation Date", "ESB Date"] },
   { title: "Personal & Identity", fields: ["First Name", "Last Name", "Date of Birth", "Gender", "Marital Status", "Family Status (Yes/No)", "No. of Dependents", "Nationality", "Blood Group"] },
   { title: "Residency, Visa & Access", fields: ["Sponsor Name", "WPS Sponsor", "RP/ID Number", "RP/ID Profession", "QID Expiry Date", "Visa Type", "Work Permit No.", "Work Permit Issue Date", "Work Permit Expiry Date", "Office File No.", "Access Card No."] },
   { title: "Contact & Addresses", fields: ["Office Mobile No.", "Personal Mobile No.", "E-Mail ID (Work)", "Local Building/Villa #", "Local Street #", "Local Zone #", "International Apartment", "International Building", "International Floor", "International Street", "International State", "International Country", "International Zip Code"] },
