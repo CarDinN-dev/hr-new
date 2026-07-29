@@ -82,6 +82,7 @@ type BackendEmployee = {
   profilePhoto?: string | null;
   department?: BackendDepartment | null;
   position?: { title: string; code: string } | null;
+  user?: { roles?: Array<{ role: { code: string } }> } | null;
   manager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
   lineManager?: Pick<BackendEmployee, "employeeCode" | "firstName" | "lastName"> | null;
   profile?: Record<string, unknown> | null;
@@ -409,6 +410,7 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
     id: employee.id,
     status: mapEmployeeStatus(employee.employmentStatus),
     photo: employee.profilePhoto || undefined,
+    roleCodes: employee.user?.roles?.map(assignment => assignment.role.code) || [],
     fields: {
       ...fields,
       "Employee Code": employee.employeeCode,

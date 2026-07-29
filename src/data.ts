@@ -31,7 +31,7 @@ export const employeeProfileSections = [
 export type AttendanceCode = "P" | "H" | "L" | "A";
 export type AttendanceApproval = "Approved" | "Not approved";
 export type EmployeeStatus = "Active" | "On Leave" | "Resigned" | "Terminated";
-export type EmployeeRecord = { id: string; status: EmployeeStatus; fields: Record<string, string>; photo?: string };
+export type EmployeeRecord = { id: string; status: EmployeeStatus; fields: Record<string, string>; photo?: string; roleCodes?: string[] };
 export type LeaveStatus = "Pending" | "Approved" | "Rejected";
 
 export type LeaveRequest = {

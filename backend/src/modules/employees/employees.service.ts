@@ -16,7 +16,7 @@ const managerSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
 } satisfies Prisma.EmployeeSelect;
 
-const employeeSummarySelect = {
+const employeeSummarySelect = (now: Date) => ({
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
   phone: true, hireDate: true, employmentStatus: true, departmentId: true, positionId: true,
   managerId: true, lineManagerId: true, profilePhoto: true, version: true, createdAt: true, updatedAt: true,
@@ -28,7 +28,15 @@ const employeeSummarySelect = {
   lineManager: {
     select: managerSummarySelect,
   },
-} satisfies Prisma.EmployeeSelect;
+  user: {
+    select: {
+      roles: {
+        where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }], role: { isActive: true } },
+        select: { role: { select: { code: true } } },
+      },
+    },
+  },
+}) satisfies Prisma.EmployeeSelect;
 
 @Injectable()
 export class EmployeesService {
@@ -441,7 +449,7 @@ export class EmployeesService {
   }
 
   private projection(user: RequestUser, self: boolean, employeeId?: string): Prisma.EmployeeSelect {
-    const select: Prisma.EmployeeSelect = { ...employeeSummarySelect };
+    const select: Prisma.EmployeeSelect = { ...employeeSummarySelect(new Date()) };
     if (self && user.permissions.includes('employee.self.read')) {
       Object.assign(select, {
         dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,

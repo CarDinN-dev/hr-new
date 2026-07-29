@@ -16,6 +16,7 @@ const organizationalRoleLabel: Record<OrganizationalRole, string> = { HR: "HR", 
 const childRole: Partial<Record<OrganizationalRole, OrganizationalRole>> = { HR: "MANAGER", MANAGER: "LINE_MANAGER", LINE_MANAGER: "EMPLOYEE" };
 
 export function hierarchyNodeRole(employee: EmployeeRecord): OrganizationalRole {
+  if (hierarchyExecutiveRole(employee)) return "MANAGER";
   const designation = (employee.fields.Designation || "").trim().toLowerCase().replaceAll("_", " ");
   if (designation.includes("line manager")) return "LINE_MANAGER";
   if (/\bhr\b|human resources/.test(designation)) return "HR";
@@ -24,9 +25,9 @@ export function hierarchyNodeRole(employee: EmployeeRecord): OrganizationalRole 
 }
 
 export function hierarchyExecutiveRole(employee: EmployeeRecord): ExecutiveRole | null {
-  const designation = (employee.fields.Designation || "").trim().toLowerCase().replaceAll("_", " ");
-  if (designation.includes("coo") || designation.includes("chief operating officer")) return "COO";
-  if (designation.includes("cpo") || designation.includes("chief people officer")) return "CPO";
+  const roles = new Set(employee.roleCodes || []);
+  if (roles.has("COO")) return "COO";
+  if (roles.has("CPO")) return "CPO";
   return null;
 }
 

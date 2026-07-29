@@ -22,9 +22,10 @@ describe("hierarchy page requests", () => {
   });
 
   it("treats executive employees as chart managers and saves both reporting links", () => {
-    expect(hierarchyNodeRole({ id: "coo-1", status: "Active", fields: { Designation: "COO" } })).toBe("MANAGER");
-    expect(hierarchyExecutiveRole({ id: "coo-1", status: "Active", fields: { Designation: "Chief Operating Officer" } })).toBe("COO");
-    expect(hierarchyExecutiveRole({ id: "cpo-1", status: "Active", fields: { Designation: "CPO" } })).toBe("CPO");
+    expect(hierarchyNodeRole({ id: "coo-1", status: "Active", fields: { Designation: "Employee" }, roleCodes: ["COO"] })).toBe("MANAGER");
+    expect(hierarchyExecutiveRole({ id: "coo-1", status: "Active", fields: { Designation: "Chief Operating Officer" }, roleCodes: ["COO"] })).toBe("COO");
+    expect(hierarchyExecutiveRole({ id: "cpo-1", status: "Active", fields: { Designation: "CPO" }, roleCodes: ["CPO"] })).toBe("CPO");
+    expect(hierarchyExecutiveRole({ id: "not-coo", status: "Active", fields: { Designation: "COO" } })).toBeNull();
     expect(hierarchyReportingPayload("line-manager-1", "manager-1")).toEqual({ lineManagerId: "line-manager-1", managerId: "manager-1" });
     expect(hierarchyReportingPayload("", "")).toEqual({ lineManagerId: null, managerId: null });
   });
