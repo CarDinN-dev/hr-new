@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyNodeRole, hierarchyReportingPayload, hierarchyUserParams } from "./features/hierarchy-page";
+import { hierarchyExecutiveRole, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyNodeRole, hierarchyReportingPayload, hierarchyUserParams } from "./features/hierarchy-page";
 
 describe("hierarchy page requests", () => {
   it("combines direct-role filtering and sends versioned inheritance changes", () => {
@@ -23,6 +23,8 @@ describe("hierarchy page requests", () => {
 
   it("treats executive employees as chart managers and saves both reporting links", () => {
     expect(hierarchyNodeRole({ id: "coo-1", status: "Active", fields: { Designation: "COO" } })).toBe("MANAGER");
+    expect(hierarchyExecutiveRole({ id: "coo-1", status: "Active", fields: { Designation: "Chief Operating Officer" } })).toBe("COO");
+    expect(hierarchyExecutiveRole({ id: "cpo-1", status: "Active", fields: { Designation: "CPO" } })).toBe("CPO");
     expect(hierarchyReportingPayload("line-manager-1", "manager-1")).toEqual({ lineManagerId: "line-manager-1", managerId: "manager-1" });
     expect(hierarchyReportingPayload("", "")).toEqual({ lineManagerId: null, managerId: null });
   });

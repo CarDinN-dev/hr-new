@@ -9,6 +9,7 @@ type Role = { id: string; code: string; displayName: string; version: number; is
 type User = { id: string; email: string; isActive: boolean; localLoginEnabled: boolean; microsoftLoginEnabled: boolean; roles: Array<{ role: Role }> };
 type InheritanceEditor = { role: Role; parentRoleIds: Set<string>; reason: string };
 export type OrganizationalRole = "HR" | "MANAGER" | "LINE_MANAGER" | "EMPLOYEE";
+type ExecutiveRole = "CPO" | "COO";
 
 const key = (session: BackendSession, value: string) => [value, session.sessionId, session.authorizationVersion] as const;
 const organizationalRoleLabel: Record<OrganizationalRole, string> = { HR: "HR", MANAGER: "Manager", LINE_MANAGER: "Line manager", EMPLOYEE: "Employee" };
@@ -20,6 +21,13 @@ export function hierarchyNodeRole(employee: EmployeeRecord): OrganizationalRole 
   if (/\bhr\b|human resources/.test(designation)) return "HR";
   if (designation.includes("manager") || designation.includes("cpo") || designation.includes("coo")) return "MANAGER";
   return "EMPLOYEE";
+}
+
+export function hierarchyExecutiveRole(employee: EmployeeRecord): ExecutiveRole | null {
+  const designation = (employee.fields.Designation || "").trim().toLowerCase().replaceAll("_", " ");
+  if (designation.includes("coo") || designation.includes("chief operating officer")) return "COO";
+  if (designation.includes("cpo") || designation.includes("chief people officer")) return "CPO";
+  return null;
 }
 
 export function hierarchyManagerCode(employee: EmployeeRecord) {
@@ -92,12 +100,17 @@ export function HierarchyPage({ session, notify, employees, onAddNode, onUpdateR
 function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditReporting }: { employees: EmployeeRecord[]; canCreate: boolean; canEdit: boolean; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onEditReporting: (employee: EmployeeRecord) => void }) {
   const active = employees.filter(employee => employee.status === "Active" || employee.status === "On Leave");
   const role = new Map(active.map(employee => [employee.id, hierarchyNodeRole(employee)]));
-  const managers = active.filter(employee => role.get(employee.id) === "MANAGER");
+  const executives = new Map<ExecutiveRole, EmployeeRecord>();
+  for (const employee of active) {
+    const executive = hierarchyExecutiveRole(employee);
+    if (executive) executives.set(executive, employee);
+  }
+  const managers = active.filter(employee => role.get(employee.id) === "MANAGER" && !hierarchyExecutiveRole(employee));
   const lineManagers = active.filter(employee => role.get(employee.id) === "LINE_MANAGER");
   const staff = active.filter(employee => role.get(employee.id) === "EMPLOYEE");
   const hrNames = active.filter(employee => role.get(employee.id) === "HR").map(employee => employee.fields["Full Name"]).filter(Boolean);
-  const managerCodes = new Set(managers.map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
-  const reportingCodes = new Set([...managers, ...lineManagers].map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
+  const managerCodes = new Set([...managers, ...executives.values()].map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
+  const reportingCodes = new Set([...managers, ...executives.values(), ...lineManagers].map(employee => employee.fields["Employee Code"].trim().toLowerCase()));
   const unassigned = [
     ...lineManagers.filter(employee => !managerCodes.has(hierarchyManagerCode(employee))),
     ...staff.filter(employee => !reportingCodes.has(hierarchyLineManagerCode(employee))),
@@ -106,8 +119,8 @@ function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditRep
   return <div className="organization-chart" aria-label="Organizational hierarchy">
     <div className="organization-spine">
       <HierarchyRoleNode label="Super Administrator" detail="Overrides everyone" />
-      <HierarchyRoleNode label="COO" />
-      <HierarchyRoleNode label="CPO" />
+      <HierarchyRoleNode label="COO" detail={executives.get("COO")?.fields["Full Name"] || "Not assigned"} role="MANAGER" canEdit={canEdit && executives.has("COO")} onEdit={executives.get("COO") ? () => onEditReporting(executives.get("COO")!) : undefined} />
+      <HierarchyRoleNode label="CPO" detail={executives.get("CPO")?.fields["Full Name"] || "Not assigned"} role="MANAGER" canEdit={canEdit && executives.has("CPO")} onEdit={executives.get("CPO") ? () => onEditReporting(executives.get("CPO")!) : undefined} />
       <HierarchyRoleNode label="HR" detail={hrNames.join(", ") || "Human Resources"} role="HR" canCreate={canCreate} onAdd={() => onAddNode("MANAGER")} />
     </div>
     {managers.length ? <div className="organization-branches">{managers.map(manager => {
