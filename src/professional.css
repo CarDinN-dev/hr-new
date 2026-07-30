@@ -114,20 +114,25 @@ textarea:focus-visible,
 .sidebar {
   width: 252px !important;
   padding: 18px 14px 14px !important;
-  border-right: 1px solid rgba(255,255,255,.07) !important;
-  background: linear-gradient(180deg, var(--pro-sidebar), var(--pro-sidebar-2)) !important;
+  border-right: 1px solid var(--pro-border) !important;
+  background: var(--pro-surface) !important;
   box-shadow: 8px 0 28px rgba(15, 23, 42, .08);
+}
+
+:root[data-theme="dark"] .sidebar {
+  border-right-color: rgba(255,255,255,.07) !important;
+  background: linear-gradient(180deg, var(--pro-sidebar), var(--pro-sidebar-2)) !important;
 }
 
 .brand-block {
   min-height: 64px;
   margin: 0 2px 16px;
   padding: 8px 8px 16px !important;
-  border-bottom: 1px solid rgba(255,255,255,.09);
+  border-bottom: 1px solid var(--pro-border);
 }
 
 .brand-block strong {
-  color: #fff !important;
+  color: var(--pro-text) !important;
   font-size: 14px !important;
   font-weight: 750 !important;
   letter-spacing: -.01em;
@@ -135,7 +140,7 @@ textarea:focus-visible,
 
 .brand-block span,
 .brand-block div > span {
-  color: rgba(255,255,255,.58) !important;
+  color: var(--pro-text-soft) !important;
   font-size: 11px !important;
   letter-spacing: .035em;
 }
@@ -144,10 +149,8 @@ textarea:focus-visible,
   width: 42px !important;
   height: 42px !important;
   flex: 0 0 42px;
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 10px;
-  background: rgba(255,255,255,.96);
-  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  background: transparent;
+  box-shadow: none;
 }
 
 .nav-list {
@@ -163,7 +166,7 @@ textarea:focus-visible,
   padding: 9px 11px !important;
   border: 1px solid transparent !important;
   border-radius: 8px !important;
-  color: rgba(255,255,255,.68) !important;
+  color: var(--pro-text-soft) !important;
   font-size: 13px !important;
   font-weight: 560 !important;
   letter-spacing: -.005em;
@@ -172,38 +175,93 @@ textarea:focus-visible,
 .nav-list a svg {
   width: 17px;
   height: 17px;
-  color: rgba(255,255,255,.48);
+  color: var(--pro-text-soft);
   stroke-width: 1.9;
 }
 
 .nav-list a:hover {
-  border-color: rgba(255,255,255,.08) !important;
-  background: rgba(255,255,255,.065) !important;
-  color: #fff !important;
+  border-color: var(--pro-border) !important;
+  background: var(--pro-surface-subtle) !important;
+  color: var(--pro-text) !important;
   transform: translateX(2px);
 }
 
 .nav-list a:hover svg {
-  color: rgba(255,255,255,.8);
+  color: var(--pro-text);
 }
 
 .nav-list a.active {
-  border-color: rgba(255,255,255,.1) !important;
-  background: rgba(255,255,255,.11) !important;
-  color: #fff !important;
+  border-color: color-mix(in srgb, var(--pro-brand) 25%, transparent) !important;
+  background: var(--pro-brand-soft) !important;
+  color: var(--pro-brand) !important;
   box-shadow: inset 3px 0 0 var(--pro-brand);
 }
 
 .nav-list a.active svg {
-  color: #fff;
+  color: var(--pro-brand);
 }
 
-.account-menu,
+.account-menu {
+  border-color: var(--pro-border) !important;
+  background: transparent !important;
+  border-radius: 10px !important;
+}
+
 .sidebar-footer,
 .user-menu {
   border-color: rgba(255,255,255,.09) !important;
   background: rgba(255,255,255,.045) !important;
   border-radius: 10px !important;
+}
+
+.account-trigger,
+.account-trigger:hover {
+  border-color: var(--pro-border) !important;
+  background: var(--pro-surface-subtle) !important;
+  color: var(--pro-text) !important;
+}
+
+:root[data-theme="dark"] .brand-block {
+  border-bottom-color: rgba(255,255,255,.09);
+}
+
+:root[data-theme="dark"] .brand-block strong {
+  color: #fff !important;
+}
+
+:root[data-theme="dark"] .brand-block span,
+:root[data-theme="dark"] .brand-block div > span,
+:root[data-theme="dark"] .nav-list a,
+:root[data-theme="dark"] .nav-list a svg {
+  color: rgba(255,255,255,.68) !important;
+}
+
+:root[data-theme="dark"] .nav-list a:hover {
+  border-color: rgba(255,255,255,.08) !important;
+  background: rgba(255,255,255,.065) !important;
+  color: #fff !important;
+}
+
+:root[data-theme="dark"] .nav-list a:hover svg,
+:root[data-theme="dark"] .nav-list a.active,
+:root[data-theme="dark"] .nav-list a.active svg {
+  color: #fff !important;
+}
+
+:root[data-theme="dark"] .nav-list a.active {
+  border-color: rgba(255,255,255,.1) !important;
+  background: rgba(255,255,255,.11) !important;
+}
+
+:root[data-theme="dark"] .account-menu {
+  border-color: rgba(255,255,255,.09) !important;
+}
+
+:root[data-theme="dark"] .account-trigger,
+:root[data-theme="dark"] .account-trigger:hover {
+  border-color: rgba(255,255,255,.1) !important;
+  background: rgba(255,255,255,.045) !important;
+  color: #fff !important;
 }
 
 .workspace {

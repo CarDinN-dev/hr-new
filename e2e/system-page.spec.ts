@@ -169,6 +169,23 @@ test("Admin can edit custom-role inheritance", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
 });
 
+test("Sidebar surfaces follow the selected theme", async ({ page }) => {
+  await installSystemApi(page);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("super.admin@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+
+  const color = (selector: string, property: "backgroundColor" | "color" | "backgroundImage") => page.locator(selector).evaluate((element, propertyName) => getComputedStyle(element)[propertyName], property);
+  await expect.poll(() => color(".sidebar", "backgroundColor")).toBe("rgb(255, 255, 255)");
+  await expect.poll(() => color(".account-trigger", "backgroundColor")).toBe("rgb(248, 250, 252)");
+  await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgba(0, 0, 0, 0)");
+
+  await page.getByLabel("Switch to dark mode").click();
+  await expect.poll(() => color(".sidebar", "backgroundImage")).toContain("linear-gradient");
+  await expect.poll(() => color(".account-trigger", "color")).toBe("rgb(255, 255, 255)");
+});
+
 test("Super Admin System controls submit mutations and protect invalid actions", async ({ page }) => {
   await loginAndOpenSystem(page);
   await expect(page.getByRole("button", { name: "Create user" })).toBeDisabled();
