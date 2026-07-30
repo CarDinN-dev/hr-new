@@ -42,6 +42,7 @@ export class AuthorizationService {
                 code: true,
                 protection: true,
                 permissions: { where: { permission: { isDeprecated: false } }, select: { permission: { select: { code: true } } } },
+                inheritedRoles: { select: { parentRole: { select: { permissions: { where: { permission: { isDeprecated: false } }, select: { permission: { select: { code: true } } } } } } } },
               },
             },
           },
@@ -79,6 +80,7 @@ export class AuthorizationService {
     for (const assignment of user.roles) {
       roles.add(assignment.role.code);
       for (const link of assignment.role.permissions) rolePermissions.add(link.permission.code);
+      for (const inherited of assignment.role.inheritedRoles) for (const link of inherited.parentRole.permissions) rolePermissions.add(link.permission.code);
     }
     const permissionOverrides = user.permissionOverrides.map((override) => ({
       permission: override.permission.code,

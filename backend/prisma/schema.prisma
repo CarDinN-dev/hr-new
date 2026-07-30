@@ -382,6 +382,8 @@ model Role {
   createdBy   User?            @relation("RoleCreator", fields: [createdById], references: [id], onDelete: SetNull)
   permissions RolePermission[]
   users       UserRole[]
+  inheritedRoles RoleInheritance[] @relation("RoleInheritanceChild")
+  childRoles     RoleInheritance[] @relation("RoleInheritanceParent")
 
   @@index([isActive])
   @@index([createdById])
@@ -420,6 +422,18 @@ model RolePermission {
   @@id([roleId, permissionId])
   @@index([permissionId])
   @@index([assignedById])
+}
+
+model RoleInheritance {
+  childRoleId  String
+  parentRoleId String
+  createdAt    DateTime @default(now())
+
+  childRole  Role @relation("RoleInheritanceChild", fields: [childRoleId], references: [id], onDelete: Cascade)
+  parentRole Role @relation("RoleInheritanceParent", fields: [parentRoleId], references: [id], onDelete: Cascade)
+
+  @@id([childRoleId, parentRoleId])
+  @@index([parentRoleId])
 }
 
 model UserRole {

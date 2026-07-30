@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import * as bcrypt from 'bcrypt';
-import { hasActiveSuperAdminRole } from '../../common/authorization';
+import { hasActiveSuperAdminRole, hasActiveSystemAdministratorRole } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -17,7 +17,7 @@ import { AuthorizationService } from '../authorization/authorization.service';
 import {
   AssignUserRolesDto, ChangeUserStatusDto, CreatePermissionOverrideDto, CreateRoleDto, CreateSystemUserDto,
   CreateWorkflowDelegationDto, QuerySystemSessionsDto, QuerySystemUsersDto,
-  ReplaceRolePermissionsDto, RevokePermissionOverrideDto, RevokeSystemSessionDto,
+  ReplaceRoleInheritanceDto, ReplaceRolePermissionsDto, RevokePermissionOverrideDto, RevokeSystemSessionDto,
   RevokeWorkflowDelegationDto, SystemMutationDto, UpdateRoleDto, UpdateSystemUserDto, UpdateWorkflowPolicyDto,
 } from './dto/system.dto';
 import { MicrosoftDirectoryProvisioningService } from './microsoft-directory-provisioning.service';
@@ -152,7 +152,9 @@ export class SystemService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const now = new Date();
-    const access = this.authorization.scopeRule(actor, 'user.read', AccessScopeType.ALL_SYSTEM);
+    const access = hasActiveSystemAdministratorRole(actor)
+      ? { unrestricted: true, includeIds: [] as string[], excludeIds: [] as string[] }
+      : this.authorization.scopeRule(actor, 'user.read', AccessScopeType.ALL_SYSTEM);
     const where: Prisma.UserWhereInput = {
       id: access.unrestricted
         ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined)
@@ -324,17 +326,19 @@ export class SystemService {
   }
 
   async listRoles(actor: RequestUser) {
-    const access = this.authorization.scopeRule(actor, 'role.read', AccessScopeType.ALL_SYSTEM);
+    const access = hasActiveSystemAdministratorRole(actor)
+      ? { unrestricted: true, includeIds: [] as string[], excludeIds: [] as string[] }
+      : this.authorization.scopeRule(actor, 'role.read', AccessScopeType.ALL_SYSTEM);
     const roles = await this.prisma.role.findMany({
       where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } },
       select: {
         id: true, code: true, displayName: true, description: true, isBuiltIn: true, protection: true,
         isActive: true, version: true, createdAt: true, updatedAt: true,
-        permissions: { select: { permission: true } }, _count: { select: { users: true } },
+        permissions: { select: { permission: true } }, inheritedRoles: { select: { parentRole: { select: { code: true } } } }, _count: { select: { users: true } },
       },
       orderBy: [{ isBuiltIn: 'desc' }, { code: 'asc' }],
     });
-    return roles.map((role) => ({ ...role, inherits: roleInheritance.get(role.code) ?? [] }));
+    return roles.map(({ inheritedRoles, ...role }) => ({ ...role, inherits: role.isBuiltIn ? roleInheritance.get(role.code) ?? [] : inheritedRoles.map((link) => link.parentRole.code) }));
   }
 
   createRole(dto: CreateRoleDto, actor: RequestUser) {
@@ -372,6 +376,44 @@ export class SystemService {
       await this.invalidateRoleUsers(tx, id);
       await this.audit.record(tx, actor, { action: AuditAction.UPDATE, resourceType: 'Role', resourceId: id, summary: 'Role updated', reason: dto.reason });
       return tx.role.findUniqueOrThrow({ where: { id } });
+    });
+  }
+
+  replaceRoleInheritance(id: string, dto: ReplaceRoleInheritanceDto, actor: RequestUser) {
+    if (!hasActiveSystemAdministratorRole(actor)) throw new ForbiddenException('Active Administrator role required');
+    return this.serializable(async (tx) => {
+      const role = await tx.role.findUnique({
+        where: { id },
+        select: {
+          id: true, code: true, version: true, isBuiltIn: true,
+          permissions: { select: { permission: { select: { code: true } } } },
+          inheritedRoles: { select: { parentRole: { select: { code: true, permissions: { select: { permission: { select: { code: true } } } } } } } },
+          users: { where: activeAssignmentWhere(new Date()), select: { userId: true } },
+        },
+      });
+      if (!role) throw new NotFoundException('Role not found');
+      if (role.isBuiltIn) throw new BadRequestException('Built-in roles are managed by the RBAC catalogue');
+      if (role.version !== dto.expectedVersion) throw new ConflictException('Role changed; refresh and retry');
+      const parents = await tx.role.findMany({
+        where: { id: { in: dto.parentRoleIds }, isBuiltIn: true, isActive: true },
+        select: { id: true, code: true, permissions: { select: { permission: { select: { code: true } } } } },
+      });
+      if (parents.length !== new Set(dto.parentRoleIds).size) throw new BadRequestException('Each inherited role must be an active built-in role');
+      const inheritedPermissions = new Set(parents.flatMap((parent) => parent.permissions.map((link) => link.permission.code)));
+      for (const link of role.permissions) inheritedPermissions.add(link.permission.code);
+      if (role.users.some((assignment) => assignment.userId === actor.id) && [...inheritedPermissions].some((permission) => !actor.permissions.includes(permission))) {
+        throw new ForbiddenException('Cannot increase permissions for a role assigned to yourself');
+      }
+      const updated = await tx.role.updateMany({ where: { id, version: dto.expectedVersion }, data: { version: { increment: 1 } } });
+      if (updated.count !== 1) throw new ConflictException('Role changed; refresh and retry');
+      await tx.roleInheritance.deleteMany({ where: { childRoleId: id } });
+      if (parents.length) await tx.roleInheritance.createMany({ data: parents.map((parent) => ({ childRoleId: id, parentRoleId: parent.id })) });
+      await this.invalidateRoleUsers(tx, id);
+      await this.audit.record(tx, actor, {
+        action: AuditAction.UPDATE, resourceType: 'RoleInheritance', resourceId: id, summary: 'Role inheritance replaced', reason: dto.reason,
+        before: { parentRoleCodes: role.inheritedRoles.map((link) => link.parentRole.code) }, after: { parentRoleCodes: parents.map((parent) => parent.code) },
+      });
+      return tx.role.findUniqueOrThrow({ where: { id }, select: { id: true, code: true, version: true } });
     });
   }
 
@@ -686,7 +728,7 @@ export class SystemService {
       where: { id: userId, deletedAt: null },
       select: {
         id: true, email: true, authorizationVersion: true,
-        roles: { where: activeAssignmentWhere(now), select: { role: { select: { id: true, code: true, displayName: true, protection: true, permissions: { select: { permission: true } } } } } },
+        roles: { where: activeAssignmentWhere(now), select: { role: { select: { id: true, code: true, displayName: true, protection: true, permissions: { select: { permission: true } }, inheritedRoles: { select: { parentRole: { select: { code: true, permissions: { select: { permission: true } } } } } } } } } },
         permissionOverrides: { where: { revokedAt: null, startsAt: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }, include: { permission: true } },
       },
     });
@@ -697,6 +739,10 @@ export class SystemService {
       for (const link of assignment.role.permissions) {
         const existing = permissions.get(link.permission.code);
         permissions.set(link.permission.code, { ...link.permission, sources: [...(existing?.sources ?? []), `role:${assignment.role.code}`] });
+      }
+      for (const inherited of assignment.role.inheritedRoles) for (const link of inherited.parentRole.permissions) {
+        const existing = permissions.get(link.permission.code);
+        permissions.set(link.permission.code, { ...link.permission, sources: [...(existing?.sources ?? []), `inheritance:${assignment.role.code}->${inherited.parentRole.code}`] });
       }
     }
     for (const override of user.permissionOverrides) {

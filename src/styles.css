@@ -2795,135 +2795,369 @@ summary {
 }
 
 .organization-chart {
-  overflow-x: auto;
-  padding: 0.5rem 0.25rem 0.25rem;
+  display: grid;
+  gap: 1rem;
+  padding-top: 0.35rem;
 }
 
-.organization-spine {
+.hierarchy-workflow-guide {
   display: grid;
-  justify-items: center;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--info) 22%, var(--line));
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--info-bg) 76%, transparent), color-mix(in srgb, var(--panel) 92%, transparent)),
+    var(--panel-2);
+}
+
+.hierarchy-workflow-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 1rem;
 }
 
-.organization-spine > .organization-node:not(:last-child)::after {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  width: 1px;
-  height: 1rem;
-  background: var(--line-strong);
-  content: "";
-}
-
-.organization-node {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 142px;
-  min-height: 72px;
-  padding: 0.75rem 1.8rem 0.75rem 1rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--ink);
-  text-align: center;
-}
-
-.organization-node strong,
-.organization-node span {
+.hierarchy-workflow-heading span,
+.hierarchy-workflow-heading strong {
   display: block;
 }
 
-.organization-node span {
-  max-width: 170px;
-  overflow: hidden;
+.hierarchy-workflow-heading span {
+  color: var(--info);
+  font-size: 0.66rem;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+}
+
+.hierarchy-workflow-heading strong {
+  margin-top: 0.1rem;
+  font-size: 0.94rem;
+}
+
+.hierarchy-workflow-heading p {
+  max-width: 32rem;
+  margin: 0;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.74rem;
+  text-align: right;
+}
+
+.hierarchy-role-flow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.hierarchy-role-stage {
+  position: relative;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+
+.hierarchy-role-stage > span,
+.hierarchy-role-stage > strong {
+  display: block;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.organization-node-add {
+.hierarchy-role-stage > span {
+  color: var(--info);
+  font-size: 0.62rem;
+  font-weight: 820;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.hierarchy-role-stage > strong {
+  margin-top: 0.16rem;
+  font-size: 0.73rem;
+}
+
+.hierarchy-role-stage > i {
   position: absolute;
-  right: -0.45rem;
-  bottom: -0.25rem;
+  top: 50%;
+  left: calc(100% + 0.11rem);
+  z-index: 1;
+  color: var(--line-strong);
+  font-size: 0.86rem;
+  font-style: normal;
+  transform: translateY(-50%);
+}
+
+.hierarchy-approval-routes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.hierarchy-approval-routes span {
+  padding: 0.55rem 0.65rem;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--soft) 74%, transparent);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.hierarchy-approval-routes strong {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--ink);
+  font-size: 0.65rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.organization-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.organization-overview span {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.organization-overview strong {
+  margin-right: 0.28rem;
+  color: var(--ink);
+  font-size: 0.96rem;
+}
+
+.organization-overview .has-issues {
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.organization-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.organization-search {
+  position: relative;
+}
+
+.organization-search svg {
+  position: absolute;
+  top: 50%;
+  left: 0.75rem;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.organization-search input {
+  width: 100%;
+  padding-left: 2.25rem;
+  background: var(--panel);
+}
+
+.organization-match-count {
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.organization-tree-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.organization-tree-actions button {
+  min-height: 38px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.7rem;
+}
+
+.organization-tree {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.organization-branch {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.organization-node {
+  display: grid;
+  grid-template-columns: 34px 42px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  min-height: 66px;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel);
+  box-shadow: 0 5px 18px rgba(17, 29, 44, 0.045);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.organization-node:hover {
+  border-color: color-mix(in srgb, var(--info) 34%, var(--line));
+  box-shadow: 0 10px 24px rgba(17, 29, 44, 0.08);
+  transform: translateY(-1px);
+}
+
+.organization-node-coo,
+.organization-node-cpo,
+.organization-node-hr {
+  border-left: 4px solid var(--info);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--info-bg) 72%, var(--panel)), var(--panel) 32%);
+}
+
+.organization-node-coo {
+  border-left-color: var(--red);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bad-bg) 54%, var(--panel)), var(--panel) 32%);
+}
+
+.organization-node-toggle,
+.organization-node-toggle-spacer {
+  width: 34px;
+  height: 34px;
+}
+
+.organization-node-toggle {
   display: grid;
   place-items: center;
-  width: 30px;
-  min-width: 30px;
-  min-height: 30px;
+  min-width: 34px;
+  min-height: 34px;
   padding: 0;
-  border-radius: 50%;
-  border-color: var(--red);
-  background: var(--red);
+  border-color: transparent;
+  border-radius: 9px;
+  background: var(--soft);
+  color: var(--muted);
+}
+
+.organization-node-toggle:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.organization-node-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, var(--navy-2), var(--navy));
   color: #fff;
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: 0.04em;
 }
 
-.organization-branches {
-  position: relative;
+.organization-node-copy {
+  min-width: 0;
+}
+
+.organization-node-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.organization-node-heading strong {
+  overflow: hidden;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-role-badge {
+  flex: 0 0 auto;
+  padding: 0.16rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--info) 24%, var(--line));
+  border-radius: 999px;
+  background: var(--info-bg);
+  color: var(--info);
+  font-size: 0.6rem;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.organization-node-meta {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.16rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-report-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.organization-node-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.organization-node-actions button {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  gap: 2.4rem;
-  width: max-content;
-  min-width: 100%;
-  margin-top: 2rem;
+  gap: 0.3rem;
+  min-height: 36px;
+  padding: 0.42rem 0.62rem;
+  font-size: 0.68rem;
 }
 
-.organization-branches::before {
-  position: absolute;
-  top: -1rem;
-  right: 7%;
-  left: 7%;
-  height: 1px;
-  background: var(--line-strong);
-  content: "";
+.organization-node-actions .organization-node-add {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--line));
+  color: var(--red);
 }
 
-.organization-manager-branch,
-.organization-line-branch {
+.organization-children {
   position: relative;
   display: grid;
-  justify-items: center;
-  gap: 1.5rem;
+  gap: 0.5rem;
+  margin-left: 1.05rem;
+  padding-left: 1.35rem;
+  border-left: 1px solid var(--line-strong);
 }
 
-.organization-manager-branch::before,
-.organization-line-branch::before {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  width: 1px;
-  height: 1rem;
-  background: var(--line-strong);
-  content: "";
-}
-
-.organization-children,
-.organization-employees {
+.organization-children > .organization-branch {
   position: relative;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1rem;
 }
 
-.organization-children::before,
-.organization-employees::before {
+.organization-children > .organization-branch::before {
   position: absolute;
-  top: -0.75rem;
-  right: 10%;
-  left: 10%;
+  top: 2rem;
+  left: -1.35rem;
+  width: 1.35rem;
   height: 1px;
   background: var(--line-strong);
   content: "";
-}
-
-.organization-employees .organization-node {
-  min-width: 118px;
-  min-height: 56px;
-  padding: 0.55rem 0.8rem;
 }
 
 .organization-empty {
@@ -2941,33 +3175,34 @@ summary {
   gap: 0.35rem;
 }
 
-.organization-unassigned {
-  max-width: 680px;
-  margin: 1.25rem auto 0;
+.organization-unresolved {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn-bg) 72%, var(--panel));
 }
 
-.organization-unassigned p {
+.organization-unresolved p {
   margin: 0.5rem 0;
   color: var(--muted);
   font-size: 0.76rem;
 }
 
-.organization-unassigned div {
-  display: flex;
-  flex-wrap: wrap;
+.organization-unresolved div {
+  display: grid;
   gap: 0.4rem;
 }
 
-.organization-unassigned span {
+.organization-unresolved span {
   padding: 0.3rem 0.55rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--panel-2);
   font-size: 0.72rem;
 }
 
 .hierarchy-access-note {
-  margin: 0.8rem 0 0;
+  margin: 0;
   text-align: center;
 }
 
@@ -3098,20 +3333,90 @@ summary {
     flex-direction: column;
   }
 
-  .organization-branches,
-  .organization-children,
-  .organization-employees {
+  .hierarchy-workflow-heading {
+    align-items: flex-start;
     flex-direction: column;
-    align-items: center;
-    width: 100%;
   }
 
-  .organization-branches::before,
-  .organization-children::before,
-  .organization-employees::before,
-  .organization-manager-branch::before,
-  .organization-line-branch::before {
+  .hierarchy-workflow-heading p {
+    text-align: left;
+  }
+
+  .hierarchy-role-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hierarchy-role-stage > i {
     display: none;
+  }
+
+  .hierarchy-approval-routes {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .organization-toolbar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .organization-search {
+    grid-column: 1 / -1;
+  }
+
+  .organization-node {
+    grid-template-columns: 28px 34px minmax(0, 1fr) auto;
+    gap: 0.4rem;
+    padding: 0.55rem;
+  }
+
+  .organization-node-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .organization-node-toggle,
+  .organization-node-toggle-spacer {
+    width: 28px;
+    height: 30px;
+  }
+
+  .organization-node-toggle {
+    min-width: 28px;
+    min-height: 30px;
+  }
+
+  .organization-report-count {
+    display: none;
+  }
+
+  .organization-node-actions button span {
+    display: none;
+  }
+
+  .organization-node-actions button {
+    width: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+  }
+
+  .organization-node-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .organization-children {
+    margin-left: 0.45rem;
+    padding-left: 0.55rem;
+  }
+
+  .organization-children > .organization-branch::before {
+    left: -0.55rem;
+    width: 0.55rem;
   }
 
   .role-branch-level {

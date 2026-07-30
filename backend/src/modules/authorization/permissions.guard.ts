@@ -4,7 +4,7 @@ import { Request } from 'express';
 import { ANY_PERMISSIONS_KEY, PAYROLL_ROLES_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } from '../../common/decorators/permissions.decorator';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
-import { hasActiveSuperAdminRole, hasActiveSystemAdministratorRole } from '../../common/authorization';
+import { hasActiveSuperAdminRole, hasActiveSystemAdministratorRole, hasPayrollRole } from '../../common/authorization';
 import { AuditAction, AuditOutcome } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -35,7 +35,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const payrollRoles = this.reflector.getAllAndOverride<string[]>(PAYROLL_ROLES_KEY, [context.getHandler(), context.getClass()]);
-    if (payrollRoles?.length && !request.user?.roles.some((role) => payrollRoles.includes(role))) {
+    if (payrollRoles?.length && (!request.user || !hasPayrollRole(request.user))) {
       await this.recordDenial(context, 'Payroll role required');
       throw new ForbiddenException('Payroll access is limited to HR, CPO, and COO roles');
     }

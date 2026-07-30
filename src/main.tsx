@@ -865,7 +865,7 @@ function pageDescription(nav: NavItem) {
     Documents: "HR letters and PDFs.",
     Reports: "Employee, attendance, leave and payroll reports.",
     Audit: "Security and business activity history.",
-    Hierarchy: "Role inheritance and the users assigned to each branch.",
+    Hierarchy: "Employee reporting lines, approval paths and role access.",
     System: "Users, access roles, permissions and sessions.",
     Settings: "Signed-in devices and company settings."
   };

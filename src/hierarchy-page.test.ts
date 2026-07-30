@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { hierarchyExecutiveRole, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyNodeRole, hierarchyReportingPayload, hierarchyUserParams } from "./features/hierarchy-page";
+import { buildOrganizationHierarchy, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams } from "./features/hierarchy-page";
+
+const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
+  id,
+  status: "Active" as const,
+  roleCodes,
+  fields: { "Employee Code": code, "Full Name": id, Designation: "Specialist", ...fields },
+});
 
 describe("hierarchy page requests", () => {
   it("combines direct-role filtering and sends versioned inheritance changes", () => {
@@ -7,10 +14,22 @@ describe("hierarchy page requests", () => {
     expect(hierarchyInheritancePayload({ role: { id: "role-custom", code: "CUSTOM", displayName: "Custom", version: 3, isBuiltIn: false, isActive: true, protection: "STANDARD", inherits: [] }, parentRoleIds: new Set(["role-employee", "role-hr"]), reason: "  Add inherited access  " })).toEqual({ parentRoleIds: ["role-employee", "role-hr"], expectedVersion: 3, reason: "Add inherited access" });
   });
 
-  it("classifies reporting nodes and reads their manager code", () => {
-    const employee = { id: "line-1", status: "Active" as const, fields: { Designation: "Line Manager", "Reporting Manager Employee Code/Name": "MGR-01 - Dana Ali" } };
-    expect(hierarchyNodeRole(employee)).toBe("LINE_MANAGER");
-    expect(hierarchyManagerCode(employee)).toBe("mgr-01");
+  it("builds the employee tree from reporting assignments instead of job titles", () => {
+    const hierarchy = buildOrganizationHierarchy([
+      employee("manager", "MGR-01", { Designation: "Commercial Director" }),
+      employee("line", "LINE-01", { Designation: "Workshop Foreman", "Manager Employee Code/Name": "MGR-01 - manager" }),
+      employee("staff", "EMP-01", { Designation: "Engineer", "Line Manager Employee Code/Name": "LINE-01 - line", "Manager Employee Code/Name": "MGR-01 - manager" }),
+      employee("fallback", "EMP-02", { "Line Manager Employee Code/Name": "MISSING - Missing", "Manager Employee Code/Name": "MGR-01 - manager" }),
+      employee("root", "ROOT-01"),
+    ]);
+
+    expect(hierarchy.roots.map(node => node.employee.id)).toEqual(["manager", "root"]);
+    const manager = hierarchy.roots[0];
+    expect(manager.role).toBe("MANAGER");
+    expect(manager.children.map(node => node.employee.id)).toEqual(["line", "fallback"]);
+    expect(manager.children[0]).toMatchObject({ role: "LINE_MANAGER", roleLabel: "Line manager" });
+    expect(manager.children[0].children[0].employee.id).toBe("staff");
+    expect(hierarchy.issues).toEqual([{ employee: expect.objectContaining({ id: "fallback" }), message: "Line Manager does not match another active employee." }]);
   });
 
   it("uses the dedicated links for manager and line-manager hierarchy levels", () => {
@@ -19,13 +38,46 @@ describe("hierarchy page requests", () => {
     } };
     expect(hierarchyLineManagerCode(employee)).toBe("line-01");
     expect(hierarchyManagerCode(employee)).toBe("mgr-01");
+    const legacyEmployee = { id: "employee-2", status: "Active" as const, fields: { "Reporting Manager Employee Code/Name": "LINE-02 - Legacy Lead" } };
+    expect(hierarchyLineManagerCode(legacyEmployee)).toBe("line-02");
+    expect(hierarchyManagerCode(legacyEmployee)).toBe("");
   });
 
-  it("treats executive employees as chart managers and saves both reporting links", () => {
-    expect(hierarchyNodeRole({ id: "coo-1", status: "Active", fields: { Designation: "Employee" }, roleCodes: ["COO"] })).toBe("MANAGER");
-    expect(hierarchyExecutiveRole({ id: "coo-1", status: "Active", fields: { Designation: "Chief Operating Officer" }, roleCodes: ["COO"] })).toBe("COO");
-    expect(hierarchyExecutiveRole({ id: "cpo-1", status: "Active", fields: { Designation: "CPO" }, roleCodes: ["CPO"] })).toBe("CPO");
-    expect(hierarchyExecutiveRole({ id: "not-coo", status: "Active", fields: { Designation: "COO" } })).toBeNull();
+  it("shows combined reporting roles and keeps every employee visible when a cycle exists", () => {
+    const hierarchy = buildOrganizationHierarchy([
+      employee("a", "A", { "Line Manager Employee Code/Name": "B - b" }),
+      employee("b", "B", { "Manager Employee Code/Name": "A - a" }),
+      employee("c", "C", { "Line Manager Employee Code/Name": "B - b" }),
+      employee("d", "D", { "Manager Employee Code/Name": "B - b" }),
+    ]);
+    const root = hierarchy.roots[0];
+    expect(root.employee.id).toBe("a");
+    expect(root.children[0]).toMatchObject({ employee: expect.objectContaining({ id: "b" }), roleLabel: "Manager / Line manager" });
+    expect([root.employee.id, root.children[0].employee.id, ...root.children[0].children.map(node => node.employee.id)].sort()).toEqual(["a", "b", "c", "d"]);
+    expect(hierarchy.issues).toContainEqual({ employee: expect.objectContaining({ id: "a" }), message: "Reporting cycle was broken here so every employee remains visible." });
+  });
+
+  it("shows active executive and HR roles without changing reporting placement", () => {
+    const hierarchy = buildOrganizationHierarchy([
+      employee("Hafiz", "TEMP-COO-HAFIZ", {}, ["COO"]),
+      employee("Ahmed", "MTC082", { "Line Manager Employee Code/Name": "TEMP-COO-HAFIZ - Hafiz" }),
+      employee("Zahira", "TEMP-CPO-ZAHIRA", { "Manager Employee Code/Name": "TEMP-COO-HAFIZ - Hafiz" }, ["CPO"]),
+      employee("Aboobacker", "MTC037", { "Line Manager Employee Code/Name": "TEMP-CPO-ZAHIRA - Zahira" }),
+      employee("Mukesh Krishna", "MTC158", {
+        "Line Manager Employee Code/Name": "TEMP-CPO-ZAHIRA - Zahira",
+        "Manager Employee Code/Name": "TEMP-CPO-ZAHIRA - Zahira",
+      }, ["HR"]),
+    ]);
+
+    const hafiz = hierarchy.roots[0];
+    expect(hafiz).toMatchObject({ employee: { id: "Hafiz" }, roleLabel: "COO" });
+    expect(hafiz.children.map(node => node.employee.id)).toEqual(["Zahira", "Ahmed"]);
+    expect(hafiz.children[0]).toMatchObject({ employee: { id: "Zahira" }, roleLabel: "CPO" });
+    expect(hafiz.children[0].children.map(node => node.employee.id)).toEqual(["Mukesh Krishna", "Aboobacker"]);
+    expect(hafiz.children[0].children[0]).toMatchObject({ employee: { id: "Mukesh Krishna" }, roleLabel: "HR" });
+  });
+
+  it("saves both reporting links", () => {
     expect(hierarchyReportingPayload("line-manager-1", "manager-1")).toEqual({ lineManagerId: "line-manager-1", managerId: "manager-1" });
     expect(hierarchyReportingPayload("", "")).toEqual({ lineManagerId: null, managerId: null });
   });

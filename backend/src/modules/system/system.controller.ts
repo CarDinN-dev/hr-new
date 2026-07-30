@@ -6,6 +6,7 @@ import { RequestUser } from '../../common/types/request-user.type';
 import {
   AssignUserRolesDto, ChangeUserStatusDto, CreateRoleDto, CreateSystemUserDto, QuerySystemSessionsDto, QuerySystemUsersDto,
   CreatePermissionOverrideDto, CreateWorkflowDelegationDto, ReplaceRolePermissionsDto,
+  ReplaceRoleInheritanceDto,
   RevokePermissionOverrideDto, RevokeSystemSessionDto, RevokeWorkflowDelegationDto,
   SystemMutationDto, UpdateRoleDto, UpdateSystemUserDto, UpdateWorkflowPolicyDto,
 } from './dto/system.dto';
@@ -18,7 +19,7 @@ import { SystemService } from './system.service';
 export class SystemController {
   constructor(private readonly system: SystemService) {}
 
-  @Permissions('user.read') @Get('users') users(@Query() query: QuerySystemUsersDto, @CurrentUser() user: RequestUser) { return this.system.listUsers(query, user); }
+  @Permissions('system.configure') @Get('users') users(@Query() query: QuerySystemUsersDto, @CurrentUser() user: RequestUser) { return this.system.listUsers(query, user); }
   @Permissions('user.manage') @Post('users') createUser(@Body() dto: CreateSystemUserDto, @CurrentUser() user: RequestUser) { return this.system.createUser(dto, user); }
   @Permissions('user.read') @Get('users/:id/effective-permissions') effectivePermissions(@Param('id') id: string, @CurrentUser() user: RequestUser) { return this.system.effectivePermissions(id, user); }
   @Permissions('user.manage') @Patch('users/:id') updateUser(@Param('id') id: string, @Body() dto: UpdateSystemUserDto, @CurrentUser() user: RequestUser) { return this.system.updateUser(id, dto, user); }
@@ -28,9 +29,10 @@ export class SystemController {
   @Permissions('permission.assign') @Post('users/:id/overrides') createOverride(@Param('id') id: string, @Body() dto: CreatePermissionOverrideDto, @CurrentUser() user: RequestUser) { return this.system.createOverride(id, dto, user); }
   @Permissions('permission.assign') @Post('users/:id/overrides/:overrideId/revoke') revokeOverride(@Param('id') id: string, @Param('overrideId') overrideId: string, @Body() dto: RevokePermissionOverrideDto, @CurrentUser() user: RequestUser) { return this.system.revokeOverride(id, overrideId, dto, user); }
 
-  @Permissions('role.read') @Get('roles') listRoles(@CurrentUser() user: RequestUser) { return this.system.listRoles(user); }
+  @Permissions('system.configure') @Get('roles') listRoles(@CurrentUser() user: RequestUser) { return this.system.listRoles(user); }
   @Permissions('role.manage') @Post('roles') createRole(@Body() dto: CreateRoleDto, @CurrentUser() user: RequestUser) { return this.system.createRole(dto, user); }
   @Permissions('role.manage') @Patch('roles/:id') updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto, @CurrentUser() user: RequestUser) { return this.system.updateRole(id, dto, user); }
+  @Permissions('system.configure') @Put('roles/:id/inheritance') replaceInheritance(@Param('id') id: string, @Body() dto: ReplaceRoleInheritanceDto, @CurrentUser() user: RequestUser) { return this.system.replaceRoleInheritance(id, dto, user); }
   @Permissions('role.manage') @Put('roles/:id/permissions') replacePermissions(@Param('id') id: string, @Body() dto: ReplaceRolePermissionsDto, @CurrentUser() user: RequestUser) { return this.system.replaceRolePermissions(id, dto, user); }
   @Permissions('role.manage') @Delete('roles/:id') deleteRole(@Param('id') id: string, @Body() dto: SystemMutationDto, @CurrentUser() user: RequestUser) { return this.system.deleteRole(id, dto, user); }
 

@@ -12,16 +12,18 @@ const roles: Role[] = [
   { id: "role-employee", code: "EMPLOYEE", displayName: "Employee", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: [], permissions: [] },
   { id: "role-hr", code: "HR", displayName: "HR", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: ["EMPLOYEE"], permissions: [] },
   { id: "role-super-admin", code: "SUPER_ADMIN", displayName: "Super Administrator", version: 1, isBuiltIn: true, isActive: true, protection: "SUPER_ADMIN", inherits: ["EMPLOYEE", "HR"], permissions: [] },
+  { id: "role-custom", code: "CUSTOM_VIEWER", displayName: "Custom Viewer", version: 1, isBuiltIn: false, isActive: true, protection: "STANDARD", inherits: [], permissions: [] },
 ];
 
 function envelope(data: unknown, meta?: unknown) {
   return { success: true, data, ...(meta === undefined ? {} : { meta }) };
 }
 
-async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"]) {
+async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], userCount = 2) {
   const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
   const target: User = { id: "target-user", email: "target@example.invalid", isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[1] }], permissionOverrides: [] };
   const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[2] }], permissionOverrides: [] }];
+  users.push(...Array.from({ length: Math.max(0, userCount - users.length) }, (_, index) => ({ id: `user-${index + 1}`, email: `user-${index + 1}@example.invalid`, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[1] }], permissionOverrides: [] })));
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
     { id: "policy-cpo", workflowType: "LEAVE", stage: "CPO", mode: "PRIMARY_APPROVER", version: 1, primaryUser: { id: admin.id, email: admin.email }, members: [] },
@@ -41,7 +43,10 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"]) {
     if (path === "/system/users" && request.method() === "GET") {
       const search = url.searchParams.get("search")?.toLowerCase();
       const roleId = url.searchParams.get("roleId");
-      return json(users.filter(user => (!search || user.email.toLowerCase().includes(search)) && (!roleId || user.roles.some(item => item.role.id === roleId))));
+      const pageNumber = Number(url.searchParams.get("page") || "1");
+      const limit = Number(url.searchParams.get("limit") || "20");
+      const matches = users.filter(user => (!search || user.email.toLowerCase().includes(search)) && (!roleId || user.roles.some(item => item.role.id === roleId)));
+      return json(matches.slice((pageNumber - 1) * limit, pageNumber * limit), 200, { total: matches.length, page: pageNumber, limit, totalPages: Math.ceil(matches.length / limit) || 1 });
     }
     if (path === "/system/roles" && request.method() === "GET") return json(roles);
     if (path === "/system/permissions") return json(permissions);
@@ -60,6 +65,12 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"]) {
       const created: Role = { id: "role-custom", code: String(body?.code), displayName: String(body?.displayName), version: 1, isBuiltIn: false, isActive: true, protection: "STANDARD", inherits: [], permissions: [] };
       roles.push(created);
       return json(created, 201);
+    }
+    if (path === "/system/roles/role-custom/inheritance" && request.method() === "PUT") {
+      const custom = roles.find(role => role.id === "role-custom")!;
+      custom.inherits = (body?.parentRoleIds as string[] ?? []).map(id => roles.find(role => role.id === id)?.code).filter((code): code is string => Boolean(code));
+      custom.version += 1;
+      return json(custom);
     }
     if (path === `/system/users/${target.id}/status`) {
       target.isActive = body?.isActive === true; target.authorizationVersion += 1;
@@ -87,6 +98,26 @@ async function loginAndOpenSystem(page: Page) {
   await page.getByRole("link", { name: "System" }).click();
   await expect(page.getByRole("heading", { name: "Create login user" })).toBeVisible();
 }
+
+test("Users and access paginates at 15 and supports 50 per page", async ({ page }) => {
+  await installSystemApi(page, ["SUPER_ADMIN"], 16);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("super.admin@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "System" }).click();
+
+  const usersPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Users and access" }) });
+  await expect(usersPanel.getByText("Page 1 of 2 · 16 users")).toBeVisible();
+  await expect(usersPanel.getByRole("button", { name: "Previous" })).toBeDisabled();
+  await usersPanel.getByRole("button", { name: "Next" }).click();
+  await expect(usersPanel.getByText("Page 2 of 2 · 16 users")).toBeVisible();
+  await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
+
+  await usersPanel.getByLabel("Users per page").selectOption("50");
+  await expect(usersPanel.getByText("Page 1 of 1 · 16 users")).toBeVisible();
+  await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
+});
 
 test("Super Admin can create a local account without Entra provisioning", async ({ page }) => {
   await loginAndOpenSystem(page);
@@ -127,6 +158,17 @@ test("Hierarchy is hidden and denied for non-administrators", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Access not available" })).toBeVisible();
 });
 
+test("Admin can edit custom-role inheritance", async ({ page }) => {
+  await installSystemApi(page, ["ADMIN"]);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("super.admin@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Hierarchy" }).click();
+  await page.getByRole("button", { name: "Edit hierarchy" }).click();
+  await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
+});
+
 test("Super Admin System controls submit mutations and protect invalid actions", async ({ page }) => {
   await loginAndOpenSystem(page);
   await expect(page.getByRole("button", { name: "Create user" })).toBeDisabled();
@@ -135,6 +177,14 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await page.getByRole("link", { name: "Hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Role hierarchy" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit hierarchy" }).click();
+  await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
+  await page.getByRole("checkbox", { name: "HR", exact: true }).check();
+  await page.getByLabel("Reason").fill("Custom role needs HR visibility");
+  const hierarchySaved = page.waitForRequest(request => request.url().endsWith("/api/v1/system/roles/role-custom/inheritance") && request.method() === "PUT");
+  await page.getByRole("button", { name: "Save hierarchy" }).click();
+  expect(JSON.parse((await hierarchySaved).postData() || "{}")).toMatchObject({ parentRoleIds: ["role-hr"], expectedVersion: 1, reason: "Custom role needs HR visibility" });
+  await expect(page.getByText("Role inheritance updated. Affected sessions were revoked.")).toBeVisible();
   const roleFiltered = page.waitForRequest(request => request.url().includes("/api/v1/system/users?") && request.url().includes("roleId=role-hr"));
   await page.getByRole("button", { name: "Filter users by HR role" }).click();
   await roleFiltered;

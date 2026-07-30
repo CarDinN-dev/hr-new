@@ -37,6 +37,10 @@ describe("System route authorization", () => {
     expect(canAccessRoute(admin, "Settings")).toBe(true);
   });
 
+  it("allows Super Administrators to access Payroll", () => {
+    expect(canAccessRoute(session(["SUPER_ADMIN"], ["payroll.read"]), "Payroll")).toBe(true);
+  });
+
   it("allows employee Settings for signed-in device management", () => {
     expect(canAccessRoute(session(["EMPLOYEE"], ["session.self.read"]), "Settings")).toBe(true);
   });

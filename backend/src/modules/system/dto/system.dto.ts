@@ -55,6 +55,10 @@ export class UpdateRoleDto extends SystemMutationDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+export class ReplaceRoleInheritanceDto extends SystemMutationDto {
+  @ApiProperty({ type: [String], maxItems: 8 }) @IsArray() @ArrayMaxSize(8) @ArrayUnique() @IsUUID('4', { each: true }) parentRoleIds: string[];
+}
+
 export class ReplaceRolePermissionsDto extends SystemMutationDto {
   @ApiProperty({ type: [String] }) @IsArray() @ArrayUnique() @IsUUID('4', { each: true }) permissionIds: string[];
 }

@@ -13,6 +13,7 @@ const {
 const { HttpExceptionFilter } = require('../dist/common/filters/http-exception.filter');
 const { listArgs } = require('../dist/common/utils/crud.util');
 const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto');
+const { ReplaceRoleInheritanceDto } = require('../dist/modules/system/dto/system.dto');
 const { PermissionsGuard } = require('../dist/modules/authorization/permissions.guard');
 const { AuthorizationService } = require('../dist/modules/authorization/authorization.service');
 const { AttendanceService } = require('../dist/modules/attendance/attendance.service');
@@ -142,10 +143,10 @@ test('permissions guard is default-deny and implements all/any without an admini
   assert.equal(await guard({ any: ['payroll.generate', 'leave.self.read'] }).canActivate(executionContext(actor)), true);
 });
 
-test('payroll access is limited to HR, CPO, and COO regardless of permission grants', async () => {
+test('payroll access is limited to payroll roles and Super Administrators regardless of permission grants', async () => {
   const guard = new PermissionsGuard(reflector({ all: ['payroll.read'], payrollRoles: ['HR', 'CPO', 'COO'] }), {}, audit);
   await assert.rejects(guard.canActivate(executionContext(user({ roles: ['ADMIN'], permissions: ['payroll.read'] }))), /Payroll access is limited/);
-  await assert.rejects(guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: true, permissions: ['payroll.read'] }))), /Payroll access is limited/);
+  assert.equal(await guard.canActivate(executionContext(user({ roles: ['SUPER_ADMIN'], isSuperAdmin: true, permissions: ['payroll.read'] }))), true);
   assert.equal(await guard.canActivate(executionContext(user({ roles: ['HR'], permissions: ['payroll.read'] }))), true);
   assert.equal(await guard.canActivate(executionContext(user({ roles: ['CPO'], permissions: ['payroll.read'] }))), true);
 });
@@ -187,6 +188,70 @@ test('System APIs require an active ADMIN or SUPER_ADMIN role before endpoint pe
   assert.equal(await guard.canActivate(executionContext(user({
     roles: ['SUPER_ADMIN'], isSuperAdmin: true, permissions: ['user.read'], rolePermissions: ['user.read'],
   }))), true);
+  assert.deepEqual(Reflect.getMetadata(PERMISSIONS_KEY, SystemController.prototype.replaceInheritance), ['system.configure']);
+});
+
+test('custom-role inheritance payload accepts only a bounded unique UUID list', () => {
+  const valid = plainToInstance(ReplaceRoleInheritanceDto, {
+    parentRoleIds: ['11111111-1111-4111-8111-111111111111'], expectedVersion: 1, reason: 'Add inherited access',
+  });
+  assert.equal(validateSync(valid).length, 0);
+  const invalid = plainToInstance(ReplaceRoleInheritanceDto, {
+    parentRoleIds: ['not-a-uuid', 'not-a-uuid'], expectedVersion: 1, reason: 'Add inherited access',
+  });
+  assert.ok(validateSync(invalid).some((error) => error.property === 'parentRoleIds'));
+});
+
+test('custom-role inheritance is versioned, audited, and invalidates affected sessions', async () => {
+  const calls = { deleted: false, parents: [], users: [], sessions: [], notifications: [], audits: [] };
+  const customRole = {
+    id: 'custom-role', code: 'CUSTOM_REPORTER', version: 2, isBuiltIn: false,
+    permissions: [], inheritedRoles: [{ parentRole: { code: 'EMPLOYEE', permissions: [] } }], users: [{ userId: 'affected-user' }],
+  };
+  const tx = {
+    role: {
+      findUnique: async () => customRole,
+      findMany: async () => [{ id: 'parent-role', code: 'HR', permissions: [{ permission: { code: 'employee.hr.read' } }] }],
+      updateMany: async () => ({ count: 1 }),
+      findUniqueOrThrow: async () => ({ id: 'custom-role', code: 'CUSTOM_REPORTER', version: 3 }),
+    },
+    roleInheritance: {
+      deleteMany: async () => { calls.deleted = true; },
+      createMany: async ({ data }) => { calls.parents = data; },
+    },
+    userRole: { findMany: async () => [{ userId: 'affected-user' }] },
+    user: { updateMany: async ({ where }) => { calls.users.push(where.id.in); } },
+    authSession: { updateMany: async ({ where }) => { calls.sessions.push(where.userId.in); } },
+    notification: { createMany: async ({ data }) => { calls.notifications = data; } },
+  };
+  const auditRecorder = { record: async (_tx, _actor, event) => { calls.audits.push(event); } };
+  const service = new SystemService({ $transaction: async (operation) => operation(tx) }, auditRecorder, authorizationStub(), { get: (_key, fallback) => fallback });
+  const actor = user({ roles: ['ADMIN'], permissions: ['system.configure'] });
+  const result = await service.replaceRoleInheritance('custom-role', {
+    parentRoleIds: ['11111111-1111-4111-8111-111111111111'], expectedVersion: 2, reason: 'Add HR reporting access',
+  }, actor);
+  assert.deepEqual(result, { id: 'custom-role', code: 'CUSTOM_REPORTER', version: 3 });
+  assert.equal(calls.deleted, true);
+  assert.deepEqual(calls.parents, [{ childRoleId: 'custom-role', parentRoleId: 'parent-role' }]);
+  assert.deepEqual(calls.users, [['affected-user']]);
+  assert.deepEqual(calls.sessions, [['affected-user']]);
+  assert.equal(calls.notifications.length, 1);
+  assert.deepEqual(calls.audits[0].before, { parentRoleCodes: ['EMPLOYEE'] });
+  assert.deepEqual(calls.audits[0].after, { parentRoleCodes: ['HR'] });
+});
+
+test('custom-role inheritance rejects built-in targets, invalid parents, stale versions, and self escalation', async () => {
+  const actor = user({ roles: ['ADMIN'], permissions: ['system.configure'] });
+  const makeService = (role, parents) => new SystemService({
+    $transaction: async (operation) => operation({
+      role: { findUnique: async () => role, findMany: async () => parents, updateMany: async () => ({ count: 1 }) },
+    }),
+  }, audit, authorizationStub(), { get: (_key, fallback) => fallback });
+  const dto = { parentRoleIds: ['11111111-1111-4111-8111-111111111111'], expectedVersion: 2, reason: 'Add access safely' };
+  await assert.rejects(makeService({ id: 'built-in', version: 2, isBuiltIn: true }, []).replaceRoleInheritance('built-in', dto, actor), /Built-in roles/);
+  await assert.rejects(makeService({ id: 'custom', version: 2, isBuiltIn: false, permissions: [], inheritedRoles: [], users: [] }, []).replaceRoleInheritance('custom', dto, actor), /active built-in/);
+  await assert.rejects(makeService({ id: 'custom', version: 1, isBuiltIn: false, permissions: [], inheritedRoles: [], users: [] }, []).replaceRoleInheritance('custom', dto, actor), /Role changed/);
+  await assert.rejects(makeService({ id: 'custom', version: 2, isBuiltIn: false, permissions: [], inheritedRoles: [], users: [{ userId: actor.id }] }, [{ id: 'parent', code: 'SUPER_ADMIN', permissions: [{ permission: { code: 'role.manage' } }] }]).replaceRoleInheritance('custom', dto, actor), /assigned to yourself/);
 });
 
 test('authorization context unions roles, applies direct denies, and preserves the Super Admin exception', async () => {
@@ -194,8 +259,8 @@ test('authorization context unions roles, applies direct denies, and preserves t
     id: 'user-1', email: 'user@example.invalid', isActive: true, deletedAt: null, authorizationVersion: 4,
     employee: { id: 'employee-1', firstName: 'Test', lastName: 'User', deletedAt: null, managedDepartments: [{ id: 'department-1' }] },
     roles: [
-      { role: { code: 'EMPLOYEE', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.self.read' } }] } },
-      { role: { code: 'LINE_MANAGER', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.team.read' } }] } },
+      { role: { code: 'EMPLOYEE', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.self.read' } }], inheritedRoles: [] } },
+      { role: { code: 'LINE_MANAGER', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.team.read' } }], inheritedRoles: [] } },
     ],
     permissionOverrides: [{ permission: { code: 'employee.team.read' }, effect: PermissionOverrideEffect.DENY, scopeType: AccessScopeType.ALL_SYSTEM, scopeIds: [] }],
   };
@@ -211,10 +276,26 @@ test('authorization context unions roles, applies direct denies, and preserves t
   assert.deepEqual(context.departmentScopeIds, ['department-1']);
 
   record = structuredClone(baseRecord);
-  record.roles.push({ role: { code: 'SUPER_ADMIN', protection: RoleProtection.SUPER_ADMIN, permissions: [{ permission: { code: 'employee.team.read' } }] } });
+  record.roles.push({ role: { code: 'SUPER_ADMIN', protection: RoleProtection.SUPER_ADMIN, permissions: [{ permission: { code: 'employee.team.read' } }], inheritedRoles: [] } });
   const superContext = service.toRequestUser(await service.loadUserContext('user-1'), { id: 'session-2', csrfToken: 'csrf', provider: 'local' });
   assert.equal(superContext.isSuperAdmin, true);
   assert.equal(superContext.permissions.includes('employee.team.read'), true);
+});
+
+test('authorization context includes permissions inherited by custom roles', async () => {
+  const record = {
+    id: 'user-1', email: 'user@example.invalid', isActive: true, deletedAt: null, authorizationVersion: 1,
+    employee: null,
+    roles: [{ role: {
+      code: 'CUSTOM_REPORTER', protection: RoleProtection.STANDARD,
+      permissions: [{ permission: { code: 'report.read' } }],
+      inheritedRoles: [{ parentRole: { permissions: [{ permission: { code: 'employee.self.read' } }] } }],
+    } }],
+    permissionOverrides: [],
+  };
+  const service = new AuthorizationService({ user: { findUnique: async () => record } });
+  const context = service.toRequestUser(await service.loadUserContext('user-1'), { id: 'session-1', csrfToken: 'csrf', provider: 'local' });
+  assert.deepEqual(context.rolePermissions, ['employee.self.read', 'report.read']);
 });
 
 test('resource-scoped denies beat grants and out-of-scope employee records return 404', async () => {
