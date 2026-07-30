@@ -123,6 +123,16 @@ describe("employee sheet import", () => {
     }));
   });
 
+  it("accepts an optional date of birth in master-data workbooks", () => {
+    const headers = ["No", "Master Data Name", "WPS Sponsor", "Working Company", "Designation", "LOB", "Date of Birth", "Date of Joining", "Gender", "Basic", "HRA", "Conveyance", "Mobile", "Food", "Fuel", "Other", "Gross Salary"];
+    const imported = parseEmployeeWorkbookRows([headers, [
+      "MTC201", "Employee Three", "Medtech", "Medtech", "Analyst", "Medical", "15/04/1992", "2025-01-01", "Female", "1000", "0", "0", "0", "0", "0", "0", "1000",
+    ]]);
+
+    expect(imported.errors).toEqual([]);
+    expect(imported.rows[0]).toEqual(expect.objectContaining({ "Date of Birth": "1992-04-15" }));
+  });
+
   it("opens the exact downloadable .xlsx template through the browser file path", async () => {
     const bytes = await readFile("public/templates/MedTech-Employee-Import-Template.xlsx");
     const buffer = new Uint8Array(bytes).buffer;

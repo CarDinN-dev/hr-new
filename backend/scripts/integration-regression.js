@@ -109,6 +109,22 @@ function assertManagerProjection(employee) {
   ]) assert.equal(Object.hasOwn(employee, field), false, `manager projection exposed ${field}`);
 }
 
+function qatarDay() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Qatar', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const part = (type) => Number(parts.find((item) => item.type === type)?.value);
+  return new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+}
+
+function addDays(date, days) {
+  const result = new Date(date);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+function birthdayFor(date) {
+  return new Date(Date.UTC(2000, date.getUTCMonth(), date.getUTCDate()));
+}
+
 test('real Nest application enforces production RBAC and workflow invariants', { timeout: 360_000 }, async (t) => {
   const { schema, adminUrl, databaseUrl } = databaseUrls();
   const storageDirectory = path.resolve(backendDirectory, `.integration-storage-${schema}`);
@@ -226,6 +242,26 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(missingCsrf.status, 403);
   assert.equal((await api('/auth/me', {}, sessions.EMPLOYEE)).status, 200);
 
+  const today = qatarDay();
+  const tomorrow = addDays(today, 1);
+  const cutoff = addDays(today, 30);
+  const outsideWindow = addDays(today, 31);
+  await Promise.all([
+    prisma.employee.update({ where: { id: sessions.EMPLOYEE.user.employeeId }, data: { dateOfBirth: birthdayFor(today) } }),
+    prisma.employee.update({ where: { id: sessions.LINE_MANAGER.user.employeeId }, data: { dateOfBirth: birthdayFor(tomorrow) } }),
+    prisma.employee.update({ where: { id: sessions.MANAGER.user.employeeId }, data: { dateOfBirth: birthdayFor(cutoff), employmentStatus: 'ON_LEAVE' } }),
+    prisma.employee.update({ where: { id: sessions.HR.user.employeeId }, data: { dateOfBirth: birthdayFor(outsideWindow) } }),
+    prisma.employee.update({ where: { id: sessions.CPO.user.employeeId }, data: { dateOfBirth: birthdayFor(today), employmentStatus: 'RESIGNED' } }),
+  ]);
+  const birthdayFeed = await api('/employees/upcoming-birthdays', {}, sessions.EMPLOYEE);
+  assert.equal(birthdayFeed.status, 200);
+  assert.deepEqual(birthdayFeed.data.map((item) => item.id), [sessions.EMPLOYEE.user.employeeId, sessions.LINE_MANAGER.user.employeeId, sessions.MANAGER.user.employeeId]);
+  assert.deepEqual(birthdayFeed.data.map((item) => item.daysUntil), [0, 1, 30]);
+  assert.deepEqual(Object.keys(birthdayFeed.data[0]).sort(), ['date', 'daysUntil', 'department', 'firstName', 'id', 'lastName', 'profilePhoto'].sort());
+  const { EmployeesService } = require('../dist/modules/employees/employees.service');
+  const birthdayService = new EmployeesService({}, {}, {});
+  assert.equal(birthdayService.birthdayInYear(new Date('2000-02-29T00:00:00.000Z'), 2025).toISOString().slice(0, 10), '2025-02-28');
+
   const systemAdmin = sessions.SUPER_ADMIN;
   const masterDataRow = (employeeCode, overrides = {}) => ({
     employeeCode, fullName: 'Master Data Employee', company: 'Medtech', wpsSponsor: 'Medtech', designation: 'Master Data Analyst', department: 'Master Data Testing',
@@ -234,7 +270,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   });
   assert.equal((await api('/employees/import-master-data', { method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-DENIED')] } }, sessions.EMPLOYEE)).status, 403);
   const importedMasterData = await api('/employees/import-master-data', {
-    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1', { lineManager: 'MTC-IMPORT-2', manager: 'Master Data Two' }), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
+    method: 'POST', body: { rows: [masterDataRow('MTC-IMPORT-1', { dateOfBirth: '1990-04-15', lineManager: 'MTC-IMPORT-2', manager: 'Master Data Two' }), masterDataRow('MTC-IMPORT-2', { fullName: 'Master Data Two' })] },
   }, systemAdmin);
   assert.equal(importedMasterData.status, 201, JSON.stringify(importedMasterData.payload));
   assert.deepEqual(importedMasterData.data, { created: 2, updated: 0, relationshipUpdates: 1, departments: 1, positions: 1 });
@@ -243,6 +279,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(importedEmployee.position.title, 'Master Data Analyst');
   assert.equal(importedEmployee.profile.wpsSponsor, 'Medtech');
   assert.equal(importedEmployee.benefits.companyFuel, true);
+  assert.equal(importedEmployee.dateOfBirth.toISOString().slice(0, 10), '1990-04-15');
   assert.equal(importedEmployee.salaryRecords[0].grossAdjustment.toFixed(2), '1200.00');
   const importedManager = await prisma.employee.findUniqueOrThrow({ where: { employeeCode: 'MTC-IMPORT-2' } });
   assert.equal(importedEmployee.lineManagerId, importedManager.id);
@@ -257,6 +294,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   }, systemAdmin);
   assert.equal(reimportedMasterData.status, 201, JSON.stringify(reimportedMasterData.payload));
   assert.deepEqual(reimportedMasterData.data, { created: 0, updated: 2, relationshipUpdates: 0, departments: 1, positions: 1 });
+  assert.equal((await prisma.employee.findUniqueOrThrow({ where: { employeeCode: 'MTC-IMPORT-1' } })).dateOfBirth.toISOString().slice(0, 10), '1990-04-15');
   assert.equal(await prisma.employee.count({ where: { employeeCode: { in: ['MTC-IMPORT-1', 'MTC-IMPORT-2'] } } }), 2);
   assert.equal((await prisma.salaryRecord.findFirstOrThrow({ where: { employeeId: importedEmployee.id, deletedAt: null } })).grossAdjustment.toFixed(2), '1400.00');
   const failedImport = await api('/employees/import-master-data', {

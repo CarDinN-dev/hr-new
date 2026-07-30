@@ -28,6 +28,12 @@ export class EmployeesController {
     return this.employeesService.importMasterData(dto, user);
   }
 
+  @Permissions('session.self.read')
+  @Get('upcoming-birthdays')
+  upcomingBirthdays() {
+    return this.employeesService.upcomingBirthdays();
+  }
+
   @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
   @Get()
   list(@Query() query: QueryEmployeesDto, @CurrentUser() user: RequestUser) {

@@ -93,7 +93,6 @@ import {
   setLoanDeductionOverride,
   todayISO,
   tripTotal,
-  upcomingBirthdays,
   upsertEmployee
 } from "./domain";
 import {
@@ -412,6 +411,7 @@ function App() {
         setBackendSession(nextSession);
       }
       queryClient.setQueryData(workspaceQueryKey(nextSession), { state: hydrated });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard-birthdays"] });
       setSyncError("");
       return nextSession;
     });
@@ -432,6 +432,7 @@ function App() {
     stateRef.current = hydrated;
     setState(hydrated);
     queryClient.setQueryData(workspaceQueryKey(session), { state: hydrated });
+    await queryClient.invalidateQueries({ queryKey: ["dashboard-birthdays"] });
   }
 
   function savePdf(file: GeneratedPdf | undefined, _template: PdfTemplate, _employeeId = "") {
@@ -714,6 +715,7 @@ type DashboardAttendanceReport = { summary: { totalRecords: number; byStatus: Re
 type DashboardLeave = { id: string; status: string; startDate: string; endDate: string; totalDays: string; employee: { firstName: string; lastName: string }; leaveType: { name: string } };
 type DashboardPayrollRun = { id: string; year: number; month: number; status: string; _count?: { payrolls: number } };
 type DashboardPayslip = { id: string; netPay: string };
+type DashboardBirthday = { id: string; firstName: string; lastName: string; department: string | null; profilePhoto: string | null; date: string; daysUntil: number };
 
 function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
   const active = activeEmployees(state.employees);
@@ -728,6 +730,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const currentYear = new Date().getFullYear(); const currentMonth = new Date().getMonth() + 1;
   const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
   const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasPermission(session, "payroll.payslip.read_all") });
+  const birthdays = useQuery({ queryKey: ["dashboard-birthdays", session.sessionId, session.authorizationVersion], queryFn: () => apiRequest<DashboardBirthday[]>("/employees/upcoming-birthdays") });
   const attendanceSummary = attendance.data?.summary;
   const byStatus = attendanceSummary?.byStatus;
   const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendanceSummary.totalRecords) } : fallbackAttendance;
@@ -742,7 +745,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
     count: active.filter(employee => employee.fields.Department === department).length
   })).filter(item => item.count > 0);
   const maxHeadcount = Math.max(1, ...headcount.map(item => item.count));
-  const birthdays = upcomingBirthdays(state.employees, 30);
+  const upcomingBirthdays = birthdays.data ?? [];
   const recentJoiners = [...state.employees]
     .sort((a, b) => (b.fields["Joining Date"] || "").localeCompare(a.fields["Joining Date"] || ""))
     .slice(0, 6);
@@ -805,15 +808,17 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
 
       <section className="two-col dashboard-secondary">
         <div className="panel">
-          <div className="panel-head"><h3>Birthdays - next 30 days</h3><span>{birthdays.length} upcoming</span></div>
-          {birthdays.length ? (
+          <div className="panel-head"><h3>Birthdays - next 30 days</h3><span>{upcomingBirthdays.length} upcoming</span></div>
+          {birthdays.isPending ? <div className="empty">Loading birthdays…</div>
+            : birthdays.isError ? <div className="empty">Birthdays could not be loaded.</div>
+            : upcomingBirthdays.length ? (
             <div className="event-list">
-              {birthdays.slice(0, 8).map(item => (
-                <div className="event-row" key={item.employee.id}>
-                  <EmployeeAvatar employee={item.employee} small />
+              {upcomingBirthdays.slice(0, 8).map(item => (
+                <div className="event-row" key={item.id}>
+                  <span className="avatar small">{item.profilePhoto ? <img src={item.profilePhoto} alt="" /> : `${item.firstName} ${item.lastName}`.split(/\s+/).slice(0, 2).map(name => name[0]).join("").toUpperCase()}</span>
                   <div>
-                    <strong>{employeeName(item.employee)}</strong>
-                    <span>{item.employee.fields.Department || "Unassigned"}</span>
+                    <strong>{`${item.firstName} ${item.lastName}`.trim()}</strong>
+                    <span>{item.department || "Unassigned"}</span>
                   </div>
                   <Badge value={item.daysUntil === 0 ? "Today" : formatDate(item.date).replace(/\s\d{4}$/, "")} />
                 </div>
@@ -1098,7 +1103,7 @@ function EmployeeMasterDataImportPreview({ rows, errors, existingEmployeeCodes, 
 function masterDataImportRow(row: Record<string, string>) {
   return {
     employeeCode: row["Employee Code"], fullName: row["Full Name"], company: row.Company, wpsSponsor: row["WPS Sponsor"], designation: row.Designation,
-    department: row.Department, joiningDate: row["Joining Date"], gender: row.Gender, basic: row.Basic, hra: row.HRA,
+    department: row.Department, joiningDate: row["Joining Date"], dateOfBirth: row["Date of Birth"] || undefined, gender: row.Gender, basic: row.Basic, hra: row.HRA,
     conveyance: row["Conveyance Allowance"], mobile: row["Mobile Allowance"], food: row["Food Allowance"], fuel: row["Fuel Allowance"], other: row["Other Allowance"],
     grossSalary: row.Total, lineManager: row["Line Manager Employee Code/Name"] || undefined, manager: row["Manager Employee Code/Name"] || undefined,
     companyConveyance: row["Company Conveyance"] === "Yes", companyFuel: row["Company Fuel"] === "Yes", companyOther: row["Company Other"] === "Yes"

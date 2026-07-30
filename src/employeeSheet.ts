@@ -253,6 +253,8 @@ const masterDataHeaderAliases: Record<typeof masterDataHeaders[number], string[]
   "GROSS SALARY": ["grosssalary", "total"],
 };
 
+const masterDataDateOfBirthAliases = ["dateofbirth", "dob"];
+
 function isEmployeeTemplate(headers: string[]) {
   return headers.length >= employeeTemplateColumns.length && employeeTemplateColumns.every((column, index) => (
     normalizedHeader(headers[index]) === normalizedHeader(column.header)
@@ -294,12 +296,16 @@ function parseMasterDataWorkbook(headers: string[], body: ReadonlyArray<Readonly
     const department = value("LOB").trim();
     const joiningDate = normalizedDate(value("Date of Joining"));
     const gender = value("Gender").trim();
+    const dateOfBirthIndex = masterDataDateOfBirthAliases.map((alias) => headerIndexes.get(alias)).find((column): column is number => column !== undefined);
+    const dateOfBirthValue = dateOfBirthIndex === undefined ? "" : values[dateOfBirthIndex] ?? "";
+    const dateOfBirth = dateOfBirthValue.trim() ? normalizedDate(dateOfBirthValue) : "";
     if (!named) errors.push(`Row ${rowNumber} was skipped because Master Data Name is blank.`);
     if (!company) errors.push(`Row ${rowNumber} was skipped because Working Company is blank.`);
     if (!wpsSponsor) errors.push(`Row ${rowNumber} was skipped because WPS Sponsor is blank.`);
     if (!designation) errors.push(`Row ${rowNumber} was skipped because Designation is blank.`);
     if (!department) errors.push(`Row ${rowNumber} was skipped because LOB is blank.`);
     if (!joiningDate) errors.push(`Row ${rowNumber} was skipped because Date of Joining must be a valid date.`);
+    if (dateOfBirthValue.trim() && !dateOfBirth) errors.push(`Row ${rowNumber} was skipped because Date of Birth must be a valid date.`);
     if (!(["Male", "Female", "Other"] as string[]).includes(gender)) errors.push(`Row ${rowNumber} was skipped because Gender must be Male, Female, or Other.`);
     const errorsBeforeAmounts = errors.length;
     const basic = cashAmount(value("BASIC"), "BASIC", rowNumber, errors);
@@ -310,7 +316,7 @@ function parseMasterDataWorkbook(headers: string[], body: ReadonlyArray<Readonly
     const fuel = componentAmount(value("Fuel"), "Fuel", rowNumber, errors);
     const other = componentAmount(value("OTHER"), "OTHER", rowNumber, errors);
     const gross = cashAmount(value("GROSS SALARY"), "GROSS SALARY", rowNumber, errors);
-    if (!named || !company || !wpsSponsor || !designation || !department || !joiningDate || !(["Male", "Female", "Other"] as string[]).includes(gender) || errors.length !== errorsBeforeAmounts) return;
+    if (!named || !company || !wpsSponsor || !designation || !department || !joiningDate || (dateOfBirthValue.trim() && !dateOfBirth) || !(["Male", "Female", "Other"] as string[]).includes(gender) || errors.length !== errorsBeforeAmounts) return;
 
     parsed.push({
       "Employee Code": employeeCode,
@@ -321,6 +327,7 @@ function parseMasterDataWorkbook(headers: string[], body: ReadonlyArray<Readonly
       Department: department,
       Designation: designation,
       "Joining Date": joiningDate,
+      ...(dateOfBirth ? { "Date of Birth": dateOfBirth } : {}),
       Gender: gender,
       Basic: basic.amount,
       HRA: hra.amount,

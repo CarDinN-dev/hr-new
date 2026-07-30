@@ -94,18 +94,19 @@ export class EmployeesService {
         positions.set(positionKey, positionId);
 
         const salary = this.masterDataSalary(row, employeeCode);
+        const dateOfBirth = row.dateOfBirth ? new Date(`${row.dateOfBirth.slice(0, 10)}T00:00:00.000Z`) : undefined;
         const existing = await tx.employee.findFirst({
           where: { employeeCode: { equals: employeeCode, mode: 'insensitive' } },
         });
         const employee = existing
           ? await tx.employee.update({
             where: { id: existing.id },
-            data: { firstName, lastName: lastName.join(' '), hireDate, gender: this.importGender(row.gender), departmentId, positionId, salary: salary.baseSalary, deletedAt: null, employmentStatus: existing.deletedAt ? EmploymentStatus.ACTIVE : undefined, version: { increment: 1 } },
+            data: { firstName, lastName: lastName.join(' '), hireDate, gender: this.importGender(row.gender), departmentId, positionId, salary: salary.baseSalary, ...(dateOfBirth ? { dateOfBirth } : {}), deletedAt: null, employmentStatus: existing.deletedAt ? EmploymentStatus.ACTIVE : undefined, version: { increment: 1 } },
           })
           : await tx.employee.create({
             data: {
               employeeCode, firstName, lastName: lastName.join(' '), email: `${employeeCode.toLocaleLowerCase()}@import.invalid`,
-              hireDate, gender: this.importGender(row.gender), employmentStatus: EmploymentStatus.ACTIVE, departmentId, positionId, salary: salary.baseSalary,
+              hireDate, ...(dateOfBirth ? { dateOfBirth } : {}), gender: this.importGender(row.gender), employmentStatus: EmploymentStatus.ACTIVE, departmentId, positionId, salary: salary.baseSalary,
             },
           });
         if (existing) updated += 1; else created += 1;
@@ -172,6 +173,38 @@ export class EmployeesService {
       data,
       meta: paginationMeta(total, page, limit),
     };
+  }
+
+  async upcomingBirthdays() {
+    const today = this.companyDay(new Date());
+    const employees = await this.prisma.employee.findMany({
+      where: {
+        deletedAt: null,
+        employmentStatus: { in: [EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE] },
+        dateOfBirth: { not: null },
+      },
+      select: {
+        id: true, firstName: true, lastName: true, profilePhoto: true, dateOfBirth: true,
+        department: { select: { name: true } },
+      },
+    });
+
+    return employees.flatMap((employee) => {
+      const dateOfBirth = employee.dateOfBirth!;
+      let birthday = this.birthdayInYear(dateOfBirth, today.getUTCFullYear());
+      if (birthday < today) birthday = this.birthdayInYear(dateOfBirth, today.getUTCFullYear() + 1);
+      const daysUntil = Math.round((birthday.getTime() - today.getTime()) / 86_400_000);
+      if (daysUntil > 30) return [];
+      return [{
+        id: employee.id,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        department: employee.department?.name ?? null,
+        profilePhoto: employee.profilePhoto,
+        date: birthday.toISOString().slice(0, 10),
+        daysUntil,
+      }];
+    }).sort((left, right) => left.daysUntil - right.daysUntil || `${left.firstName} ${left.lastName}`.localeCompare(`${right.firstName} ${right.lastName}`));
   }
 
   async findById(id: string, user: RequestUser) {
@@ -507,6 +540,25 @@ export class EmployeesService {
 
     await this.validateReportingRelation(dto.managerId, currentEmployeeId, 'managerId', 'Manager');
     await this.validateReportingRelation(dto.lineManagerId, currentEmployeeId, 'lineManagerId', 'Line manager');
+  }
+
+  private companyDay(value: Date) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Qatar', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(value);
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value);
+    return new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  }
+
+  private birthdayInYear(dateOfBirth: Date, year: number) {
+    const month = dateOfBirth.getUTCMonth();
+    const birthday = dateOfBirth.getUTCDate();
+    const day = month === 1 && birthday === 29 && !this.isLeapYear(year) ? 28 : birthday;
+    return new Date(Date.UTC(year, month, day));
+  }
+
+  private isLeapYear(year: number) {
+    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   }
 
   private async validateReportingRelation(relationId: string | undefined, currentEmployeeId: string | undefined, field: 'managerId' | 'lineManagerId', label: string) {

@@ -12,6 +12,7 @@ export class ImportEmployeeMasterDataRowDto {
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(200) designation: string;
   @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(120) department: string;
   @ApiProperty() @IsDateString() joiningDate: string;
+  @ApiPropertyOptional({ example: '1992-04-15' }) @IsOptional() @IsDateString() dateOfBirth?: string;
   @ApiProperty({ enum: ['Male', 'Female', 'Other'] }) @IsIn(['Male', 'Female', 'Other']) gender: 'Male' | 'Female' | 'Other';
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(200) lineManager?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(200) manager?: string;
