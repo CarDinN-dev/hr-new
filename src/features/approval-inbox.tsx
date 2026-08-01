@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, hasPermission, type BackendSession } from "../api";
+import { Dialog } from "../dialog";
 import type { LeaveRecord } from "./leave-workflow";
 import type { PayrollRun } from "./payroll-workflow";
 import { displayDate, displayTitle, idempotencyHeaders, workflowKey } from "./workflow-utils";
@@ -36,6 +37,6 @@ export function ApprovalInboxPanel({ session, notify }: { session: BackendSessio
     {!count && <div className="empty compact">No approvals waiting.</div>}
   </div>}
   {mutate.isError && <p className="sync-alert">{mutate.error.message}</p>}
-  {reasonAction && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{reasonAction.label}</h2><label>Reason<textarea autoFocus value={reasonAction.reason} onChange={event => setReasonAction(previous => previous ? { ...previous, reason: event.target.value } : previous)} /></label><div className="modal-actions"><button onClick={() => setReasonAction(null)}>Cancel</button><button className="primary" disabled={reasonAction.reason.trim().length < 3 || mutate.isPending} onClick={confirmReason}>Confirm</button></div></div></div>}
+  {reasonAction && <Dialog title={reasonAction.label} onClose={() => setReasonAction(null)}><label>Reason<textarea autoFocus value={reasonAction.reason} onChange={event => setReasonAction(previous => previous ? { ...previous, reason: event.target.value } : previous)} /></label><div className="modal-actions"><button onClick={() => setReasonAction(null)}>Cancel</button><button className="primary" disabled={reasonAction.reason.trim().length < 3 || mutate.isPending} onClick={confirmReason}>Confirm</button></div></Dialog>}
   </section>;
 }

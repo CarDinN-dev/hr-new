@@ -105,6 +105,28 @@ textarea:focus-visible,
   color: var(--pro-text);
 }
 
+.module-loading {
+  min-height: 220px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--pro-text-soft);
+}
+
+.module-loading .spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--pro-border);
+  border-top-color: var(--pro-brand);
+  border-radius: 50%;
+  animation: module-spin .7s linear infinite;
+}
+
+@keyframes module-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Application shell */
 .app {
   min-height: 100vh;
@@ -533,7 +555,8 @@ textarea:focus {
 
 input::placeholder,
 textarea::placeholder {
-  color: color-mix(in srgb, var(--pro-text-soft) 76%, transparent);
+  color: var(--pro-text-soft);
+  opacity: 1;
 }
 
 label {
@@ -572,6 +595,14 @@ fieldset {
   scrollbar-width: thin;
 }
 
+.table-scroll-hint {
+  display: none;
+}
+
+.table-wrap table {
+  min-width: 100%;
+}
+
 table {
   width: 100%;
   border-collapse: separate !important;
@@ -590,7 +621,7 @@ th {
   border-bottom: 1px solid var(--pro-border-strong) !important;
   background: var(--pro-surface-subtle) !important;
   color: var(--pro-text-soft) !important;
-  font-size: 10.5px !important;
+  font-size: 12px !important;
   font-weight: 800 !important;
   letter-spacing: .055em;
   text-align: left;
@@ -614,7 +645,7 @@ tbody tr:hover td {
 }
 
 td button {
-  min-height: 32px !important;
+  min-height: 36px !important;
   padding: 6px 9px !important;
   font-size: 12px !important;
 }
@@ -634,7 +665,7 @@ td button {
   border-radius: 999px !important;
   background: var(--pro-surface-subtle) !important;
   color: var(--pro-text-soft) !important;
-  font-size: 10.5px !important;
+  font-size: 12px !important;
   font-weight: 750 !important;
   letter-spacing: .025em;
 }
@@ -667,21 +698,46 @@ td button {
 }
 
 /* Dialogs and transient feedback */
-.modal-backdrop {
-  padding: 24px !important;
-  background: rgba(7, 13, 24, .62) !important;
+.modal-dialog {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--pro-text);
+  overflow: auto;
+  cursor: pointer;
+}
+
+.modal-dialog[open] {
+  display: grid;
+  place-items: start center;
+}
+
+.modal-dialog::backdrop {
+  background: rgba(7, 13, 24, .62);
   backdrop-filter: blur(5px);
 }
 
 .modal {
-  width: min(94vw, 920px) !important;
+  position: relative;
+  width: min(calc(100vw - 48px), 640px) !important;
   max-height: min(90vh, 900px) !important;
+  margin: auto;
   overflow: auto;
   padding: clamp(20px, 3vw, 32px) !important;
   border: 1px solid var(--pro-border) !important;
   border-radius: 16px !important;
   background: var(--pro-surface) !important;
   box-shadow: var(--pro-shadow-lg) !important;
+  cursor: default;
+}
+
+.modal.modal-wide {
+  width: min(calc(100vw - 48px), 920px) !important;
 }
 
 .modal-close {
@@ -915,14 +971,19 @@ td button {
     width: 100%;
   }
 
-  .modal-backdrop {
-    align-items: flex-end !important;
-    padding: 0 !important;
+  .modal-dialog {
+    padding: 0;
   }
 
-  .modal {
+  .modal-dialog[open] {
+    place-items: end center;
+  }
+
+  .modal-dialog .modal,
+  .modal-dialog .modal.modal-wide {
     width: 100% !important;
     max-height: 92vh !important;
+    margin: 0 !important;
     padding: 20px 16px 24px !important;
     border-radius: 16px 16px 0 0 !important;
   }
@@ -934,8 +995,79 @@ td button {
     max-width: none;
   }
 
-  table {
+  .table-wide table,
+  .table-wrap:has(th:nth-child(4)) table {
     min-width: 680px;
+  }
+
+  .table-wide .table-scroll-hint,
+  .table-wrap:has(th:nth-child(4)):not(:has(.table-scroll-hint))::before {
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    display: block;
+    width: fit-content;
+    margin: 8px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--pro-brand-soft);
+    color: var(--pro-brand);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .table-wrap:has(th:nth-child(4)):not(:has(.table-scroll-hint))::before {
+    content: "Scroll horizontally for more columns";
+  }
+
+  .table-wide th:first-child,
+  .table-wide td:first-child,
+  .table-wrap:has(th:nth-child(4)) th:first-child,
+  .table-wrap:has(th:nth-child(4)) td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    box-shadow: 1px 0 0 var(--pro-border);
+  }
+
+  .table-actions th:last-child,
+  .table-actions td:last-child,
+  .table-wrap:has(td:last-child button) th:last-child,
+  .table-wrap:has(td:last-child button) td:last-child {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    box-shadow: -1px 0 0 var(--pro-border);
+  }
+
+  .table-actions th:first-child,
+  .table-actions th:last-child {
+    z-index: 3;
+  }
+
+  .table-wide td button,
+  .row-actions button {
+    min-height: 44px !important;
+  }
+
+  .hero-copy {
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .hero-copy .section-label {
+    margin-bottom: 2px;
+  }
+
+  .hero-logo-crop {
+    margin-bottom: 4px;
+  }
+
+  .hero-panel h2 {
+    width: 100%;
+    overflow-wrap: normal;
   }
 }
 

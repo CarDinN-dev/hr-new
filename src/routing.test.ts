@@ -9,4 +9,8 @@ describe("application routes", () => {
       if (path !== "/") expect(navItemForPath(`${path}/`)).toBe(nav);
     }
   });
+
+  it("does not silently map an unknown URL to the dashboard", () => {
+    expect(navItemForPath("/not-a-module")).toBeNull();
+  });
 });

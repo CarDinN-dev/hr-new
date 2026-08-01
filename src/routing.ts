@@ -23,7 +23,7 @@ export const navPaths = {
 
 const navByPath = new Map<string, NavItem>(Object.entries(navPaths).map(([nav, path]) => [path, nav as NavItem]));
 
-export function navItemForPath(pathname: string): NavItem {
+export function navItemForPath(pathname: string): NavItem | null {
   const normalized = pathname === "/" ? "/" : pathname.replace(/\/+$/, "");
-  return navByPath.get(normalized) ?? "Dashboard";
+  return navByPath.get(normalized) ?? null;
 }

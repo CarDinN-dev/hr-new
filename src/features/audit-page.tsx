@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ShieldCheck } from "lucide-react";
 import { apiDownload, apiList, apiPage, apiRequest, hasActiveSuperAdminRole, hasPermission, type BackendSession } from "../api";
+import { Dialog } from "../dialog";
 
 type AuditEvent = {
   id: string;
@@ -166,7 +167,7 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
         <label>To<input type="date" value={filters.dateTo} onChange={event => updateFilter("dateTo", event.target.value)} /></label>
       </div>
       {events.isPending ? <p className="muted">Loading audit history…</p> : events.isError ? <p className="sync-alert">{events.error.message}</p> : <>
-        <div className="table-wrap"><table><thead><tr><th>Sequence</th><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason</th></tr></thead><tbody>{events.data?.data.map(item => <tr key={item.id}><td>{item.sequence}</td><td>{new Date(item.occurredAtUtc).toLocaleString()}</td><td>{item.actorEmailSnapshot || "System"}</td><td>{item.action}</td><td>{item.resourceType}{item.resourceId ? <small><br />{item.resourceId}</small> : null}</td><td>{item.outcome}</td><td>{item.reason || "—"}</td></tr>)}</tbody></table></div>
+        <div className="table-wrap table-wide" role="region" aria-label="Audit history" tabIndex={0}><span className="table-scroll-hint" aria-hidden="true">Scroll horizontally for more columns</span><table><thead><tr><th>Sequence</th><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason</th></tr></thead><tbody>{events.data?.data.map(item => <tr key={item.id}><td>{item.sequence}</td><td>{new Date(item.occurredAtUtc).toLocaleString()}</td><td>{item.actorEmailSnapshot || "System"}</td><td>{item.action}</td><td>{item.resourceType}{item.resourceId ? <small><br />{item.resourceId}</small> : null}</td><td>{item.outcome}</td><td>{item.reason || "—"}</td></tr>)}</tbody></table></div>
         <div className="audit-pagination">
           <span className="muted" aria-live="polite">Page {page} of {totalPages} · {total} entries</span>
           <label>Entries per page<select value={pagination.limit} onChange={event => setPagination({ page: 1, limit: Number(event.target.value) })}><option value={15}>15</option><option value={50}>50</option><option value={100}>100</option></select></label>
@@ -196,7 +197,7 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
     </>}
 
     {exportFormat && <ReasonModal title={`Export audit history as ${exportFormat}`} reason={exportReason} setReason={setExportReason} busy={false} onCancel={() => setExportFormat(null)} onConfirm={() => void exportAudit(exportFormat).catch(error => notify(error.message))} />}
-    {policyDraft && <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>Retention policy</h2><label className="switch-row"><input type="checkbox" checked={policyDraft.enabled} onChange={event => setPolicyDraft(previous => previous ? { ...previous, enabled: event.target.checked } : previous)} /> Enable retention pruning</label><label>Retention days<input type="number" min={30} value={policyDraft.retentionDays} onChange={event => setPolicyDraft(previous => previous ? { ...previous, retentionDays: Number(event.target.value) } : previous)} /></label><label>Reason<textarea value={policyDraft.reason} onChange={event => setPolicyDraft(previous => previous ? { ...previous, reason: event.target.value } : previous)} /></label><div className="modal-actions"><button onClick={() => setPolicyDraft(null)}>Cancel</button><button className="primary" disabled={policyDraft.retentionDays < 30 || policyDraft.reason.trim().length < 3 || savePolicy.isPending} onClick={() => savePolicy.mutate()}>Save policy</button></div>{savePolicy.isError && <p className="sync-alert">{savePolicy.error.message}</p>}</div></div>}
+    {policyDraft && <Dialog title="Retention policy" onClose={() => setPolicyDraft(null)}><label className="switch-row"><input type="checkbox" checked={policyDraft.enabled} onChange={event => setPolicyDraft(previous => previous ? { ...previous, enabled: event.target.checked } : previous)} /> Enable retention pruning</label><label>Retention days<input type="number" min={30} value={policyDraft.retentionDays} onChange={event => setPolicyDraft(previous => previous ? { ...previous, retentionDays: Number(event.target.value) } : previous)} /></label><label>Reason<textarea value={policyDraft.reason} onChange={event => setPolicyDraft(previous => previous ? { ...previous, reason: event.target.value } : previous)} /></label><div className="modal-actions"><button onClick={() => setPolicyDraft(null)}>Cancel</button><button className="primary" disabled={policyDraft.retentionDays < 30 || policyDraft.reason.trim().length < 3 || savePolicy.isPending} onClick={() => savePolicy.mutate()}>Save policy</button></div>{savePolicy.isError && <p className="sync-alert">{savePolicy.error.message}</p>}</Dialog>}
     {release && <ReasonModal title={`Release ${release.hold.name}`} reason={release.reason} setReason={reason => setRelease(previous => previous ? { ...previous, reason } : previous)} busy={releaseHold.isPending} onCancel={() => setRelease(null)} onConfirm={() => releaseHold.mutate()} />}
   </section>;
 }
@@ -221,5 +222,5 @@ function saveDownload(blob: Blob, fileName: string) {
 }
 
 function ReasonModal({ title, reason, setReason, busy, onCancel, onConfirm }: { title: string; reason: string; setReason: (value: string) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
-  return <div className="modal-backdrop"><div className="modal" role="dialog" aria-modal="true"><h2>{title}</h2><label>Reason<textarea autoFocus maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label><div className="modal-actions"><button onClick={onCancel}>Cancel</button><button className="primary" disabled={reason.trim().length < 3 || busy} onClick={onConfirm}>Confirm</button></div></div></div>;
+  return <Dialog title={title} onClose={onCancel}><label>Reason<textarea autoFocus maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label><div className="modal-actions"><button onClick={onCancel}>Cancel</button><button className="primary" disabled={reason.trim().length < 3 || busy} onClick={onConfirm}>Confirm</button></div></Dialog>;
 }

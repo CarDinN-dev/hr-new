@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Link,
-  Navigate,
   Outlet,
   RouterProvider,
   createRootRoute,
@@ -61,8 +60,6 @@ import {
   type RecruitmentCandidate,
   type RecruitmentJob
 } from "./data";
-import { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } from "./employeeSheet";
-import { applyAttendanceRows, attendanceTemplateHtml, parseAttendanceSheet, parseAttendanceWorkbook } from "./attendanceSheet";
 import {
   activeEmployees,
   attendanceDaySummary,
@@ -120,11 +117,10 @@ import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, LeaveWorkflowPage, MyLeaveStatusPanel, MyPayslipsPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
-import { SystemAccessPage } from "./features/system-access";
-import { HierarchyPage } from "./features/hierarchy-page";
-import { AuditHistoryPage } from "./features/audit-page";
 import { NotificationsPanel } from "./features/notifications-panel";
+import { Dialog } from "./dialog";
 import "./styles.css";
+import "./professional.css";
 
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
@@ -149,6 +145,9 @@ const employeeFieldOptions: Record<string, readonly string[]> = {
   "Company Fuel Card": ["Yes", "No"]
 };
 const LoginScene = React.lazy(() => import("./LoginScene"));
+const SystemAccessPage = React.lazy(() => import("./features/system-access").then(module => ({ default: module.SystemAccessPage })));
+const HierarchyPage = React.lazy(() => import("./features/hierarchy-page").then(module => ({ default: module.HierarchyPage })));
+const AuditHistoryPage = React.lazy(() => import("./features/audit-page").then(module => ({ default: module.AuditHistoryPage })));
 const appQueryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -373,18 +372,12 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (!modal) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeModal();
-    };
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = overflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [modal]);
+    document.title = backendSession === null
+      ? "Sign in | MedTech HR ERP"
+      : nav
+        ? `${nav} | MedTech HR ERP`
+        : "Page not found | MedTech HR ERP";
+  }, [backendSession, nav]);
 
   function notify(message: string) {
     setToast(message);
@@ -421,6 +414,10 @@ function App() {
 
   function closeModal() {
     setModal(null);
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(".content button.primary, .content a[href], .content button") ?? document.querySelector<HTMLElement>("main button");
+      target?.focus({ preventScroll: true });
+    }, 0);
   }
 
   async function refreshWorkspace() {
@@ -511,6 +508,7 @@ function App() {
   }
 
   const visibleNavItems = navItems.filter(item => canAccessRoute(backendSession, item));
+  if (!nav) return <NotFoundPage />;
   if (!canAccessRoute(backendSession, nav)) return <AccessDenied onBack={() => setNav("Dashboard")} />;
   const canViewSalary = hasAnyPermission(backendSession, "employee.self.read_compensation", "payroll.read_compensation");
   const canManageAttendance = hasPermission(backendSession, "attendance.hr.manage");
@@ -570,7 +568,7 @@ function App() {
           </div>
         </header>
 
-        <div className="content">
+        <div className="content"><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
           {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
@@ -608,11 +606,11 @@ function App() {
           }} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
           {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
-        </div>
+        </React.Suspense></div>
       </main>
 
       {sidebarOpen && <button aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
-      {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) closeModal(); }}><div className="modal" role="dialog" aria-modal="true"><button className="modal-close" onClick={closeModal} aria-label="Close"><X size={18} /></button>{modal}</div></div>}
+      {modal && <Dialog onClose={closeModal}>{modal}</Dialog>}
       {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
     </div></AuthorizationProvider>
   );
@@ -634,7 +632,20 @@ function AccountMenu({
   toggleTheme: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const photo = state.employees.find(employee => employee.id === backendSession.employeeId)?.photo;
+
+  useEffect(() => {
+    if (!open) return;
+    popoverRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const close = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!popoverRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
 
   function go(destination: NavItem) {
     setOpen(false);
@@ -642,13 +653,20 @@ function AccountMenu({
   }
 
   return <div className="account-menu">
-    {open && <div className="account-popover" role="menu">
+    {open && <div id="account-popover" ref={popoverRef} className="account-popover" role="menu" aria-label="Account options" onKeyDown={event => {
+      if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); return; }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]"));
+      const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
+      items[(current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+    }}>
       <button role="menuitem" onClick={() => { toggleTheme(); setOpen(false); }}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Light mode" : "Dark mode"}</button>
       {canAccessRoute(backendSession, "My HR") && <button role="menuitem" onClick={() => go("My HR")}><UsersRound size={16} /> My HR</button>}
       {canAccessRoute(backendSession, "Settings") && <button role="menuitem" onClick={() => go("Settings")}><Settings size={16} /> Settings</button>}
       <button role="menuitem" onClick={onLogout}><LogOut size={16} /> Log out</button>
     </div>}
-    <button className="account-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
+    <button ref={triggerRef} className="account-trigger" aria-haspopup="menu" aria-controls="account-popover" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
       <span className="account-avatar">{photo ? <img src={photo} alt="" /> : accountInitials(backendSession.email)}</span>
       <span className="account-label">
         <strong>{backendSession.displayName || backendSession.email}</strong>
@@ -705,7 +723,7 @@ function TeamPage({ state, session, notify }: { state: HrState; session: Backend
   return <div className="dashboard-grid">
     <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
     <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
-      <DataTable columns={["Employee", "Department", "Status", "Joined"]} rows={state.employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
+      <DataTable label="People in scope" columns={["Employee", "Department", "Status", "Joined"]} rows={state.employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
     </section>
     <ApprovalInboxPanel session={session} notify={notify} />
   </div>;
@@ -799,6 +817,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
         <div className="panel">
           <div className="panel-head"><h3>Pending Leave Approvals</h3><span>{pendingLeave.length} open</span></div>
           <DataTable
+            label="Pending leave approvals"
             empty="No pending leave requests."
             columns={["Employee", "Type", "Dates", "Days", "Status"]}
             rows={pendingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} - ${formatDate(leave.endDate)}`, leave.totalDays, leave.status.replaceAll("_", " ")])}
@@ -830,6 +849,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
         <div className="panel">
           <div className="panel-head"><h3>Recent Joiners</h3><span>latest employee records</span></div>
           <DataTable
+            label="Recent joiners"
             empty="No employees yet."
             columns={["Name", "Designation", "Joined", "Status"]}
             rows={recentJoiners.map(employee => [
@@ -934,9 +954,9 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       </div>
       <div className="panel employee-directory-panel">
         <div className="filters employee-filters">
-          <label><Search size={16} /><input placeholder="Search employee, code, email, department..." value={query} onChange={event => setQuery(event.target.value)} /></label>
-          <select value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
-          <select value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map(item => <option key={item}>{item}</option>)}</select>
+          <label><Search size={16} /><input aria-label="Search employees" placeholder="Search employee, code, email, department..." value={query} onChange={event => setQuery(event.target.value)} /></label>
+          <select aria-label="Filter employees by department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
+          <select aria-label="Filter employees by status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map(item => <option key={item}>{item}</option>)}</select>
         </div>
         {employees.length ? (
           <div className="employee-card-grid">
@@ -986,6 +1006,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
   async function importEmployees(file?: File) {
     if (!file) return;
     try {
+      const { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } = await import("./employeeSheet");
       if (file.size > 10_000_000) throw new Error("Employee imports are limited to 10 MB.");
       const spreadsheet = /\.(xlsx|xlsm|xltx|xltm)$/i.test(file.name);
       const parsed = spreadsheet
@@ -1095,7 +1116,7 @@ function EmployeeMasterDataImportPreview({ rows, errors, existingEmployeeCodes, 
     </div>
     {errors.length > 0 && <div className="form-error"><strong>Fix these rows before importing:</strong><ul>{errors.slice(0, 12).map(error => <li key={error}>{error}</li>)}</ul>{errors.length > 12 && <p>{errors.length - 12} more issue(s).</p>}</div>}
     {submitError && <p className="form-error">{submitError}</p>}
-    <div className="table-wrap"><table><thead><tr><th>Employee Code</th><th>Employee</th><th>Department</th><th>Designation</th><th>Gross salary</th></tr></thead><tbody>{rows.slice(0, 12).map(row => <tr key={row["Employee Code"]}><td>{row["Employee Code"]}</td><td>{row["Full Name"]}</td><td>{row.Department}</td><td>{row.Designation}</td><td>{row.Total}</td></tr>)}</tbody></table>{rows.length > 12 && <p className="muted">Showing the first 12 records.</p>}</div>
+    <div className="table-wrap table-wide" role="region" aria-label="Employee import preview" tabIndex={0}><span className="table-scroll-hint" aria-hidden="true">Scroll horizontally for more columns</span><table><thead><tr><th>Employee Code</th><th>Employee</th><th>Department</th><th>Designation</th><th>Gross salary</th></tr></thead><tbody>{rows.slice(0, 12).map(row => <tr key={row["Employee Code"]}><td>{row["Employee Code"]}</td><td>{row["Full Name"]}</td><td>{row.Department}</td><td>{row.Designation}</td><td>{row.Total}</td></tr>)}</tbody></table>{rows.length > 12 && <p className="muted">Showing the first 12 records.</p>}</div>
     <div className="modal-actions"><button type="button" onClick={close} disabled={submitting}>Cancel</button><button className="primary" type="button" onClick={() => void confirm()} disabled={submitting || errors.length > 0 || !session}>{submitting ? "Importing…" : "Confirm import"}</button></div>
   </div>;
 }
@@ -1180,8 +1201,8 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
                 const values = options && Array.from(new Set([...options, draft.fields[field] || ""])).filter(Boolean);
                 return <label key={field}>{field}
                   {values
-                    ? <select value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
-                    : <input type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
+                    ? <select aria-label={field} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
+                    : <input aria-label={field} type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
                 </label>;
               })}
             </div>
@@ -1266,13 +1287,15 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
     })
     .filter(group => group.employees.length);
 
-  function downloadAttendanceTemplate() {
+  async function downloadAttendanceTemplate() {
+    const { attendanceTemplateHtml } = await import("./attendanceSheet");
     downloadBlob(new Blob([attendanceTemplateHtml()], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Attendance-Import-Template-${todayISO()}.xls`);
   }
 
   async function importAttendance(file?: File) {
     if (!file) return;
     try {
+      const { applyAttendanceRows, parseAttendanceSheet, parseAttendanceWorkbook } = await import("./attendanceSheet");
       if (file.size > 10_000_000) throw new Error("Attendance imports are limited to 10 MB.");
       const rows = /\.xls$/i.test(file.name) ? await parseAttendanceWorkbook(file) : parseAttendanceSheet(await file.text());
       if (rows.length > 50_000) throw new Error("Attendance imports are limited to 50,000 rows at a time.");
@@ -1298,7 +1321,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
             <p>Mark each employee or import a completed attendance sheet.</p>
           </div>
           {canManage && <div className="inline-controls">
-            <button onClick={downloadAttendanceTemplate}><Download size={16} /> Template</button>
+            <button onClick={() => void downloadAttendanceTemplate().catch(error => notify(errorMessage(error)))}><Download size={16} /> Template</button>
             <label className="button-like"><Upload size={16} /> Import attendance<input type="file" accept=".xls,.html,.csv,.tsv,application/vnd.ms-excel,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
             <button onClick={() => setState(prev => markAllAttendance(prev, date, "P"))}>Mark all present</button>
             <button onClick={() => setState(prev => clearAttendanceDay(prev, date))}>Clear day</button>
@@ -1315,7 +1338,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
 
         <div className="attendance-toolbar department-style">
           <label><Search size={16} /><input id="attendance-search" name="attendance-search" aria-label="Search attendance" placeholder="Search employee, department or status..." value={query} onChange={event => setQuery(event.target.value)} /></label>
-          <input id="attendance-date" name="attendance-date" type="date" value={date} onChange={event => setDate(event.target.value)} />
+          <input id="attendance-date" name="attendance-date" aria-label="Attendance date" type="date" value={date} onChange={event => setDate(event.target.value)} />
           <select value={department} onChange={event => setDepartment(event.target.value)} aria-label="Department filter"><option value="">All departments</option>{departments.map(item => <option key={item}>{item}</option>)}</select>
           <select value={status} onChange={event => setStatus(event.target.value)} aria-label="Status filter"><option value="">All statuses</option>{["Present", "Half-day", "Leave", "Absent", "Unmarked"].map(item => <option key={item}>{item}</option>)}</select>
         </div>
@@ -1369,12 +1392,12 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
         <div className="panel-head">
           <div><h3>Monthly Summary</h3><span>Counts for {months[month - 1]} {year}</span></div>
           <div className="inline-controls">
-            <select id="attendance-month" name="attendance-month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
-            <input id="attendance-year" name="attendance-year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
+          <select id="attendance-month" name="attendance-month" aria-label="Attendance report month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
+          <input id="attendance-year" name="attendance-year" aria-label="Attendance report year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
             {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("attendance_report", state, year, month), "attendance_report"))}>PDF</button>}
           </div>
         </div>
-        <DataTable columns={["Code", "Employee", "Present", "Half-day", "Leave", "Absent", "%"]} rows={stats.map(row => [row.employee.fields["Employee Code"], employeeName(row.employee), row.P, row.H, row.L, row.A, `${row.pct}%`])} />
+        <DataTable label="Monthly attendance report" columns={["Code", "Employee", "Present", "Half-day", "Leave", "Absent", "%"]} rows={stats.map(row => [row.employee.fields["Employee Code"], employeeName(row.employee), row.P, row.H, row.L, row.A, `${row.pct}%`])} />
       </div>
     </section>
   );
@@ -1463,7 +1486,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
     </div>}
     <div className="panel">
       <div className="panel-head"><h3>Trip Register</h3><span>{state.businessTrips.length} records</span></div>
-      <DataTable empty="No business trips yet." columns={["Employee", "Destination", "Dates", "Days", "Cost", "Advance", "Status", "Actions"]} rows={state.businessTrips.map(trip => {
+      <DataTable label="Business trips" empty="No business trips yet." columns={["Employee", "Destination", "Dates", "Days", "Cost", "Advance", "Status", "Actions"]} rows={state.businessTrips.map(trip => {
         const employee = state.employees.find(item => item.id === trip.employeeId);
         return [
           employeeName(employee),
@@ -1540,7 +1563,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
     </div>}
     <div className="panel">
       <div className="panel-head"><h3>Expense Register</h3><span>{state.expenses.length} records</span></div>
-      <DataTable empty="No expenses yet." columns={["Employee", "Category", "Date", "Amount", "Trip", "Status", "Actions"]} rows={state.expenses.map(expense => {
+      <DataTable label="Employee expenses" empty="No expenses yet." columns={["Employee", "Category", "Date", "Amount", "Trip", "Status", "Actions"]} rows={state.expenses.map(expense => {
         const employee = state.employees.find(item => item.id === expense.employeeId);
         const trip = state.businessTrips.find(item => item.id === expense.tripId);
         return [
@@ -1613,7 +1636,7 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
       </div>
     </div>
     <div className="panel">
-      <DataTable empty="No loans match the filters." columns={["Employee", "Loan", "Principal", "Monthly plan", "Paid", "Balance", "Plan", "Status", "Actions"]} rows={visible.map(loan => {
+      <DataTable label="Employee loans" empty="No loans match the filters." columns={["Employee", "Loan", "Principal", "Monthly plan", "Paid", "Balance", "Plan", "Status", "Actions"]} rows={visible.map(loan => {
         const employee = state.employees.find(item => item.id === loan.employeeId);
         const balance = loanBalance(state, loan.id);
         const scheduledAmount = loanScheduledAmount(loan);
@@ -1898,6 +1921,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       </div>
       <div className="form-actions"><button className="primary" onClick={saveJob}>{editingJobId ? "Update opening" : "Add opening"}</button></div></>}
       <DataTable
+        label="Job openings"
         empty="No job openings yet."
         columns={["Title", "Department", "Openings", "Candidates", "Posted", "Status", "Actions"]}
         rows={state.jobs.map(job => {
@@ -2020,7 +2044,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
     </div>
     <div className="panel">
       <div className="panel-head"><h3>EOS Register</h3><span>{state.eosRecords.length} records</span></div>
-      <DataTable empty="No EOS records yet." columns={["Employee", "Date", "Gratuity", "Expenses", "Advances", "Net", "Status", "Actions"]} rows={state.eosRecords.map(record => {
+      <DataTable label="End-of-service settlements" empty="No EOS records yet." columns={["Employee", "Date", "Gratuity", "Expenses", "Advances", "Net", "Status", "Actions"]} rows={state.eosRecords.map(record => {
         const rowEmployee = state.employees.find(item => item.id === record.employeeId);
         return [
           employeeName(rowEmployee),
@@ -2082,7 +2106,7 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
       </div>
       <div className="panel">
         <div className="panel-head"><h3>Generated Document Log</h3><span>{state.documents.length} records</span></div>
-        <DataTable columns={["Document No.", "Template", "Employee", "Generated", "File", "Actions"]} rows={state.documents.map(doc => {
+        <DataTable label="Generated HR documents" columns={["Document No.", "Template", "Employee", "Generated", "File", "Actions"]} rows={state.documents.map(doc => {
           const rowEmployee = state.employees.find(item => item.id === doc.employeeId);
           return [
             doc.documentNumber,
@@ -2124,8 +2148,8 @@ function Reports({ state, savePdf }: { state: HrState; notify: (message: string)
       <BarChart3 size={20} />
       <h3>{report.label}</h3>
       <p>{report.description}</p>
-      {["attendance_report", "payroll_register"].includes(report.id) && <div className="inline-controls report-controls"><select value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select><input type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
-      {report.id === "leave_report" && <div className="inline-controls report-controls"><input type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
+      {["attendance_report", "payroll_register"].includes(report.id) && <div className="inline-controls report-controls"><select aria-label={`${report.label} month`} value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select><input aria-label={`${report.label} year`} type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
+      {report.id === "leave_report" && <div className="inline-controls report-controls"><input aria-label="Leave report year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
       {can("report.export") ? <button className="primary" onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf(report.id, state, year, month), report.id))}><Download size={16} /> Download PDF</button> : <span className="muted">View only</span>}
     </div>
   ))}</section>;
@@ -2220,9 +2244,11 @@ function SignedInDevicesPanel({ session, notify }: { session: BackendSession; no
   </section>;
 }
 
-function DataTable({ columns, rows, empty }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string }) {
+function DataTable({ columns, rows, empty, label = "Data table" }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string; label?: string }) {
   if (!rows.length) return <div className="empty">{empty || "No records."}</div>;
-  return <div className="table-wrap" role="region" aria-label="Scrollable data table" tabIndex={0}><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
+  const wide = columns.length >= 4;
+  const actions = typeof columns.at(-1) === "string" && /actions?/i.test(String(columns.at(-1)));
+  return <div className={`table-wrap${wide ? " table-wide" : ""}${actions ? " table-actions" : ""}`} role="region" aria-label={label} tabIndex={wide ? 0 : undefined}>{wide && <span className="table-scroll-hint" aria-hidden="true">Scroll horizontally for more columns</span>}<table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
 function Badge({ value }: { value: string }) {
@@ -2320,9 +2346,19 @@ function RootRoute() {
   return <Outlet />;
 }
 
+function NotFoundPage() {
+  useEffect(() => { document.title = "Page not found | MedTech HR ERP"; }, []);
+  return <main className="workspace-gate"><section className="workspace-gate-card" role="alert">
+    <FileText size={28} />
+    <h1>Page not found</h1>
+    <p>The requested HR module does not exist.</p>
+    <Link className="button-like primary" to="/">Return to dashboard</Link>
+  </section></main>;
+}
+
 const rootRoute = createRootRoute({
   component: RootRoute,
-  notFoundComponent: () => <Navigate to="/" replace />
+  notFoundComponent: NotFoundPage
 });
 const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: "hr-shell", component: App });
 const dashboardRoute = createRoute({ getParentRoute: () => shellRoute, path: "/" });
