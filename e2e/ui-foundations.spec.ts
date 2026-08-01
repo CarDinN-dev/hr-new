@@ -78,3 +78,10 @@ test("unknown URLs show an explicit not-found page", async ({ page }) => {
   await expect(page).toHaveTitle("Page not found | MedTech HR ERP");
   await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
 });
+
+test("search input text clears its leading icon", async ({ page }) => {
+  await installUiApi(page);
+  await page.goto("/employees");
+  const search = page.getByLabel("Search employees");
+  expect(await search.evaluate(element => parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(36);
+});

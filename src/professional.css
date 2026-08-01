@@ -532,6 +532,10 @@ select {
   padding: 8px 11px !important;
 }
 
+.filters input {
+  padding-left: 2.25rem !important;
+}
+
 textarea {
   min-height: 104px !important;
   padding: 10px 11px !important;
