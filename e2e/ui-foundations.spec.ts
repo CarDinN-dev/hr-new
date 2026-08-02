@@ -20,12 +20,12 @@ const session = {
   ]
 };
 
-async function installUiApi(page: Page) {
-  await page.addInitScript(value => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify(value)), session);
+async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = []) {
+  await page.addInitScript(({ value, permissions }) => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, permissions: [...value.permissions, ...permissions] })), { value: session, permissions: extraPermissions });
   await page.route("**/api/v1/**", route => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ success: true, data: [], meta: { total: 0, page: 1, limit: 100, totalPages: 1 } })
+    body: JSON.stringify({ success: true, data: new URL(route.request().url()).pathname === "/api/v1/employees" ? employees : [], meta: { total: 0, page: 1, limit: 100, totalPages: 1 } })
   }));
 }
 
@@ -84,4 +84,33 @@ test("search input text clears its leading icon", async ({ page }) => {
   await page.goto("/employees");
   const search = page.getByLabel("Search employees");
   expect(await search.evaluate(element => parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(36);
+});
+
+test("employee profile uses the wide dialog without leaving the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installUiApi(page, [{
+    id: "employee-1", employeeCode: "MTC005", firstName: "Dima Osama Ahmad", lastName: "Alhawi",
+    email: "mtc005@example.invalid", hireDate: "2017-04-05", employmentStatus: "ACTIVE",
+    department: { id: "department-1", name: "Diagnostics & POCT", code: "DPOCT" },
+    position: { title: "Application Manager", code: "APP-MGR" }
+  }], ["employee.hr.update", "payroll.read_compensation", "report.export"]);
+  await page.goto("/employees");
+  await page.getByRole("button", { name: /Dima Osama Ahmad Alhawi/ }).click();
+
+  const panel = page.locator(".modal:has(> .employee-profile)");
+  const desktop = await panel.boundingBox();
+  expect(desktop).not.toBeNull();
+  expect(desktop!.width).toBeGreaterThanOrEqual(900);
+  expect(desktop!.width).toBeLessThanOrEqual(920);
+  expect(desktop!.x).toBeGreaterThanOrEqual(24);
+  expect(desktop!.x + desktop!.width).toBeLessThanOrEqual(1416);
+  await expect(panel.getByRole("button", { name: "Profile PDF" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Done" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobile = await panel.boundingBox();
+  expect(mobile).not.toBeNull();
+  expect(mobile!.x).toBeGreaterThanOrEqual(0);
+  expect(mobile!.x + mobile!.width).toBeLessThanOrEqual(390);
 });

@@ -744,6 +744,10 @@ td button {
   width: min(calc(100vw - 48px), 920px) !important;
 }
 
+.modal:has(> .employee-profile) {
+  width: min(calc(100vw - 48px), 920px) !important;
+}
+
 .modal-close {
   position: sticky;
   top: 0;
