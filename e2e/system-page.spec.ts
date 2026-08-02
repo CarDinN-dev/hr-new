@@ -25,12 +25,17 @@ function envelope(data: unknown, meta?: unknown) {
 }
 
 async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], userCount = 2) {
-  const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
+  const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "employee.read_all", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
   const hrRole = roles.find(role => role.code === "HR")!;
-  const superAdminRole = roles.find(role => role.code === "SUPER_ADMIN")!;
-  const target: User = { id: "target-user", email: "target@example.invalid", isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }], permissionOverrides: [] };
-  const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: superAdminRole }], permissionOverrides: [] }];
+  const employeeRole = roles.find(role => role.code === "EMPLOYEE")!;
+  const adminRoles = sessionRoles.map(code => roles.find(role => role.code === code)).filter((role): role is Role => Boolean(role));
+  const target: User = { id: "target-user", email: "target@example.invalid", isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }, { role: employeeRole }], permissionOverrides: [] };
+  const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: adminRoles.map(role => ({ role })), permissionOverrides: [] }];
   users.push(...Array.from({ length: Math.max(0, userCount - users.length) }, (_, index) => ({ id: `user-${index + 1}`, email: `user-${index + 1}@example.invalid`, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }], permissionOverrides: [] })));
+  const employees = [
+    { id: "admin-employee", employeeCode: "ADM-001", firstName: "Amina", lastName: "Admin", email: admin.email, hireDate: "2020-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Platform Administrator", code: "PLATFORM_ADMIN" }, user: { roles: sessionRoles.map(code => ({ role: { code } })) }, manager: null, lineManager: null },
+    { id: "target-employee", employeeCode: "EMP-001", firstName: "Taylor", lastName: "Target", email: target.email, hireDate: "2022-04-10", employmentStatus: "ON_LEAVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR_SPECIALIST" }, user: { roles: [{ role: { code: "HR" } }, { role: { code: "EMPLOYEE" } }] }, manager: null, lineManager: null },
+  ];
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
     { id: "policy-cpo", workflowType: "LEAVE", stage: "CPO", mode: "PRIMARY_APPROVER", version: 1, primaryUser: { id: admin.id, email: admin.email }, members: [] },
@@ -56,6 +61,7 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
       return json(matches.slice((pageNumber - 1) * limit, pageNumber * limit), 200, { total: matches.length, page: pageNumber, limit, totalPages: Math.ceil(matches.length / limit) || 1 });
     }
     if (path === "/system/roles" && request.method() === "GET") return json(roles);
+    if (path === "/employees" && request.method() === "GET") return json(employees);
     if (path === "/system/permissions") return json(permissions);
     if (path === "/system/sessions" && request.method() === "GET") return json(sessions, 200, { total: sessions.length, page: 1, limit: 20, totalPages: 1 });
     if (path === "/system/workflow-policy" && request.method() === "GET") return json(policies);
@@ -204,8 +210,25 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
   await page.getByRole("button", { name: "All users", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Filter users by Super Administrator role" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Filter users by Custom Viewer role" })).toBeVisible();
+  const superAdminButton = page.getByRole("button", { name: "Filter users by Super Administrator role" });
+  const customRoleButton = page.getByRole("button", { name: "Filter users by Custom Viewer role" });
+  const superAdminShell = page.locator(".role-flowchart-node-shell").filter({ has: superAdminButton });
+  const customRoleShell = page.locator(".role-flowchart-node-shell").filter({ has: customRoleButton });
+  await expect(superAdminButton).toBeVisible();
+  await expect(customRoleButton).toBeVisible();
+  await expect(customRoleShell.getByText("No active employees assigned")).toBeVisible();
+  const superAdminRosterToggle = superAdminShell.locator(".role-assignee-toggle");
+  await expect(superAdminRosterToggle).toHaveAccessibleName("Show 1 active employee directly assigned to Super Administrator");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await superAdminRosterToggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(superAdminRosterToggle).toHaveAttribute("aria-expanded", "true");
+  const superAdminRoster = superAdminShell.getByRole("list", { name: "Employees directly assigned to Super Administrator" });
+  await expect(superAdminRoster.getByText("Amina Admin")).toBeVisible();
+  await expect(superAdminRoster.getByText("Executive Office")).toBeVisible();
+  await expect(superAdminButton).toHaveAttribute("aria-pressed", "false");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
   await page.getByRole("button", { name: "Edit hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
   await page.getByRole("checkbox", { name: "HR", exact: true }).check();
@@ -215,13 +238,31 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   expect(JSON.parse((await hierarchySaved).postData() || "{}")).toMatchObject({ parentRoleIds: ["role-hr"], expectedVersion: 1, reason: "Custom role needs HR visibility" });
   await expect(page.getByText("Role inheritance updated. Affected sessions were revoked.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Filter users by Super Administrator role" }).click();
-  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toBeVisible();
+  await superAdminButton.click();
+  const hrButton = page.getByRole("button", { name: "Filter users by HR role" });
+  await expect(hrButton).toBeVisible();
+  await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toHaveCount(0);
+  const hrShell = page.locator(".role-flowchart-node-shell").filter({ has: hrButton });
+  const hrRosterToggle = hrShell.getByRole("button", { name: "Show 1 active employee directly assigned to HR" });
+  await hrRosterToggle.click();
+  const hrRoster = hrShell.getByRole("list", { name: "Employees directly assigned to HR" });
+  await expect(hrRoster.getByText("Taylor Target")).toBeVisible();
+  await expect(hrRoster.getByText("Human Resources")).toBeVisible();
   await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toHaveCount(0);
   const roleFiltered = page.waitForRequest(request => request.url().includes("/api/v1/system/users?") && request.url().includes("roleId=role-hr"));
-  await page.getByRole("button", { name: "Filter users by HR role" }).click();
+  await hrButton.click();
   await roleFiltered;
-  await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toBeVisible();
+  const employeeButton = page.getByRole("button", { name: "Filter users by Employee role" });
+  await expect(employeeButton).toBeVisible();
+  let employeeShell = page.locator(".role-flowchart-node-shell").filter({ has: employeeButton });
+  await employeeShell.getByRole("button", { name: "Show 1 active employee directly assigned to Employee" }).click();
+  await expect(employeeShell.getByRole("list", { name: "Employees directly assigned to Employee" }).getByText("Taylor Target")).toBeVisible();
+  await hrButton.click();
+  await expect(employeeButton).toHaveCount(0);
+  await hrButton.click();
+  await expect(employeeButton).toBeVisible();
+  employeeShell = page.locator(".role-flowchart-node-shell").filter({ has: employeeButton });
+  await expect(employeeShell.getByRole("list", { name: "Employees directly assigned to Employee" })).toHaveCount(0);
   await expect(page.getByRole("row", { name: /target@example\.invalid/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid/ })).not.toBeVisible();
   const combinedFilter = page.waitForRequest(request => request.url().includes("roleId=role-hr") && request.url().includes("search=target"));
@@ -232,7 +273,17 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   const flowViewport = page.locator(".role-flowchart-viewport");
   await expect(flowViewport).toBeVisible();
   expect(await flowViewport.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.locator(".role-flowchart-line").evaluateAll(lines => lines.length > 0 && lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
+  await page.getByLabel("Switch to dark mode").click();
+  await expect(hrRoster.getByText("Taylor Target")).toBeVisible();
+  await page.getByLabel("Switch to light mode").click();
   await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(hrRoster.getByText("Taylor Target")).toBeVisible();
+  await page.getByRole("button", { name: "All users", exact: true }).click();
+  await expect(superAdminButton).toHaveCount(0);
+  await page.getByRole("button", { name: "All users", exact: true }).click();
+  await expect(superAdminButton).toBeVisible();
+  await expect(superAdminShell.getByRole("list", { name: "Employees directly assigned to Super Administrator" })).toHaveCount(0);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("link", { name: "System" }).click();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid.*Current user/ })).toBeVisible();

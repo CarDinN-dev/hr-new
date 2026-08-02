@@ -3260,7 +3260,7 @@ summary {
   display: grid;
   align-content: start;
   gap: 0.38rem;
-  width: 160px;
+  width: 184px;
   animation: role-branch-reveal 180ms ease-out both;
 }
 
@@ -3349,6 +3349,79 @@ summary {
 
 .role-branch-node-custom {
   border-style: dashed;
+}
+
+.role-assignee-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.34rem;
+  width: 100%;
+  min-height: 34px;
+  padding: 0.38rem 0.5rem;
+  border-color: var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-align: left;
+}
+
+.role-assignee-toggle:hover {
+  border-color: color-mix(in srgb, var(--info) 38%, var(--line-strong));
+  color: var(--ink);
+}
+
+.role-assignee-toggle span {
+  flex: 1;
+}
+
+.role-assignee-empty {
+  display: block;
+  padding: 0.42rem 0.5rem;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.role-assignee-list {
+  display: grid;
+  gap: 0.32rem;
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.38rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-2) 72%, var(--panel));
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.role-assignee {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.42rem 0.48rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.role-assignee strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+.role-assignee span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 1.25;
 }
 
 .role-branch-edit {
@@ -3498,11 +3571,11 @@ summary {
   }
 
   .role-flowchart-node-shell {
-    width: 152px;
+    width: 172px;
   }
 
   .role-branch-root-shell {
-    width: 174px;
+    width: 182px;
   }
 
   .role-branch-node {

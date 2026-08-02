@@ -15,6 +15,7 @@ type OrganizationHierarchyIssue = { employee: EmployeeRecord; message: string };
 type RoleFlowGraph = { activeRoles: Role[]; roots: Role[]; childrenByCode: Map<string, Role[]> };
 type RoleFlowEdge = { sourceCode: string; targetCode: string };
 type RoleFlowConnector = RoleFlowEdge & { path: string };
+type RoleAssignee = { id: string; name: string; department: string };
 
 const key = (session: BackendSession, value: string) => [value, session.sessionId, session.authorizationVersion] as const;
 const organizationalRoleLabel: Record<OrganizationalRole, string> = { HR: "HR", MANAGER: "Manager", LINE_MANAGER: "Line manager", EMPLOYEE: "Employee" };
@@ -124,6 +125,19 @@ export function hierarchyInheritancePayload(editor: InheritanceEditor) {
   return { parentRoleIds: [...editor.parentRoleIds], expectedVersion: editor.role.version, reason: editor.reason.trim() };
 }
 
+export function buildRoleAssigneeMap(roles: Role[], employees: EmployeeRecord[]) {
+  const assigneesByCode = new Map<string, RoleAssignee[]>(roles.filter(role => role.isActive).map(role => [role.code, []]));
+  employees.filter(employee => employee.status === "Active" || employee.status === "On Leave").forEach(employee => {
+    const name = employee.fields["Full Name"]?.trim() || employee.fields["Employee Code"]?.trim() || "Unnamed employee";
+    const department = employee.fields.Department?.trim() || "Department not assigned";
+    new Set(employee.roleCodes ?? []).forEach(code => assigneesByCode.get(code)?.push({ id: employee.id, name, department }));
+  });
+  assigneesByCode.forEach(assignees => assignees.sort((left, right) =>
+    left.department.localeCompare(right.department) || left.name.localeCompare(right.name) || left.id.localeCompare(right.id)
+  ));
+  return assigneesByCode;
+}
+
 export function buildRoleFlowGraph(roles: Role[]): RoleFlowGraph {
   const activeRoles = roles.filter(role => role.isActive);
   const roleByCode = new Map(activeRoles.map(role => [role.code, role]));
@@ -224,7 +238,7 @@ export function HierarchyPage({ session, notify, employees, onAddNode, onUpdateR
     {reportingEmployee && <ReportingEditor employee={reportingEmployee} employees={employees} onCancel={() => setReportingEmployee(null)} onSave={async reporting => { await onUpdateReporting(reportingEmployee.id, reporting); setReportingEmployee(null); }} />}
     <div className="panel">
       <div className="panel-head"><div><h3>Role hierarchy</h3><span>Explore inherited access and find the users assigned to each branch.</span></div></div>
-      {roles.isPending ? <p className="muted">Loading role hierarchy…</p> : roles.isError ? <p className="sync-alert">{roles.error.message}</p> : <RoleBranchFilter roles={roles.data ?? []} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId} onEdit={role => setEditor({ role, parentRoleIds: new Set(role.inherits.map(code => roles.data?.find(item => item.code === code)?.id).filter((id): id is string => Boolean(id))), reason: "" })} />}
+      {roles.isPending ? <p className="muted">Loading role hierarchy…</p> : roles.isError ? <p className="sync-alert">{roles.error.message}</p> : <RoleBranchFilter roles={roles.data ?? []} employees={employees} selectedRoleId={selectedRoleId} onSelect={setSelectedRoleId} onEdit={role => setEditor({ role, parentRoleIds: new Set(role.inherits.map(code => roles.data?.find(item => item.code === code)?.id).filter((id): id is string => Boolean(id))), reason: "" })} />}
     </div>
     {editor && <div className="panel">
       <div className="panel-head"><div><h3>Edit {editor.role.displayName} hierarchy</h3><span>Choose the built-in roles whose permissions this custom role inherits.</span></div></div>
@@ -388,17 +402,19 @@ function ReportingEditor({ employee, employees, onCancel, onSave }: { employee: 
   </div>;
 }
 
-export function RoleBranchFilter({ roles, selectedRoleId, onSelect, onEdit }: { roles: Role[]; selectedRoleId: string; onSelect: (roleId: string) => void; onEdit?: (role: Role) => void }) {
+export function RoleBranchFilter({ roles, employees, selectedRoleId, onSelect, onEdit }: { roles: Role[]; employees: EmployeeRecord[]; selectedRoleId: string; onSelect: (roleId: string) => void; onEdit?: (role: Role) => void }) {
   const graph = buildRoleFlowGraph(roles);
+  const assigneesByCode = buildRoleAssigneeMap(roles, employees);
   const [rootExpanded, setRootExpanded] = useState(false);
   const [expandedRoleCodes, setExpandedRoleCodes] = useState<Set<string>>(new Set());
+  const [expandedRosterCodes, setExpandedRosterCodes] = useState<Set<string>>(new Set());
   const [focusCode, setFocusCode] = useState(roleFlowRootCode);
   const [connectors, setConnectors] = useState<RoleFlowConnector[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef(new Map<string, HTMLButtonElement>());
   const flow = buildVisibleRoleFlow(graph, rootExpanded, expandedRoleCodes);
-  const signature = `${flow.levels.flat().map(role => role.code).join("|")}:${flow.edges.map(edge => `${edge.sourceCode}>${edge.targetCode}`).join("|")}`;
+  const signature = `${flow.levels.flat().map(role => role.code).join("|")}:${flow.edges.map(edge => `${edge.sourceCode}>${edge.targetCode}`).join("|")}:${[...expandedRosterCodes].sort().join("|")}`;
   const widestLevel = Math.max(1, ...flow.levels.map(level => level.length));
 
   useLayoutEffect(() => {
@@ -462,27 +478,41 @@ export function RoleBranchFilter({ roles, selectedRoleId, onSelect, onEdit }: { 
     setRootExpanded(nextExpanded);
     setFocusCode(roleFlowRootCode);
     onSelect("");
-    if (!nextExpanded) setExpandedRoleCodes(new Set());
+    if (!nextExpanded) {
+      setExpandedRoleCodes(new Set());
+      setExpandedRosterCodes(new Set());
+    }
   };
   const toggleRole = (role: Role) => {
     onSelect(selectedRoleId === role.id ? "" : role.id);
     setFocusCode(role.code);
     if (!(graph.childrenByCode.get(role.code)?.length)) return;
-    setExpandedRoleCodes(current => {
-      const next = new Set(current);
-      if (next.has(role.code)) {
-        next.delete(role.code);
-        return pruneExpandedRoleCodes(graph, true, next);
-      }
+    const next = new Set(expandedRoleCodes);
+    if (!next.has(role.code)) {
       next.add(role.code);
+      setExpandedRoleCodes(next);
+      return;
+    }
+    next.delete(role.code);
+    const pruned = pruneExpandedRoleCodes(graph, true, next);
+    const visibleCodes = buildVisibleRoleFlow(graph, true, pruned).visibleCodes;
+    setExpandedRoleCodes(pruned);
+    setExpandedRosterCodes(current => new Set([...current].filter(code => visibleCodes.has(code))));
+  };
+  const toggleRoster = (role: Role) => {
+    setFocusCode(role.code);
+    setExpandedRosterCodes(current => {
+      const next = new Set(current);
+      if (next.has(role.code)) next.delete(role.code);
+      else next.add(role.code);
       return next;
     });
   };
 
   return <div className="role-branch-filter" role="group" aria-label="Role hierarchy filter">
-    <p>Select a card to filter users and reveal the roles it inherits. Redundant links are combined for clarity.</p>
+    <p>Select a role to filter users and reveal inherited roles. Use its assigned count to show employee names and departments. Redundant links are combined for clarity.</p>
     <div className="role-flowchart-viewport" ref={viewportRef}>
-      <div className="role-flowchart-canvas" id="role-hierarchy-flowchart" ref={canvasRef} style={{ minWidth: `${Math.max(320, widestLevel * 176)}px` }}>
+      <div className="role-flowchart-canvas" id="role-hierarchy-flowchart" ref={canvasRef} style={{ minWidth: `${Math.max(320, widestLevel * 200)}px` }}>
         <svg className="role-flowchart-connectors" aria-hidden="true">
           <defs><marker id="role-flowchart-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
           {connectors.map(connector => <path className="role-flowchart-line" d={connector.path} markerEnd="url(#role-flowchart-arrow)" key={`${connector.sourceCode}-${connector.targetCode}`} />)}
@@ -499,11 +529,20 @@ export function RoleBranchFilter({ roles, selectedRoleId, onSelect, onEdit }: { 
           {level.map(role => {
             const children = graph.childrenByCode.get(role.code) ?? [];
             const expanded = expandedRoleCodes.has(role.code);
+            const assignees = assigneesByCode.get(role.code) ?? [];
+            const rosterExpanded = expandedRosterCodes.has(role.code);
+            const rosterId = `role-assignees-${role.id}`;
             return <div className="role-flowchart-node-shell" key={role.id}>
               <button ref={setNodeRef(role.code)} type="button" className={`role-branch-node${role.isBuiltIn ? "" : " role-branch-node-custom"}${selectedRoleId === role.id ? " selected" : ""}${expanded ? " expanded" : ""}`} aria-label={`Filter users by ${role.displayName} role`} aria-pressed={selectedRoleId === role.id} aria-expanded={children.length ? expanded : undefined} onClick={() => toggleRole(role)}>
                 <span className="role-branch-node-copy"><strong>{role.displayName}</strong><span>{role.code.replaceAll("_", " ")}</span></span>
                 {children.length > 0 && <span className="role-branch-disclosure" aria-hidden="true">{expanded ? <ChevronDown size={17} /> : <ChevronRight size={17} />}</span>}
               </button>
+              {assignees.length ? <button type="button" className="role-assignee-toggle" aria-expanded={rosterExpanded} aria-controls={rosterId} aria-label={`${rosterExpanded ? "Hide" : "Show"} ${assignees.length} active employee${assignees.length === 1 ? "" : "s"} directly assigned to ${role.displayName}`} onClick={() => toggleRoster(role)}>
+                <Users size={14} aria-hidden="true" /><span>{assignees.length} assigned</span>{rosterExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+              </button> : <span className="role-assignee-empty">No active employees assigned</span>}
+              {rosterExpanded && <div id={rosterId} className="role-assignee-list" role="list" tabIndex={0} aria-label={`Employees directly assigned to ${role.displayName}`}>
+                {assignees.map(assignee => <div className="role-assignee" role="listitem" key={assignee.id}><strong>{assignee.name}</strong><span>{assignee.department}</span></div>)}
+              </div>}
               {!role.isBuiltIn && onEdit && <button type="button" className="role-branch-edit" onClick={() => onEdit(role)}><Pencil size={14} aria-hidden="true" /> Edit hierarchy</button>}
             </div>;
           })}

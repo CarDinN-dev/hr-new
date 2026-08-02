@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, buildRoleFlowGraph, buildVisibleRoleFlow, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams, pruneExpandedRoleCodes } from "./features/hierarchy-page";
+import { buildOrganizationHierarchy, buildRoleAssigneeMap, buildRoleFlowGraph, buildVisibleRoleFlow, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams, pruneExpandedRoleCodes } from "./features/hierarchy-page";
 
 const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
   id,
@@ -45,6 +45,32 @@ describe("hierarchy page requests", () => {
     expect(shared.edges.filter(edge => edge.targetCode === "EMPLOYEE").map(edge => edge.sourceCode)).toEqual(["ADMIN", "HR"]);
     expect(buildVisibleRoleFlow(graph, true, new Set(["SUPER_ADMIN", "ADMIN"])).visibleCodes.has("EMPLOYEE")).toBe(true);
     expect([...pruneExpandedRoleCodes(graph, true, new Set(["ADMIN", "HR"]))]).toEqual([]);
+  });
+
+  it("maps active employees to every directly assigned active role", () => {
+    const inactiveRole = { ...accessRole("ARCHIVED"), isActive: false };
+    const assignees = buildRoleAssigneeMap(
+      [accessRole("EMPLOYEE"), accessRole("HR", ["EMPLOYEE"]), accessRole("CUSTOM_VIEWER", [], false), inactiveRole],
+      [
+        employee("amy", "EMP-001", { "Full Name": "Amy Adams", Department: "Engineering" }, ["HR", "HR"]),
+        { ...employee("zoe", "EMP-002", { "Full Name": "Zoe Zane", Department: "Finance" }, ["HR", "CUSTOM_VIEWER"]), status: "On Leave" as const },
+        employee("fallback", "EMP-003", { "Full Name": "", Department: "" }, ["CUSTOM_VIEWER"]),
+        { ...employee("former", "EMP-004", { Department: "Finance" }, ["HR"]), status: "Resigned" as const },
+        { ...employee("terminated", "EMP-006", { Department: "Finance" }, ["CUSTOM_VIEWER"]), status: "Terminated" as const },
+        employee("archived", "EMP-005", { Department: "Operations" }, ["ARCHIVED"]),
+      ],
+    );
+
+    expect(assignees.get("HR")).toEqual([
+      { id: "amy", name: "Amy Adams", department: "Engineering" },
+      { id: "zoe", name: "Zoe Zane", department: "Finance" },
+    ]);
+    expect(assignees.get("CUSTOM_VIEWER")).toEqual([
+      { id: "fallback", name: "EMP-003", department: "Department not assigned" },
+      { id: "zoe", name: "Zoe Zane", department: "Finance" },
+    ]);
+    expect(assignees.get("EMPLOYEE")).toEqual([]);
+    expect(assignees.has("ARCHIVED")).toBe(false);
   });
 
   it("builds the employee tree from reporting assignments instead of job titles", () => {
