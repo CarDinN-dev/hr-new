@@ -3195,7 +3195,6 @@ summary {
 }
 
 .role-branch-filter {
-  overflow: hidden;
   margin-bottom: 0.8rem;
   padding: 0.85rem;
   border: 1px solid var(--line);
@@ -3209,60 +3208,129 @@ summary {
   font-size: 0.78rem;
 }
 
-.role-branch-levels {
+.role-flowchart-viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0 0.55rem;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.role-flowchart-canvas {
   position: relative;
   display: grid;
-  gap: 1.2rem;
-  margin-top: 1.2rem;
+  gap: 1.55rem;
+  width: 100%;
+  padding: 0.2rem 1rem 0.75rem;
 }
 
-.role-branch-levels::before {
+.role-flowchart-connectors {
   position: absolute;
-  inset: -1.2rem 50% 0;
-  width: 1px;
-  background: var(--line-strong);
-  content: "";
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
 }
 
-.role-branch-level {
+.role-flowchart-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--info) 62%, var(--line-strong));
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.role-flowchart-connectors marker path {
+  fill: color-mix(in srgb, var(--info) 62%, var(--line-strong));
+}
+
+.role-flowchart-level {
   position: relative;
   z-index: 1;
   display: flex;
   justify-content: center;
-  gap: 0.65rem;
+  gap: 1rem;
+  min-width: 100%;
 }
 
-.role-branch-level::before {
-  position: absolute;
-  top: 50%;
-  right: 12%;
-  left: 12%;
-  z-index: -1;
-  height: 1px;
-  background: var(--line-strong);
-  content: "";
+.role-flowchart-node-shell {
+  display: grid;
+  align-content: start;
+  gap: 0.38rem;
+  width: 160px;
+  animation: role-branch-reveal 180ms ease-out both;
 }
 
 .role-branch-node {
+  position: relative;
   display: grid;
-  min-width: 132px;
-  min-height: 58px;
-  padding: 0.55rem 0.8rem;
+  place-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 0.62rem 2rem 0.62rem 0.8rem;
   border-color: var(--line-strong);
+  border-radius: 12px;
   background: var(--panel);
   color: var(--ink);
   text-align: center;
+  box-shadow: 0 5px 16px rgba(17, 29, 44, 0.045);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 
-.role-branch-node strong,
-.role-branch-node span {
+.role-branch-node:hover {
+  border-color: color-mix(in srgb, var(--info) 42%, var(--line-strong));
+  box-shadow: 0 9px 20px rgba(17, 29, 44, 0.08);
+  transform: translateY(-1px);
+}
+
+.role-branch-node-copy,
+.role-branch-node-copy strong,
+.role-branch-node-copy span {
   display: block;
 }
 
-.role-branch-node span {
+.role-branch-node-copy {
+  min-width: 0;
+}
+
+.role-branch-node-copy strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.role-branch-node-copy span {
+  overflow: hidden;
+  margin-top: 0.16rem;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   letter-spacing: 0.045em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.role-branch-disclosure {
+  position: absolute;
+  top: 50%;
+  right: 0.62rem;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--soft);
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+.role-branch-node.expanded:not(.selected) {
+  border-color: color-mix(in srgb, var(--info) 48%, var(--line-strong));
+  background: color-mix(in srgb, var(--info-bg) 46%, var(--panel));
 }
 
 .role-branch-node.selected {
@@ -3272,37 +3340,45 @@ summary {
 }
 
 .role-branch-root {
-  position: relative;
-  z-index: 2;
-  margin-inline: auto;
+  min-height: 68px;
 }
 
-.role-branch-custom {
-  display: flex;
+.role-branch-root-shell {
+  width: 184px;
+}
+
+.role-branch-node-custom {
+  border-style: dashed;
+}
+
+.role-branch-edit {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  margin-top: 1rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--line-strong);
+  justify-content: center;
+  gap: 0.28rem;
+  min-height: 32px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.66rem;
 }
 
-.role-branch-custom > span {
+.role-flowchart-empty {
+  position: relative;
+  z-index: 1;
+  margin: 0;
   color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 760;
+  font-size: 0.76rem;
+  text-align: center;
 }
 
-.role-branch-custom-role {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.role-branch-inherits {
-  max-width: 180px;
-  color: var(--muted);
-  font-size: 0.7rem;
-  line-height: 1.35;
+@keyframes role-branch-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .system-user-filter-summary {
@@ -3407,17 +3483,30 @@ summary {
     width: 0.55rem;
   }
 
-  .role-branch-level {
-    align-items: stretch;
-    flex-direction: column;
+  .role-flowchart-viewport {
+    margin-inline: -0.35rem;
+    padding-inline: 0.35rem;
   }
 
-  .role-branch-level::before {
-    display: none;
+  .role-flowchart-canvas {
+    gap: 1.35rem;
+    padding-inline: 0.65rem;
+  }
+
+  .role-flowchart-level {
+    gap: 0.75rem;
+  }
+
+  .role-flowchart-node-shell {
+    width: 152px;
+  }
+
+  .role-branch-root-shell {
+    width: 174px;
   }
 
   .role-branch-node {
-    width: 100%;
+    min-height: 60px;
   }
 }
 

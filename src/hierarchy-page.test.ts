@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams } from "./features/hierarchy-page";
+import { buildOrganizationHierarchy, buildRoleFlowGraph, buildVisibleRoleFlow, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams, pruneExpandedRoleCodes } from "./features/hierarchy-page";
 
 const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
   id,
@@ -8,10 +8,43 @@ const employee = (id: string, code: string, fields: Record<string, string> = {},
   fields: { "Employee Code": code, "Full Name": id, Designation: "Specialist", ...fields },
 });
 
+const accessRole = (code: string, inherits: string[] = [], isBuiltIn = true) => ({
+  id: `role-${code.toLowerCase()}`,
+  code,
+  displayName: code.replaceAll("_", " "),
+  version: 1,
+  isBuiltIn,
+  isActive: true,
+  protection: code === "SUPER_ADMIN" ? "SUPER_ADMIN" as const : "STANDARD" as const,
+  inherits,
+});
+
 describe("hierarchy page requests", () => {
   it("combines direct-role filtering and sends versioned inheritance changes", () => {
     expect(hierarchyUserParams("Taylor", "role-hr").toString()).toBe("search=Taylor&roleId=role-hr");
     expect(hierarchyInheritancePayload({ role: { id: "role-custom", code: "CUSTOM", displayName: "Custom", version: 3, isBuiltIn: false, isActive: true, protection: "STANDARD", inherits: [] }, parentRoleIds: new Set(["role-employee", "role-hr"]), reason: "  Add inherited access  " })).toEqual({ parentRoleIds: ["role-employee", "role-hr"], expectedVersion: 3, reason: "Add inherited access" });
+  });
+
+  it("builds and progressively reveals a reduced role inheritance graph", () => {
+    const graph = buildRoleFlowGraph([
+      accessRole("ADMIN", ["EMPLOYEE"]),
+      accessRole("EMPLOYEE"),
+      accessRole("HR", ["EMPLOYEE"]),
+      accessRole("SUPER_ADMIN", ["EMPLOYEE", "HR", "ADMIN"]),
+      accessRole("CUSTOM_VIEWER", ["EMPLOYEE", "HR"], false),
+    ]);
+
+    expect(graph.roots.map(role => role.code)).toEqual(["SUPER_ADMIN", "CUSTOM_VIEWER"]);
+    expect(graph.childrenByCode.get("SUPER_ADMIN")?.map(role => role.code)).toEqual(["ADMIN", "HR"]);
+    expect(graph.childrenByCode.get("CUSTOM_VIEWER")?.map(role => role.code)).toEqual(["HR"]);
+    expect(buildVisibleRoleFlow(graph, false, new Set()).levels).toEqual([]);
+    expect(buildVisibleRoleFlow(graph, true, new Set()).levels.map(level => level.map(role => role.code))).toEqual([["SUPER_ADMIN", "CUSTOM_VIEWER"]]);
+
+    const shared = buildVisibleRoleFlow(graph, true, new Set(["SUPER_ADMIN", "ADMIN", "HR"]));
+    expect(shared.levels.map(level => level.map(role => role.code))).toEqual([["SUPER_ADMIN", "CUSTOM_VIEWER"], ["ADMIN", "HR"], ["EMPLOYEE"]]);
+    expect(shared.edges.filter(edge => edge.targetCode === "EMPLOYEE").map(edge => edge.sourceCode)).toEqual(["ADMIN", "HR"]);
+    expect(buildVisibleRoleFlow(graph, true, new Set(["SUPER_ADMIN", "ADMIN"])).visibleCodes.has("EMPLOYEE")).toBe(true);
+    expect([...pruneExpandedRoleCodes(graph, true, new Set(["ADMIN", "HR"]))]).toEqual([]);
   });
 
   it("builds the employee tree from reporting assignments instead of job titles", () => {

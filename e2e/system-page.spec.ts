@@ -9,9 +9,14 @@ const permissions: Permission[] = [
   { id: "permission-role-protected", code: "role.assign_protected", displayName: "Assign protected roles", category: "System", isProtected: true, isDeprecated: false },
 ];
 const roles: Role[] = [
+  { id: "role-admin", code: "ADMIN", displayName: "Administrator", version: 1, isBuiltIn: true, isActive: true, protection: "PROTECTED", inherits: ["EMPLOYEE"], permissions: [] },
+  { id: "role-coo", code: "COO", displayName: "Chief Operating Officer", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: ["EMPLOYEE"], permissions: [] },
+  { id: "role-cpo", code: "CPO", displayName: "Chief People Officer", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: ["EMPLOYEE"], permissions: [] },
   { id: "role-employee", code: "EMPLOYEE", displayName: "Employee", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: [], permissions: [] },
   { id: "role-hr", code: "HR", displayName: "HR", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: ["EMPLOYEE"], permissions: [] },
-  { id: "role-super-admin", code: "SUPER_ADMIN", displayName: "Super Administrator", version: 1, isBuiltIn: true, isActive: true, protection: "SUPER_ADMIN", inherits: ["EMPLOYEE", "HR"], permissions: [] },
+  { id: "role-line-manager", code: "LINE_MANAGER", displayName: "Line Manager", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: ["EMPLOYEE"], permissions: [] },
+  { id: "role-manager", code: "MANAGER", displayName: "Manager", version: 1, isBuiltIn: true, isActive: true, protection: "STANDARD", inherits: ["EMPLOYEE"], permissions: [] },
+  { id: "role-super-admin", code: "SUPER_ADMIN", displayName: "Super Administrator", version: 1, isBuiltIn: true, isActive: true, protection: "SUPER_ADMIN", inherits: ["EMPLOYEE", "HR", "LINE_MANAGER", "MANAGER", "COO", "CPO", "ADMIN"], permissions: [] },
   { id: "role-custom", code: "CUSTOM_VIEWER", displayName: "Custom Viewer", version: 1, isBuiltIn: false, isActive: true, protection: "STANDARD", inherits: [], permissions: [] },
 ];
 
@@ -21,9 +26,11 @@ function envelope(data: unknown, meta?: unknown) {
 
 async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], userCount = 2) {
   const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
-  const target: User = { id: "target-user", email: "target@example.invalid", isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[1] }], permissionOverrides: [] };
-  const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[2] }], permissionOverrides: [] }];
-  users.push(...Array.from({ length: Math.max(0, userCount - users.length) }, (_, index) => ({ id: `user-${index + 1}`, email: `user-${index + 1}@example.invalid`, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: roles[1] }], permissionOverrides: [] })));
+  const hrRole = roles.find(role => role.code === "HR")!;
+  const superAdminRole = roles.find(role => role.code === "SUPER_ADMIN")!;
+  const target: User = { id: "target-user", email: "target@example.invalid", isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }], permissionOverrides: [] };
+  const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: superAdminRole }], permissionOverrides: [] }];
+  users.push(...Array.from({ length: Math.max(0, userCount - users.length) }, (_, index) => ({ id: `user-${index + 1}`, email: `user-${index + 1}@example.invalid`, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }], permissionOverrides: [] })));
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
     { id: "policy-cpo", workflowType: "LEAVE", stage: "CPO", mode: "PRIMARY_APPROVER", version: 1, primaryUser: { id: admin.id, email: admin.email }, members: [] },
@@ -165,6 +172,7 @@ test("Admin can edit custom-role inheritance", async ({ page }) => {
   await page.getByLabel("Password").fill("IntegrationPass123!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Hierarchy" }).click();
+  await page.getByRole("button", { name: "All users", exact: true }).click();
   await page.getByRole("button", { name: "Edit hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
 });
@@ -194,6 +202,10 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await page.getByRole("link", { name: "Hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Role hierarchy" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
+  await page.getByRole("button", { name: "All users", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Filter users by Super Administrator role" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Filter users by Custom Viewer role" })).toBeVisible();
   await page.getByRole("button", { name: "Edit hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
   await page.getByRole("checkbox", { name: "HR", exact: true }).check();
@@ -202,16 +214,26 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await page.getByRole("button", { name: "Save hierarchy" }).click();
   expect(JSON.parse((await hierarchySaved).postData() || "{}")).toMatchObject({ parentRoleIds: ["role-hr"], expectedVersion: 1, reason: "Custom role needs HR visibility" });
   await expect(page.getByText("Role inheritance updated. Affected sessions were revoked.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Filter users by Super Administrator role" }).click();
+  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toHaveCount(0);
   const roleFiltered = page.waitForRequest(request => request.url().includes("/api/v1/system/users?") && request.url().includes("roleId=role-hr"));
   await page.getByRole("button", { name: "Filter users by HR role" }).click();
   await roleFiltered;
+  await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toBeVisible();
   await expect(page.getByRole("row", { name: /target@example\.invalid/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid/ })).not.toBeVisible();
   const combinedFilter = page.waitForRequest(request => request.url().includes("roleId=role-hr") && request.url().includes("search=target"));
   await page.getByLabel("Find users").fill("target");
   await combinedFilter;
   await expect(page.getByText("1 user found with HR.")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const flowViewport = page.locator(".role-flowchart-viewport");
+  await expect(flowViewport).toBeVisible();
+  expect(await flowViewport.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
   await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("link", { name: "System" }).click();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid.*Current user/ })).toBeVisible();
   const searched = page.waitForRequest(request => request.url().includes("/api/v1/system/sessions?") && request.url().includes("search=target"));
