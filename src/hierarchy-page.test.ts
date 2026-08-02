@@ -1,15 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, buildRoleAssigneeMap, buildRoleFlowGraph, buildVisibleRoleFlow, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams, pruneExpandedRoleCodes } from "./features/hierarchy-page";
+import {
+  buildOrganizationHierarchy,
+  buildRoleAssigneeMap,
+  buildRoleFlowGraph,
+  buildVisibleEmployeeFlow,
+  buildVisibleRoleFlow,
+  employeeHierarchySearchPath,
+  hierarchyInheritancePayload,
+  hierarchyLineManagerCode,
+  hierarchyManagerCode,
+  hierarchyReportingPayload,
+  hierarchyUserParams,
+  pruneExpandedEmployeeIds,
+  pruneExpandedRoleCodes,
+  unassignedReportingRootId,
+} from "./features/hierarchy-page";
 
-const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
+const employee = (
+  id: string,
+  code: string,
+  fields: Record<string, string> = {},
+  roleCodes: string[] = [],
+  reporting: { lineManagerId?: string | null; managerId?: string | null } = {},
+) => ({
   id,
   status: "Active" as const,
   roleCodes,
   fields: { "Employee Code": code, "Full Name": id, Designation: "Specialist", ...fields },
+  ...reporting,
 });
 
 const accessRole = (code: string, inherits: string[] = [], isBuiltIn = true) => ({
-  id: `role-${code.toLowerCase()}`,
+  id: "role-" + code.toLowerCase(),
   code,
   displayName: code.replaceAll("_", " "),
   version: 1,
@@ -47,7 +69,7 @@ describe("hierarchy page requests", () => {
     expect([...pruneExpandedRoleCodes(graph, true, new Set(["ADMIN", "HR"]))]).toEqual([]);
   });
 
-  it("maps active employees to every directly assigned active role", () => {
+  it("maps active employees to every directly assigned active access role", () => {
     const inactiveRole = { ...accessRole("ARCHIVED"), isActive: false };
     const assignees = buildRoleAssigneeMap(
       [accessRole("EMPLOYEE"), accessRole("HR", ["EMPLOYEE"]), accessRole("CUSTOM_VIEWER", [], false), inactiveRole],
@@ -73,67 +95,87 @@ describe("hierarchy page requests", () => {
     expect(assignees.has("ARCHIVED")).toBe(false);
   });
 
-  it("builds the employee tree from reporting assignments instead of job titles", () => {
-    const hierarchy = buildOrganizationHierarchy([
-      employee("manager", "MGR-01", { Designation: "Commercial Director" }),
-      employee("line", "LINE-01", { Designation: "Workshop Foreman", "Manager Employee Code/Name": "MGR-01 - manager" }),
-      employee("staff", "EMP-01", { Designation: "Engineer", "Line Manager Employee Code/Name": "LINE-01 - line", "Manager Employee Code/Name": "MGR-01 - manager" }),
-      employee("fallback", "EMP-02", { "Line Manager Employee Code/Name": "MISSING - Missing", "Manager Employee Code/Name": "MGR-01 - manager" }),
-      employee("root", "ROOT-01"),
+  it("uses saved reporting IDs for primary and additional Manager relationships", () => {
+    const graph = buildOrganizationHierarchy([
+      employee("lead", "LEAD", { "Full Name": "Executive Lead", Designation: "Operations Director" }),
+      employee("manager", "MGR", { "Full Name": "Department Manager", Department: "Operations" }, [], { lineManagerId: "lead", managerId: null }),
+      employee("line", "LINE", { "Full Name": "Line Lead", Department: "Operations" }, [], { lineManagerId: "manager", managerId: "manager" }),
+      employee("staff", "EMP", { "Full Name": "Employee", Department: "Operations", "Line Manager Employee Code/Name": "STALE - Stale" }, [], { lineManagerId: "line", managerId: "manager" }),
+      employee("manager-only", "EMP2", { "Full Name": "Manager Fallback", Department: "Finance" }, [], { lineManagerId: null, managerId: "manager" }),
+      employee("unassigned", "NONE", { "Full Name": "No Reporting Link" }, ["COO"], { lineManagerId: null, managerId: null }),
     ]);
 
-    expect(hierarchy.roots.map(node => node.employee.id)).toEqual(["manager", "root"]);
-    const manager = hierarchy.roots[0];
-    expect(manager.role).toBe("MANAGER");
-    expect(manager.children.map(node => node.employee.id)).toEqual(["line", "fallback"]);
-    expect(manager.children[0]).toMatchObject({ role: "LINE_MANAGER", roleLabel: "Line manager" });
-    expect(manager.children[0].children[0].employee.id).toBe("staff");
-    expect(hierarchy.issues).toEqual([{ employee: expect.objectContaining({ id: "fallback" }), message: "Line Manager does not match another active employee." }]);
+    expect(graph.roots.map(item => item.id)).toEqual(["lead"]);
+    expect(graph.unassignedRoots.map(item => item.id)).toEqual(["unassigned"]);
+    expect(graph.primaryParentById.get("staff")).toBe("line");
+    expect(graph.primaryRelationById.get("line")).toBe("BOTH");
+    expect(graph.primaryRelationById.get("manager-only")).toBe("MANAGER");
+    expect(graph.secondaryManagerEdges).toContainEqual({ sourceId: "manager", targetId: "staff", relation: "MANAGER", secondary: true });
+    expect(graph.lineManagerIds).toEqual(new Set(["lead", "manager", "line"]));
+    expect(graph.managerIds).toEqual(new Set(["manager"]));
+    expect(graph.issues).toEqual([]);
   });
 
-  it("uses the dedicated links for manager and line-manager hierarchy levels", () => {
-    const employee = { id: "employee-1", status: "Active" as const, fields: {
+  it("progressively reveals branches, searches reporting paths, and prunes collapsed descendants", () => {
+    const graph = buildOrganizationHierarchy([
+      employee("lead", "LEAD", { "Full Name": "Executive Lead" }),
+      employee("team", "TEAM", { "Full Name": "Team Lead", Department: "Field Services" }, [], { lineManagerId: "lead" }),
+      employee("staff", "STAFF", { "Full Name": "Alex Worker", Designation: "Engineer", Department: "Field Services" }, [], { lineManagerId: "team" }),
+      employee("unassigned", "NONE", { "Full Name": "Unassigned Person" }, [], { lineManagerId: null, managerId: null }),
+    ]);
+
+    expect(buildVisibleEmployeeFlow(graph, new Set()).levels.map(level => level.map(node => node.id))).toEqual([["lead", unassignedReportingRootId]]);
+    expect(buildVisibleEmployeeFlow(graph, new Set(["lead"])).levels.map(level => level.map(node => node.id))).toEqual([["lead", unassignedReportingRootId], ["team"]]);
+    expect(buildVisibleEmployeeFlow(graph, new Set(["lead", "team"])).levels.map(level => level.map(node => node.id))).toEqual([["lead", unassignedReportingRootId], ["team"], ["staff"]]);
+    expect(buildVisibleEmployeeFlow(graph, new Set([unassignedReportingRootId])).visibleIds.has("unassigned")).toBe(true);
+    expect([...pruneExpandedEmployeeIds(graph, new Set(["team"]))]).toEqual([]);
+
+    const search = employeeHierarchySearchPath(graph, "engineer");
+    expect(search.matchedIds).toEqual(new Set(["staff"]));
+    expect(search.visibleIds).toEqual(new Set(["staff", "team", "lead"]));
+    expect(buildVisibleEmployeeFlow(graph, search.visibleIds, search.visibleIds).visibleIds).toEqual(search.visibleIds);
+
+    const unassignedSearch = employeeHierarchySearchPath(graph, "unassigned person");
+    expect(unassignedSearch.visibleIds).toEqual(new Set(["unassigned", unassignedReportingRootId]));
+  });
+
+  it("falls back to Manager, excludes inactive employees, and reports invalid active links", () => {
+    const graph = buildOrganizationHierarchy([
+      employee("lead", "LEAD"),
+      employee("staff", "STAFF", {}, [], { lineManagerId: "missing", managerId: "lead" }),
+      { ...employee("former", "FORMER", {}, [], { lineManagerId: "lead" }), status: "Resigned" as const },
+    ]);
+
+    expect(graph.activeEmployees.map(item => item.id)).toEqual(["lead", "staff"]);
+    expect(graph.primaryParentById.get("staff")).toBe("lead");
+    expect(graph.primaryRelationById.get("staff")).toBe("MANAGER");
+    expect(graph.issues).toEqual([{ employee: expect.objectContaining({ id: "staff" }), message: "Line Manager is not an active employee in this hierarchy." }]);
+  });
+
+  it("uses legacy labels only when reporting IDs are absent", () => {
+    const legacy = { id: "employee-1", status: "Active" as const, fields: {
       Designation: "Employee", "Line Manager Employee Code/Name": "LINE-01 - Lina Lead", "Manager Employee Code/Name": "MGR-01 - Dana Manager",
     } };
-    expect(hierarchyLineManagerCode(employee)).toBe("line-01");
-    expect(hierarchyManagerCode(employee)).toBe("mgr-01");
-    const legacyEmployee = { id: "employee-2", status: "Active" as const, fields: { "Reporting Manager Employee Code/Name": "LINE-02 - Legacy Lead" } };
-    expect(hierarchyLineManagerCode(legacyEmployee)).toBe("line-02");
-    expect(hierarchyManagerCode(legacyEmployee)).toBe("");
+    expect(hierarchyLineManagerCode(legacy)).toBe("line-01");
+    expect(hierarchyManagerCode(legacy)).toBe("mgr-01");
+    const older = { id: "employee-2", status: "Active" as const, fields: { "Reporting Manager Employee Code/Name": "LINE-02 - Legacy Lead" } };
+    expect(hierarchyLineManagerCode(older)).toBe("line-02");
+    expect(hierarchyManagerCode(older)).toBe("");
   });
 
-  it("shows combined reporting roles and keeps every employee visible when a cycle exists", () => {
-    const hierarchy = buildOrganizationHierarchy([
-      employee("a", "A", { "Line Manager Employee Code/Name": "B - b" }),
-      employee("b", "B", { "Manager Employee Code/Name": "A - a" }),
-      employee("c", "C", { "Line Manager Employee Code/Name": "B - b" }),
-      employee("d", "D", { "Manager Employee Code/Name": "B - b" }),
-    ]);
-    const root = hierarchy.roots[0];
-    expect(root.employee.id).toBe("a");
-    expect(root.children[0]).toMatchObject({ employee: expect.objectContaining({ id: "b" }), roleLabel: "Manager / Line manager" });
-    expect([root.employee.id, root.children[0].employee.id, ...root.children[0].children.map(node => node.employee.id)].sort()).toEqual(["a", "b", "c", "d"]);
-    expect(hierarchy.issues).toContainEqual({ employee: expect.objectContaining({ id: "a" }), message: "Reporting cycle was broken here so every employee remains visible." });
-  });
-
-  it("shows active executive and HR roles without changing reporting placement", () => {
-    const hierarchy = buildOrganizationHierarchy([
-      employee("Hafiz", "TEMP-COO-HAFIZ", {}, ["COO"]),
-      employee("Ahmed", "MTC082", { "Line Manager Employee Code/Name": "TEMP-COO-HAFIZ - Hafiz" }),
-      employee("Zahira", "TEMP-CPO-ZAHIRA", { "Manager Employee Code/Name": "TEMP-COO-HAFIZ - Hafiz" }, ["CPO"]),
-      employee("Aboobacker", "MTC037", { "Line Manager Employee Code/Name": "TEMP-CPO-ZAHIRA - Zahira" }),
-      employee("Mukesh Krishna", "MTC158", {
-        "Line Manager Employee Code/Name": "TEMP-CPO-ZAHIRA - Zahira",
-        "Manager Employee Code/Name": "TEMP-CPO-ZAHIRA - Zahira",
-      }, ["HR"]),
+  it("combines identical links and keeps every employee visible when a cycle exists", () => {
+    const graph = buildOrganizationHierarchy([
+      employee("a", "A", {}, [], { lineManagerId: "b" }),
+      employee("b", "B", {}, [], { managerId: "a" }),
+      employee("c", "C", {}, [], { lineManagerId: "b", managerId: "b" }),
+      employee("d", "D", {}, [], { managerId: "b" }),
     ]);
 
-    const hafiz = hierarchy.roots[0];
-    expect(hafiz).toMatchObject({ employee: { id: "Hafiz" }, roleLabel: "COO" });
-    expect(hafiz.children.map(node => node.employee.id)).toEqual(["Zahira", "Ahmed"]);
-    expect(hafiz.children[0]).toMatchObject({ employee: { id: "Zahira" }, roleLabel: "CPO" });
-    expect(hafiz.children[0].children.map(node => node.employee.id)).toEqual(["Mukesh Krishna", "Aboobacker"]);
-    expect(hafiz.children[0].children[0]).toMatchObject({ employee: { id: "Mukesh Krishna" }, roleLabel: "HR" });
+    expect(graph.roots.map(item => item.id)).toEqual(["a"]);
+    expect(graph.primaryRelationById.get("c")).toBe("BOTH");
+    expect(graph.childrenByParentId.get("b")?.map(item => item.id)).toEqual(["c", "d"]);
+    expect(buildVisibleEmployeeFlow(graph, new Set(["a", "b"])).visibleIds).toEqual(new Set(["a", "b", "c", "d"]));
+    expect(graph.issues).toContainEqual({ employee: expect.objectContaining({ id: "a" }), message: "Reporting cycle was broken here so every employee remains visible." });
   });
 
   it("saves both reporting links", () => {
