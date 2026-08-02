@@ -34,7 +34,10 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
   users.push(...Array.from({ length: Math.max(0, userCount - users.length) }, (_, index) => ({ id: `user-${index + 1}`, email: `user-${index + 1}@example.invalid`, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }], permissionOverrides: [] })));
   const employees = [
     { id: "admin-employee", employeeCode: "ADM-001", firstName: "Amina", lastName: "Admin", email: admin.email, hireDate: "2020-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Platform Administrator", code: "PLATFORM_ADMIN" }, user: { roles: sessionRoles.map(code => ({ role: { code } })) }, manager: null, lineManager: null },
+    { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations", email: "coo@example.invalid", hireDate: "2018-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Chief Operating Officer", code: "COO" }, user: { roles: [{ role: { code: "COO" } }] }, manager: null, lineManager: null },
+    { id: "cpo-employee", employeeCode: "EXE-002", firstName: "Priya", lastName: "People", email: "cpo@example.invalid", hireDate: "2019-01-01", employmentStatus: "ACTIVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "Chief People Officer", code: "CPO" }, user: { roles: [{ role: { code: "CPO" } }] }, manager: null, lineManager: null },
     { id: "target-employee", employeeCode: "EMP-001", firstName: "Taylor", lastName: "Target", email: target.email, hireDate: "2022-04-10", employmentStatus: "ON_LEAVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR_SPECIALIST" }, user: { roles: [{ role: { code: "HR" } }, { role: { code: "EMPLOYEE" } }] }, manager: null, lineManager: null },
+    { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager", email: "manager@example.invalid", hireDate: "2021-06-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Operations Manager", code: "OPS_MANAGER" }, user: { roles: [{ role: { code: "MANAGER" } }] }, manager: null, lineManager: null },
   ];
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
@@ -167,11 +170,11 @@ test("Hierarchy is hidden and denied for non-administrators", async ({ page }) =
   await page.getByLabel("Password").fill("IntegrationPass123!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("link", { name: "Hierarchy" })).toHaveCount(0);
-  await page.goto("/hierarchy");
+  await page.evaluate(() => { window.history.pushState({}, "", "/hierarchy"); window.dispatchEvent(new PopStateEvent("popstate")); });
   await expect(page.getByRole("heading", { name: "Access not available" })).toBeVisible();
 });
 
-test("Admin can edit custom-role inheritance", async ({ page }) => {
+test("Admin can explore and export the department role hierarchy without changing the organization chart", async ({ page }) => {
   await installSystemApi(page, ["ADMIN"]);
   await page.goto("/");
   await page.getByLabel("Email").fill("super.admin@example.invalid");
@@ -179,10 +182,54 @@ test("Admin can edit custom-role inheritance", async ({ page }) => {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Organizational hierarchy" })).toBeVisible();
-  await expect(page.getByLabel("Organizational hierarchy")).toBeVisible();
-  await page.getByRole("button", { name: "All users", exact: true }).click();
-  await page.getByRole("button", { name: "Edit hierarchy" }).click();
-  await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
+  await expect(page.locator(".organization-chart")).toBeVisible();
+
+  const organizationTab = page.getByRole("tab", { name: "Organizational hierarchy" });
+  const roleTab = page.getByRole("tab", { name: "Role hierarchy" });
+  await expect(organizationTab).toHaveAttribute("aria-selected", "true");
+  await organizationTab.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(roleTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("group", { name: "Company role hierarchy" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Executive leadership/ })).toContainText("COO");
+  await expect(page.getByRole("button", { name: /Executive leadership/ })).toContainText("Omar Operations");
+  await expect(page.getByRole("button", { name: /Executive leadership/ })).toContainText("CPO");
+  await expect(page.getByRole("button", { name: /Executive leadership/ })).toContainText("Priya People");
+
+  const humanResources = page.locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Human Resources.*1 employee.*2 roles/ }) });
+  const humanResourcesButton = humanResources.getByRole("button", { name: /Human Resources.*1 employee.*2 roles/ });
+  await expect(humanResourcesButton).toHaveAttribute("aria-expanded", "false");
+  await humanResourcesButton.click();
+  const hrRole = humanResources.getByRole("button", { name: /Human Resources.*HR.*1 assigned/ });
+  await expect(hrRole).toHaveAttribute("aria-expanded", "false");
+  await expect(humanResources.getByText("Taylor Target")).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await hrRole.focus();
+  await page.keyboard.press("Enter");
+  await expect(hrRole).toHaveAttribute("aria-expanded", "true");
+  const roster = humanResources.getByRole("list", { name: "Human Resources employees" });
+  await expect(roster.getByText("Taylor Target")).toBeVisible();
+  await expect(roster.getByText(/EMP-001.*HR Specialist/)).toBeVisible();
+  await expect(roster.getByText("On leave")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const flowViewport = page.locator(".company-role-viewport");
+  await expect(flowViewport).toBeVisible();
+  expect(await flowViewport.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  await expect.poll(() => page.locator(".company-role-canvas .role-flowchart-line").count()).toBeGreaterThan(0);
+  expect(await page.locator(".company-role-canvas .role-flowchart-line").evaluateAll(lines => lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
+  await page.getByLabel("Switch to dark mode").click();
+  await expect(roster.getByText("Taylor Target")).toBeVisible();
+  await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(21, 34, 56)");
+  await page.getByLabel("Switch to light mode").click();
+
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export PDF" }).click();
+  expect((await download).suggestedFilename()).toBe("Company-Role-Hierarchy.pdf");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await organizationTab.click();
+  await expect(page.locator(".organization-chart")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Company role hierarchy" })).toHaveCount(0);
 });
 
 test("Sidebar surfaces follow the selected theme", async ({ page }) => {
@@ -206,88 +253,6 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await loginAndOpenSystem(page);
   await expect(page.getByRole("button", { name: "Create user" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Revoke all" })).toBeEnabled();
-  await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toHaveCount(0);
-  await page.getByRole("link", { name: "Hierarchy" }).click();
-  await expect(page.getByRole("heading", { name: "Role hierarchy" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
-  await page.getByRole("button", { name: "All users", exact: true }).click();
-  const superAdminButton = page.getByRole("button", { name: "Filter users by Super Administrator role" });
-  const customRoleButton = page.getByRole("button", { name: "Filter users by Custom Viewer role" });
-  const superAdminShell = page.locator(".role-flowchart-node-shell").filter({ has: superAdminButton });
-  const customRoleShell = page.locator(".role-flowchart-node-shell").filter({ has: customRoleButton });
-  await expect(superAdminButton).toBeVisible();
-  await expect(customRoleButton).toBeVisible();
-  await expect(customRoleShell.getByText("No active employees assigned")).toBeVisible();
-  const superAdminRosterToggle = superAdminShell.locator(".role-assignee-toggle");
-  await expect(superAdminRosterToggle).toHaveAccessibleName("Show 1 active employee directly assigned to Super Administrator");
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await superAdminRosterToggle.focus();
-  await page.keyboard.press("Enter");
-  await expect(superAdminRosterToggle).toHaveAttribute("aria-expanded", "true");
-  const superAdminRoster = superAdminShell.getByRole("list", { name: "Employees directly assigned to Super Administrator" });
-  await expect(superAdminRoster.getByText("Amina Admin")).toBeVisible();
-  await expect(superAdminRoster.getByText("Executive Office")).toBeVisible();
-  await expect(superAdminButton).toHaveAttribute("aria-pressed", "false");
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Edit hierarchy" }).click();
-  await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "HR", exact: true }).check();
-  await page.getByLabel("Reason").fill("Custom role needs HR visibility");
-  const hierarchySaved = page.waitForRequest(request => request.url().endsWith("/api/v1/system/roles/role-custom/inheritance") && request.method() === "PUT");
-  await page.getByRole("button", { name: "Save hierarchy" }).click();
-  expect(JSON.parse((await hierarchySaved).postData() || "{}")).toMatchObject({ parentRoleIds: ["role-hr"], expectedVersion: 1, reason: "Custom role needs HR visibility" });
-  await expect(page.getByText("Role inheritance updated. Affected sessions were revoked.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
-  await superAdminButton.click();
-  const hrButton = page.getByRole("button", { name: "Filter users by HR role" });
-  await expect(hrButton).toBeVisible();
-  await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toHaveCount(0);
-  const hrShell = page.locator(".role-flowchart-node-shell").filter({ has: hrButton });
-  const hrRosterToggle = hrShell.getByRole("button", { name: "Show 1 active employee directly assigned to HR" });
-  await hrRosterToggle.click();
-  const hrRoster = hrShell.getByRole("list", { name: "Employees directly assigned to HR" });
-  await expect(hrRoster.getByText("Taylor Target")).toBeVisible();
-  await expect(hrRoster.getByText("Human Resources")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Filter users by Employee role" })).toHaveCount(0);
-  const roleFiltered = page.waitForRequest(request => request.url().includes("/api/v1/system/users?") && request.url().includes("roleId=role-hr"));
-  await hrButton.click();
-  await roleFiltered;
-  const employeeButton = page.getByRole("button", { name: "Filter users by Employee role" });
-  await expect(employeeButton).toBeVisible();
-  let employeeShell = page.locator(".role-flowchart-node-shell").filter({ has: employeeButton });
-  await employeeShell.getByRole("button", { name: "Show 1 active employee directly assigned to Employee" }).click();
-  await expect(employeeShell.getByRole("list", { name: "Employees directly assigned to Employee" }).getByText("Taylor Target")).toBeVisible();
-  await hrButton.click();
-  await expect(employeeButton).toHaveCount(0);
-  await hrButton.click();
-  await expect(employeeButton).toBeVisible();
-  employeeShell = page.locator(".role-flowchart-node-shell").filter({ has: employeeButton });
-  await expect(employeeShell.getByRole("list", { name: "Employees directly assigned to Employee" })).toHaveCount(0);
-  await expect(page.getByRole("row", { name: /target@example\.invalid/ })).toBeVisible();
-  await expect(page.getByRole("row", { name: /super\.admin@example\.invalid/ })).not.toBeVisible();
-  const combinedFilter = page.waitForRequest(request => request.url().includes("roleId=role-hr") && request.url().includes("search=target"));
-  await page.getByLabel("Find users").fill("target");
-  await combinedFilter;
-  await expect(page.getByText("1 user found with HR.")).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
-  const flowViewport = page.locator(".role-flowchart-viewport");
-  await expect(flowViewport).toBeVisible();
-  expect(await flowViewport.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
-  expect(await page.locator(".role-flowchart-line").evaluateAll(lines => lines.length > 0 && lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
-  await page.getByLabel("Switch to dark mode").click();
-  await expect(hrRoster.getByText("Taylor Target")).toBeVisible();
-  await page.getByLabel("Switch to light mode").click();
-  await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(hrRoster.getByText("Taylor Target")).toBeVisible();
-  await page.getByRole("button", { name: "All users", exact: true }).click();
-  await expect(superAdminButton).toHaveCount(0);
-  await page.getByRole("button", { name: "All users", exact: true }).click();
-  await expect(superAdminButton).toBeVisible();
-  await expect(superAdminShell.getByRole("list", { name: "Employees directly assigned to Super Administrator" })).toHaveCount(0);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("link", { name: "System" }).click();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid.*Current user/ })).toBeVisible();
   const searched = page.waitForRequest(request => request.url().includes("/api/v1/system/sessions?") && request.url().includes("search=target"));
   await page.getByLabel("Email search").fill("target");

@@ -191,6 +191,10 @@ export function hasActiveSystemAdministratorRole(session: Pick<BackendSession, "
   return session.roles.includes("SUPER_ADMIN") || session.roles.includes("ADMIN");
 }
 
+export function hasActiveHierarchyRole(session: Pick<BackendSession, "roles">) {
+  return ["HR", "COO", "CPO", "SUPER_ADMIN", "ADMIN"].some(role => session.roles.includes(role));
+}
+
 export function hasAnyPermission(session: BackendSession, ...permissions: string[]) {
   return permissions.some(permission => hasPermission(session, permission));
 }

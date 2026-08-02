@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { testState } from "./testState";
-import { saveEmployeeProfilePdf, savePayslipPdf } from "./pdf";
+import { saveEmployeeProfilePdf, savePayslipPdf, saveRoleHierarchyPdf } from "./pdf";
 import { createPayroll } from "./domain";
 import { dataUrlBlob } from "./dataUrl";
 
@@ -28,5 +28,15 @@ describe("professional PDF output", () => {
   it("rejects executable or mislabeled saved document data", () => {
     expect(() => dataUrlBlob(`data:text/html;base64,${btoa("<script>alert(1)</script>")}`)).toThrow("Saved PDF data is invalid.");
     expect(() => dataUrlBlob(`data:application/pdf;base64,${btoa("not a pdf")}`)).toThrow("Saved PDF data is invalid.");
+  });
+
+  it("exports the complete company role hierarchy as a landscape PDF", () => {
+    const state = testState();
+    const file = saveRoleHierarchyPdf(state.employees, state.settings);
+
+    expect(file.filename).toBe("Company-Role-Hierarchy.pdf");
+    expect(file.dataUrl).toMatch(/^data:application\/pdf/);
+    expect(dataUrlBlob(file.dataUrl).size).toBeGreaterThan(5_000);
+    expect(file.sizeBytes).toBeGreaterThan(5_000);
   });
 });

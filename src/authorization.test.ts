@@ -18,11 +18,12 @@ function session(roles: string[], permissions: string[]): BackendSession {
 }
 
 describe("System route authorization", () => {
-  it("allows active ADMIN and SUPER_ADMIN session roles", () => {
+  it("allows active administrators into System and company leadership into Hierarchy", () => {
     expect(canAccessRoute(session(["SUPER_ADMIN"], []), "System")).toBe(true);
     expect(canAccessRoute(session(["ADMIN"], []), "System")).toBe(true);
-    expect(canAccessRoute(session(["SUPER_ADMIN"], []), "Hierarchy")).toBe(true);
-    expect(canAccessRoute(session(["ADMIN"], []), "Hierarchy")).toBe(true);
+    for (const role of ["HR", "COO", "CPO", "SUPER_ADMIN", "ADMIN"]) {
+      expect(canAccessRoute(session([role], []), "Hierarchy")).toBe(true);
+    }
   });
 
   it("denies direct System permissions without an administrator role", () => {

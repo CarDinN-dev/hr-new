@@ -1136,3 +1136,524 @@ td button {
     break-inside: avoid;
   }
 }
+
+/* Department-based access-role hierarchy. The organizational hierarchy above is intentionally independent. */
+.hierarchy-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--pro-border);
+  border-radius: 12px;
+  background: var(--pro-surface-subtle);
+  box-shadow: var(--pro-shadow-sm);
+}
+
+.hierarchy-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--pro-text-soft) !important;
+  box-shadow: none !important;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.hierarchy-tabs button[aria-selected="true"] {
+  border-color: var(--pro-border) !important;
+  background: var(--pro-surface) !important;
+  color: var(--pro-text) !important;
+  box-shadow: var(--pro-shadow-sm) !important;
+}
+
+.company-role-hierarchy {
+  display: grid;
+  gap: 14px;
+}
+
+.company-role-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.company-role-summary span {
+  padding: 10px 12px;
+  border: 1px solid var(--pro-border);
+  border-radius: 10px;
+  background: var(--pro-surface-subtle);
+  color: var(--pro-text-soft);
+  font-size: 11.5px;
+}
+
+.company-role-summary strong {
+  margin-right: 4px;
+  color: var(--pro-text);
+  font-size: 15px;
+}
+
+.company-role-summary .has-issues {
+  border-color: color-mix(in srgb, var(--pro-warning) 35%, var(--pro-border));
+  background: color-mix(in srgb, var(--pro-warning) 8%, var(--pro-surface));
+  color: var(--pro-warning);
+}
+
+.company-role-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--pro-border);
+  border-radius: 12px;
+  background: var(--pro-surface-subtle);
+}
+
+.company-role-search {
+  position: relative;
+}
+
+.company-role-search svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--pro-text-soft);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.company-role-search input {
+  width: 100%;
+  padding-left: 36px !important;
+  background: var(--pro-surface) !important;
+}
+
+.company-role-match-count {
+  color: var(--pro-text-soft);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.company-role-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.company-role-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.company-role-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding-inline: 2px;
+  color: var(--pro-text-soft);
+  font-size: 11px;
+}
+
+.company-role-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.company-role-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--pro-border-strong);
+}
+
+.company-role-legend i.leadership { background: var(--pro-brand); }
+.company-role-legend i.department { background: var(--pro-info); }
+.company-role-legend i.access-role { background: var(--pro-success); }
+
+.company-role-legend p {
+  flex: 1 1 360px;
+  margin: 0;
+  text-align: right;
+}
+
+.company-role-viewport {
+  min-height: 330px;
+  padding: 14px 0 10px;
+  border: 1px solid var(--pro-border);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--pro-border-strong) 42%, transparent) 1px, transparent 1.2px),
+    var(--pro-surface-subtle);
+  background-size: 20px 20px;
+}
+
+.company-role-canvas {
+  display: grid;
+  width: max-content;
+  min-height: 300px;
+  gap: 48px;
+  padding: 10px 26px 24px;
+}
+
+.company-role-leadership,
+.company-role-department,
+.company-role-card {
+  position: relative;
+  z-index: 1;
+  color: var(--pro-text) !important;
+  box-shadow: var(--pro-shadow-sm) !important;
+}
+
+.company-role-leadership:hover,
+.company-role-department:hover,
+.company-role-card:hover {
+  box-shadow: var(--pro-shadow) !important;
+  transform: translateY(-1px);
+}
+
+.company-role-leadership {
+  display: grid;
+  gap: 10px;
+  width: 470px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--pro-brand) 40%, var(--pro-border)) !important;
+  border-radius: 15px !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--pro-brand-soft) 72%, var(--pro-surface)), var(--pro-surface) 58%) !important;
+  text-align: left;
+}
+
+.company-role-leadership.expanded {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pro-brand) 10%, transparent), var(--pro-shadow-sm) !important;
+}
+
+.company-role-leadership-heading,
+.company-role-leadership-heading > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.company-role-leadership-heading > span {
+  justify-content: flex-start;
+  color: var(--pro-brand);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.company-role-executives {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.company-role-executive {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--pro-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pro-surface) 92%, transparent);
+}
+
+.company-role-executive small {
+  color: var(--pro-brand);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .08em;
+}
+
+.company-role-executive strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-role-executive span {
+  overflow: hidden;
+  color: var(--pro-text-soft);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-role-departments {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 22px;
+  min-width: 100%;
+}
+
+.company-role-department-branch {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 34px;
+  min-width: 230px;
+  animation: role-branch-reveal 180ms ease-out both;
+}
+
+.company-role-department {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  width: 218px;
+  min-height: 66px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--pro-info) 30%, var(--pro-border)) !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--pro-info) 7%, var(--pro-surface)), var(--pro-surface)) !important;
+  text-align: left;
+}
+
+.company-role-department.expanded {
+  border-color: color-mix(in srgb, var(--pro-info) 60%, var(--pro-border)) !important;
+}
+
+.company-role-node-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--pro-info) 11%, var(--pro-surface));
+  color: var(--pro-info);
+}
+
+.company-role-department strong,
+.company-role-department small,
+.company-role-card strong,
+.company-role-card small {
+  display: block;
+}
+
+.company-role-department strong,
+.company-role-card strong {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.company-role-department small,
+.company-role-card small {
+  margin-top: 3px;
+  color: var(--pro-text-soft);
+  font-size: 9.5px;
+  line-height: 1.25;
+}
+
+.company-role-cards {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.company-role-card-shell {
+  display: grid;
+  gap: 7px;
+  width: 204px;
+  animation: role-branch-reveal 180ms ease-out both;
+}
+
+.company-role-card {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 17px;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 62px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--pro-success) 28%, var(--pro-border)) !important;
+  border-radius: 11px !important;
+  background: var(--pro-surface) !important;
+  text-align: left;
+}
+
+.company-role-card .company-role-node-icon {
+  width: 30px;
+  height: 30px;
+  background: color-mix(in srgb, var(--pro-success) 10%, var(--pro-surface));
+  color: var(--pro-success);
+}
+
+.company-role-card.expanded {
+  border-color: color-mix(in srgb, var(--pro-success) 58%, var(--pro-border)) !important;
+}
+
+.company-role-roster {
+  display: grid;
+  gap: 5px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--pro-border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--pro-surface-subtle) 86%, var(--pro-surface));
+  box-shadow: var(--pro-shadow-sm);
+  scrollbar-color: var(--pro-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.company-role-member {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--pro-border);
+  border-radius: 8px;
+  background: var(--pro-surface);
+}
+
+.company-role-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(145deg, var(--pro-sidebar-2), var(--pro-sidebar));
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.company-role-member strong,
+.company-role-member small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-role-member strong { font-size: 10.5px; }
+.company-role-member small { margin-top: 2px; color: var(--pro-text-soft); font-size: 9px; }
+
+.company-role-member em {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pro-warning) 10%, var(--pro-surface));
+  color: var(--pro-warning);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.company-role-canvas .role-flowchart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 90px;
+}
+
+@media (max-width: 760px) {
+  .hierarchy-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .hierarchy-tabs button {
+    padding-inline: 8px;
+    font-size: 11.5px;
+  }
+
+  .company-role-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .company-role-toolbar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .company-role-search,
+  .company-role-actions {
+    grid-column: 1 / -1;
+  }
+
+  .company-role-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .company-role-match-count {
+    grid-column: 1 / -1;
+  }
+
+  .company-role-legend p {
+    flex-basis: 100%;
+    text-align: left;
+  }
+
+  .company-role-viewport {
+    margin-inline: -4px;
+    border-radius: 10px;
+  }
+
+  .company-role-canvas {
+    padding-inline: 14px;
+  }
+
+  .company-role-leadership {
+    width: 350px;
+  }
+
+  .company-role-executive strong {
+    white-space: normal;
+  }
+}
+
+@media print {
+  @page { size: landscape; margin: 8mm; }
+
+  .hierarchy-tabs,
+  .company-role-toolbar,
+  .company-role-legend {
+    display: none !important;
+  }
+
+  .role-hierarchy-print-surface,
+  .company-role-viewport {
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  button.company-role-leadership,
+  button.company-role-department,
+  button.company-role-card {
+    display: grid !important;
+    break-inside: avoid;
+  }
+
+  .company-role-canvas {
+    width: max-content !important;
+    transform-origin: top left;
+  }
+}

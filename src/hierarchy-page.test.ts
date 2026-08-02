@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, buildRoleAssigneeMap, buildRoleFlowGraph, buildVisibleRoleFlow, hierarchyInheritancePayload, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, hierarchyUserParams, pruneExpandedRoleCodes } from "./features/hierarchy-page";
+import { buildOrganizationHierarchy, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload } from "./features/hierarchy-page";
+import { accessRoleLabel, buildCompanyRoleHierarchy } from "./roleHierarchy";
 
 const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
   id,
@@ -8,69 +9,47 @@ const employee = (id: string, code: string, fields: Record<string, string> = {},
   fields: { "Employee Code": code, "Full Name": id, Designation: "Specialist", ...fields },
 });
 
-const accessRole = (code: string, inherits: string[] = [], isBuiltIn = true) => ({
-  id: `role-${code.toLowerCase()}`,
-  code,
-  displayName: code.replaceAll("_", " "),
-  version: 1,
-  isBuiltIn,
-  isActive: true,
-  protection: code === "SUPER_ADMIN" ? "SUPER_ADMIN" as const : "STANDARD" as const,
-  inherits,
-});
+describe("hierarchy page", () => {
+  it("places COO and CPO above department role groups", () => {
+    const hierarchy = buildCompanyRoleHierarchy([
+      employee("coo", "EX-001", { "Full Name": "Omar Operations", Designation: "Director" }, ["COO"]),
+      employee("cpo", "EX-002", { "Full Name": "Priya People", Designation: "Chief People Officer" }),
+      employee("hr", "HR-001", { "Full Name": "Ava HR", Department: "People", Designation: "HR Partner" }, ["HR"]),
+      employee("engineer", "EN-001", { "Full Name": "Ben Engineer", Department: "Engineering", Designation: "Engineer" }, ["EMPLOYEE"]),
+    ]);
 
-describe("hierarchy page requests", () => {
-  it("combines direct-role filtering and sends versioned inheritance changes", () => {
-    expect(hierarchyUserParams("Taylor", "role-hr").toString()).toBe("search=Taylor&roleId=role-hr");
-    expect(hierarchyInheritancePayload({ role: { id: "role-custom", code: "CUSTOM", displayName: "Custom", version: 3, isBuiltIn: false, isActive: true, protection: "STANDARD", inherits: [] }, parentRoleIds: new Set(["role-employee", "role-hr"]), reason: "  Add inherited access  " })).toEqual({ parentRoleIds: ["role-employee", "role-hr"], expectedVersion: 3, reason: "Add inherited access" });
+    expect(hierarchy.executives.map(group => [group.code, group.members.map(member => member.name)])).toEqual([
+      ["COO", ["Omar Operations"]],
+      ["CPO", ["Priya People"]],
+    ]);
+    expect(hierarchy.departments.map(department => department.name)).toEqual(["Engineering", "People"]);
+    expect(hierarchy.departments.flatMap(department => department.roles.map(role => role.code))).toEqual(["EMPLOYEE", "HR"]);
   });
 
-  it("builds and progressively reveals a reduced role inheritance graph", () => {
-    const graph = buildRoleFlowGraph([
-      accessRole("ADMIN", ["EMPLOYEE"]),
-      accessRole("EMPLOYEE"),
-      accessRole("HR", ["EMPLOYEE"]),
-      accessRole("SUPER_ADMIN", ["EMPLOYEE", "HR", "ADMIN"]),
-      accessRole("CUSTOM_VIEWER", ["EMPLOYEE", "HR"], false),
+  it("groups every direct role, excludes former employees, and supplies safe fallbacks", () => {
+    const hierarchy = buildCompanyRoleHierarchy([
+      employee("amy", "EMP-001", { "Full Name": "Amy Adams", Department: "Engineering", Designation: "Lead" }, ["MANAGER", "HR", "CUSTOM_FINANCE_APPROVER", "MANAGER"]),
+      { ...employee("zoe", "EMP-002", { "Full Name": "Zoe Zane", Department: "Engineering", Designation: "Engineer" }, ["EMPLOYEE", "CUSTOM_FINANCE_APPROVER"]), status: "On Leave" as const },
+      employee("fallback", "EMP-003", { "Full Name": "", Department: "", Designation: "" }),
+      { ...employee("former", "EMP-004", { Department: "Finance" }, ["HR"]), status: "Resigned" as const },
+      { ...employee("terminated", "EMP-005", { Department: "Finance" }, ["HR"]), status: "Terminated" as const },
     ]);
 
-    expect(graph.roots.map(role => role.code)).toEqual(["SUPER_ADMIN", "CUSTOM_VIEWER"]);
-    expect(graph.childrenByCode.get("SUPER_ADMIN")?.map(role => role.code)).toEqual(["ADMIN", "HR"]);
-    expect(graph.childrenByCode.get("CUSTOM_VIEWER")?.map(role => role.code)).toEqual(["HR"]);
-    expect(buildVisibleRoleFlow(graph, false, new Set()).levels).toEqual([]);
-    expect(buildVisibleRoleFlow(graph, true, new Set()).levels.map(level => level.map(role => role.code))).toEqual([["SUPER_ADMIN", "CUSTOM_VIEWER"]]);
-
-    const shared = buildVisibleRoleFlow(graph, true, new Set(["SUPER_ADMIN", "ADMIN", "HR"]));
-    expect(shared.levels.map(level => level.map(role => role.code))).toEqual([["SUPER_ADMIN", "CUSTOM_VIEWER"], ["ADMIN", "HR"], ["EMPLOYEE"]]);
-    expect(shared.edges.filter(edge => edge.targetCode === "EMPLOYEE").map(edge => edge.sourceCode)).toEqual(["ADMIN", "HR"]);
-    expect(buildVisibleRoleFlow(graph, true, new Set(["SUPER_ADMIN", "ADMIN"])).visibleCodes.has("EMPLOYEE")).toBe(true);
-    expect([...pruneExpandedRoleCodes(graph, true, new Set(["ADMIN", "HR"]))]).toEqual([]);
-  });
-
-  it("maps active employees to every directly assigned active role", () => {
-    const inactiveRole = { ...accessRole("ARCHIVED"), isActive: false };
-    const assignees = buildRoleAssigneeMap(
-      [accessRole("EMPLOYEE"), accessRole("HR", ["EMPLOYEE"]), accessRole("CUSTOM_VIEWER", [], false), inactiveRole],
-      [
-        employee("amy", "EMP-001", { "Full Name": "Amy Adams", Department: "Engineering" }, ["HR", "HR"]),
-        { ...employee("zoe", "EMP-002", { "Full Name": "Zoe Zane", Department: "Finance" }, ["HR", "CUSTOM_VIEWER"]), status: "On Leave" as const },
-        employee("fallback", "EMP-003", { "Full Name": "", Department: "" }, ["CUSTOM_VIEWER"]),
-        { ...employee("former", "EMP-004", { Department: "Finance" }, ["HR"]), status: "Resigned" as const },
-        { ...employee("terminated", "EMP-006", { Department: "Finance" }, ["CUSTOM_VIEWER"]), status: "Terminated" as const },
-        employee("archived", "EMP-005", { Department: "Operations" }, ["ARCHIVED"]),
-      ],
-    );
-
-    expect(assignees.get("HR")).toEqual([
-      { id: "amy", name: "Amy Adams", department: "Engineering" },
-      { id: "zoe", name: "Zoe Zane", department: "Finance" },
-    ]);
-    expect(assignees.get("CUSTOM_VIEWER")).toEqual([
-      { id: "fallback", name: "EMP-003", department: "Department not assigned" },
-      { id: "zoe", name: "Zoe Zane", department: "Finance" },
-    ]);
-    expect(assignees.get("EMPLOYEE")).toEqual([]);
-    expect(assignees.has("ARCHIVED")).toBe(false);
+    const engineering = hierarchy.departments[0];
+    expect(engineering.name).toBe("Engineering");
+    expect(engineering.memberCount).toBe(2);
+    expect(engineering.roles.map(role => role.code)).toEqual(["HR", "MANAGER", "EMPLOYEE", "CUSTOM_FINANCE_APPROVER"]);
+    expect(engineering.roles.find(role => role.code === "HR")?.members[0].name).toBe("Amy Adams");
+    expect(engineering.roles.find(role => role.code === "MANAGER")?.members).toHaveLength(1);
+    expect(engineering.roles.find(role => role.code === "CUSTOM_FINANCE_APPROVER")?.members.map(member => member.name)).toEqual(["Amy Adams", "Zoe Zane"]);
+    expect(hierarchy.departments[1]).toMatchObject({ name: "Department not assigned", memberCount: 1 });
+    expect(hierarchy.departments[1].roles[0]).toMatchObject({ code: "NO_ACCESS_ROLE", label: "No access role assigned" });
+    expect(hierarchy.departments[1].roles[0].members[0]).toMatchObject({ name: "EMP-003", designation: "Designation not assigned" });
+    expect(hierarchy.activeEmployees.map(member => member.id)).not.toContain("former");
+    expect(hierarchy.activeEmployees.map(member => member.id)).not.toContain("terminated");
+    expect(hierarchy.roleAssignmentCount).toBe(6);
+    expect(hierarchy.unassignedCount).toBe(1);
+    expect(accessRoleLabel("CUSTOM_FINANCE_APPROVER")).toBe("Custom Finance Approver");
   });
 
   it("builds the employee tree from reporting assignments instead of job titles", () => {

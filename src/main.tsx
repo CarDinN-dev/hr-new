@@ -587,7 +587,7 @@ function App() {
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
-          {nav === "Hierarchy" && <HierarchyPage session={backendSession} notify={notify} employees={state.employees} onAddNode={(role, parent) => {
+          {nav === "Hierarchy" && <HierarchyPage session={backendSession} employees={state.employees} onAddNode={(role, parent) => {
             const draft = createEmptyEmployee(nextEmployeeCode(state.employees));
             draft.fields = {
               ...draft.fields,
@@ -603,7 +603,10 @@ function App() {
             await apiRequest(`/employees/${employeeId}`, { method: "PATCH", csrfToken: backendSession.csrfToken, body: JSON.stringify(reporting) });
             await refreshWorkspace();
             notify("Reporting lines updated in Employees and Hierarchy.");
-          }} />}
+          }} onExportRoleHierarchy={() => void withPdf(pdf => {
+            const file = pdf.saveRoleHierarchyPdf(state.employees, state.settings);
+            notify(`${file.filename} downloaded.`);
+          })} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
           {nav === "Settings" && <SettingsPage state={state} setState={setState} notify={notify} backendSession={backendSession} />}
         </React.Suspense></div>

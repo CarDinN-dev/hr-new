@@ -4,6 +4,7 @@ import type { RowInput } from "jspdf-autotable";
 import type { EmployeeRecord, EosRecord, HrSettings, HrState, PdfTemplate, PayrollSlip } from "./data";
 import { months, pdfTemplates, reportTemplates } from "./data";
 import { attendanceStats, employeeName, employeeSalary, eosSummary, formatDate, formatMoney, moneyValue } from "./domain";
+import { buildCompanyRoleHierarchy, type RoleHierarchyMember } from "./roleHierarchy";
 
 type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
 export type GeneratedPdf = { filename: string; dataUrl: string; sizeBytes: number };
@@ -144,6 +145,171 @@ export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings
     ["Status", record.status]
   ]);
   return finish(doc, settings, `EOS-${safe(employee.fields["Employee Code"])}-${record.asOf}.pdf`);
+}
+
+export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSettings) {
+  const hierarchy = buildCompanyRoleHierarchy(employees);
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+  doc.setProperties({ title: "Company Role Hierarchy", subject: "Departments and direct access-role assignments", author: settings.company.legalName, creator: "MedTech HR ERP" });
+  const departmentPages = hierarchy.departments.length ? chunk(hierarchy.departments, 4) : [[]];
+
+  departmentPages.forEach((departments, pageIndex) => {
+    if (pageIndex) doc.addPage();
+    roleHierarchyPageTitle(doc, "Company Role Hierarchy", `${hierarchy.activeEmployees.length} active employees · ${hierarchy.departments.length} departments · ${hierarchy.roleAssignmentCount} direct role assignments`);
+    roleHierarchyBox(doc, 116, 35, 65, 12, "Executive leadership", ["COO · CPO"], "leadership");
+    const executiveXs = [61, 166];
+    hierarchy.executives.forEach((executive, index) => {
+      const names = executive.members.length ? executive.members.map(member => member.name) : ["Position not assigned"];
+      roleHierarchyBox(doc, executiveXs[index], 57, 70, 29, `${executive.code} · ${executive.label}`, names, "executive");
+      roleHierarchyConnector(doc, 148.5, 47, executiveXs[index] + 35, 57);
+    });
+    const boxWidth = 58;
+    const gap = 10;
+    const totalWidth = departments.length * boxWidth + Math.max(0, departments.length - 1) * gap;
+    const firstX = (297 - totalWidth) / 2;
+    departments.forEach((department, index) => {
+      const x = firstX + index * (boxWidth + gap);
+      roleHierarchyConnector(doc, 148.5, 86, x + boxWidth / 2, 116);
+      roleHierarchyBox(doc, x, 116, boxWidth, 32, department.name, [`${department.memberCount} employees`, `${department.roles.length} direct access roles`], "department");
+    });
+    if (!departments.length) roleHierarchyEmpty(doc, "No active employees are available below executive leadership.");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...brand.muted);
+    doc.text("Department overview", 148.5, 158, { align: "center" });
+  });
+
+  hierarchy.departments.forEach(department => {
+    chunk(department.roles, 3).forEach((roles, rolePageIndex) => {
+      doc.addPage();
+      roleHierarchyPageTitle(doc, department.name, `${department.memberCount} employees · direct access roles${rolePageIndex ? ` · continued ${rolePageIndex + 1}` : ""}`);
+      roleHierarchyBox(doc, 103.5, 36, 90, 24, department.name, [`${department.memberCount} active employees`, `${department.roles.length} access roles`], "department");
+      const roleWidth = 82;
+      const gap = 9;
+      const totalWidth = roles.length * roleWidth + Math.max(0, roles.length - 1) * gap;
+      const firstX = (297 - totalWidth) / 2;
+      roles.forEach((role, index) => {
+        const x = firstX + index * (roleWidth + gap);
+        roleHierarchyConnector(doc, 148.5, 60, x + roleWidth / 2, 82);
+        roleHierarchyRoleBox(doc, x, 82, roleWidth, role.label, role.code, role.members);
+      });
+    });
+  });
+
+  const pages = doc.getNumberOfPages();
+  for (let current = 1; current <= pages; current += 1) {
+    doc.setPage(current);
+    drawRoleHierarchyChrome(doc, settings, current, pages);
+  }
+  const filename = "Company-Role-Hierarchy.pdf";
+  const dataUrl = doc.output("datauristring");
+  doc.save(filename);
+  return { filename, dataUrl, sizeBytes: Math.round((dataUrl.length * 3) / 4) };
+}
+
+function chunk<T>(items: T[], size: number) {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
+}
+
+function roleHierarchyPageTitle(doc: jsPDF, title: string, subtitle: string) {
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(17);
+  doc.setTextColor(...brand.ink);
+  doc.text(title, 14, 31);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(...brand.muted);
+  doc.text(subtitle, 14, 36);
+}
+
+function roleHierarchyConnector(doc: jsPDF, sourceX: number, sourceY: number, targetX: number, targetY: number) {
+  const middleY = sourceY + (targetY - sourceY) / 2;
+  doc.setDrawColor(74, 119, 181);
+  doc.setLineWidth(0.45);
+  doc.line(sourceX, sourceY, sourceX, middleY);
+  doc.line(sourceX, middleY, targetX, middleY);
+  doc.line(targetX, middleY, targetX, targetY);
+  doc.setFillColor(74, 119, 181);
+  doc.triangle(targetX - 1.2, targetY - 2, targetX + 1.2, targetY - 2, targetX, targetY, "F");
+}
+
+function roleHierarchyBox(doc: jsPDF, x: number, y: number, width: number, height: number, title: string, lines: string[], kind: "leadership" | "executive" | "department") {
+  const colors = kind === "leadership" ? { fill: [35, 49, 74], line: [35, 49, 74], text: [255, 255, 255] } : kind === "executive" ? { fill: [241, 246, 254], line: [74, 119, 181], text: brand.ink } : { fill: [250, 250, 251], line: [187, 198, 213], text: brand.ink };
+  doc.setFillColor(...colors.fill as [number, number, number]);
+  doc.setDrawColor(...colors.line as [number, number, number]);
+  doc.setLineWidth(0.45);
+  doc.roundedRect(x, y, width, height, 2.2, 2.2, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(kind === "leadership" ? 8.5 : 8);
+  doc.setTextColor(...colors.text as [number, number, number]);
+  doc.text(doc.splitTextToSize(title, width - 8) as string[], x + width / 2, y + (kind === "leadership" ? 7.4 : 8), { align: "center", lineHeightFactor: 1.1 });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.8);
+  doc.setTextColor(...(kind === "leadership" ? [220, 228, 240] as [number, number, number] : brand.muted));
+  doc.text(doc.splitTextToSize(lines.join("\n"), width - 8) as string[], x + width / 2, y + (kind === "leadership" ? 10.5 : 18), { align: "center", lineHeightFactor: 1.25 });
+}
+
+function roleHierarchyRoleBox(doc: jsPDF, x: number, y: number, width: number, title: string, code: string, members: RoleHierarchyMember[]) {
+  const visibleMembers = members.slice(0, 8);
+  const height = 42 + visibleMembers.length * 8 + (members.length > visibleMembers.length ? 6 : 0);
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(187, 198, 213);
+  doc.roundedRect(x, y, width, height, 2.2, 2.2, "FD");
+  doc.setFillColor(239, 244, 251);
+  doc.roundedRect(x + 0.5, y + 0.5, width - 1, 21, 1.7, 1.7, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(...brand.ink);
+  doc.text(doc.splitTextToSize(title, width - 10) as string[], x + 5, y + 7, { lineHeightFactor: 1.05 });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.5);
+  doc.setTextColor(...brand.muted);
+  doc.text(`${code.replaceAll("_", " ")} · ${members.length} assigned`, x + 5, y + 17);
+  visibleMembers.forEach((member, index) => {
+    const memberY = y + 29 + index * 8;
+    doc.setFillColor(...brand.soft);
+    doc.circle(x + 6.2, memberY - 1.3, 2.5, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6.8);
+    doc.setTextColor(...brand.ink);
+    doc.text(doc.splitTextToSize(member.name, width - 19)[0], x + 11, memberY - 1.2);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5.8);
+    doc.setTextColor(...brand.muted);
+    doc.text(doc.splitTextToSize(`${member.employeeCode} · ${member.designation}`, width - 19)[0], x + 11, memberY + 2.2);
+  });
+  if (members.length > visibleMembers.length) doc.text(`+ ${members.length - visibleMembers.length} more employees`, x + 5, y + height - 4);
+}
+
+function roleHierarchyEmpty(doc: jsPDF, message: string) {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...brand.muted);
+  doc.text(message, 148.5, 118, { align: "center" });
+}
+
+function drawRoleHierarchyChrome(doc: jsPDF, settings: HrSettings, current: number, pages: number) {
+  doc.setFillColor(250, 250, 251);
+  doc.rect(0, 0, 297, 22, "F");
+  doc.setFillColor(...brand.red);
+  doc.circle(15, 9, 2.1, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...brand.ink);
+  doc.text("MEDTECH", 21, 9.5);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.2);
+  doc.setTextColor(...brand.muted);
+  doc.text(settings.company.legalName.toUpperCase(), 21, 14.5);
+  doc.text(`ROLE HIERARCHY · ${current}/${pages}`, 283, 11, { align: "right" });
+  doc.setDrawColor(...brand.red);
+  doc.setLineWidth(0.6);
+  doc.line(0, 22, 297, 22);
+  doc.setLineWidth(0.2);
+  doc.line(14, 196, 283, 196);
+  doc.setFontSize(6.2);
+  doc.text(`${settings.company.address}  |  ${settings.company.email}  |  ${settings.company.phone}`, 14, 201);
+  doc.text(`Confidential  |  Page ${current} of ${pages}`, 283, 201, { align: "right" });
 }
 
 function employeeDirectory(state: HrState, settings: HrSettings) {
