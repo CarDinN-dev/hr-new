@@ -80,8 +80,6 @@ type BackendEmployee = {
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
   profilePhoto?: string | null;
-  managerId?: string | null;
-  lineManagerId?: string | null;
   department?: BackendDepartment | null;
   position?: { title: string; code: string } | null;
   user?: { roles?: Array<{ role: { code: string } }> } | null;
@@ -413,8 +411,6 @@ function mapEmployee(employee: BackendEmployee): EmployeeRecord {
     status: mapEmployeeStatus(employee.employmentStatus),
     photo: employee.profilePhoto || undefined,
     roleCodes: employee.user?.roles?.map(assignment => assignment.role.code) || [],
-    managerId: employee.managerId,
-    lineManagerId: employee.lineManagerId,
     fields: {
       ...fields,
       "Employee Code": employee.employeeCode,

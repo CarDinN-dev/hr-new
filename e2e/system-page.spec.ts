@@ -25,7 +25,7 @@ function envelope(data: unknown, meta?: unknown) {
 }
 
 async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], userCount = 2) {
-  const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "employee.read_all", "employee.hr.create", "employee.hr.update", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
+  const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "employee.read_all", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
   const hrRole = roles.find(role => role.code === "HR")!;
   const employeeRole = roles.find(role => role.code === "EMPLOYEE")!;
   const adminRoles = sessionRoles.map(code => roles.find(role => role.code === code)).filter((role): role is Role => Boolean(role));
@@ -33,10 +33,8 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
   const users: User[] = [{ ...target }, { id: admin.id, email: admin.email, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: adminRoles.map(role => ({ role })), permissionOverrides: [] }];
   users.push(...Array.from({ length: Math.max(0, userCount - users.length) }, (_, index) => ({ id: `user-${index + 1}`, email: `user-${index + 1}@example.invalid`, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: false, authorizationVersion: 1, roles: [{ role: hrRole }], permissionOverrides: [] })));
   const employees = [
-    { id: "admin-employee", employeeCode: "ADM-001", firstName: "Amina", lastName: "Admin", email: admin.email, hireDate: "2020-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Operations Director", code: "OPERATIONS_DIRECTOR" }, user: { roles: sessionRoles.map(code => ({ role: { code } })) }, managerId: null, lineManagerId: null, manager: null, lineManager: null },
-    { id: "target-employee", employeeCode: "EMP-001", firstName: "Taylor", lastName: "Target", email: target.email, hireDate: "2022-04-10", employmentStatus: "ON_LEAVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR_SPECIALIST" }, user: { roles: [{ role: { code: "HR" } }, { role: { code: "EMPLOYEE" } }] }, managerId: "admin-employee", lineManagerId: "admin-employee", manager: null, lineManager: null },
-    { id: "field-employee", employeeCode: "EMP-002", firstName: "Farah", lastName: "Field", email: "farah.field@example.invalid", hireDate: "2024-03-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Field Operations", code: "OPS" }, position: { title: "Field Engineer", code: "FIELD_ENGINEER" }, user: null, managerId: "admin-employee", lineManagerId: "target-employee", manager: null, lineManager: null },
-    { id: "orphan-employee", employeeCode: "EMP-003", firstName: "Uma", lastName: "Unassigned", email: "uma.unassigned@example.invalid", hireDate: "2024-06-01", employmentStatus: "ACTIVE", department: { id: "department-finance", name: "Finance", code: "FIN" }, position: { title: "Finance Analyst", code: "FINANCE_ANALYST" }, user: null, managerId: null, lineManagerId: null, manager: null, lineManager: null },
+    { id: "admin-employee", employeeCode: "ADM-001", firstName: "Amina", lastName: "Admin", email: admin.email, hireDate: "2020-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Platform Administrator", code: "PLATFORM_ADMIN" }, user: { roles: sessionRoles.map(code => ({ role: { code } })) }, manager: null, lineManager: null },
+    { id: "target-employee", employeeCode: "EMP-001", firstName: "Taylor", lastName: "Target", email: target.email, hireDate: "2022-04-10", employmentStatus: "ON_LEAVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR_SPECIALIST" }, user: { roles: [{ role: { code: "HR" } }, { role: { code: "EMPLOYEE" } }] }, manager: null, lineManager: null },
   ];
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
@@ -180,7 +178,8 @@ test("Admin can edit custom-role inheritance", async ({ page }) => {
   await page.getByLabel("Password").fill("IntegrationPass123!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Hierarchy" }).click();
-  await page.getByRole("tab", { name: "Access role inheritance" }).click();
+  await expect(page.getByRole("heading", { name: "Organizational hierarchy" })).toBeVisible();
+  await expect(page.getByLabel("Organizational hierarchy")).toBeVisible();
   await page.getByRole("button", { name: "All users", exact: true }).click();
   await page.getByRole("button", { name: "Edit hierarchy" }).click();
   await expect(page.getByRole("heading", { name: "Edit Custom Viewer hierarchy" })).toBeVisible();
@@ -209,43 +208,7 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await expect(page.getByRole("button", { name: "Revoke all" })).toBeEnabled();
   await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toHaveCount(0);
   await page.getByRole("link", { name: "Hierarchy" }).click();
-  await expect(page.getByRole("tab", { name: "Employee role hierarchy" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("heading", { name: "Employee role hierarchy" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Expand direct reports for Taylor Target" })).toHaveCount(0);
-  const adminEmployeeButton = page.getByRole("button", { name: "Expand direct reports for Amina Admin" });
-  await adminEmployeeButton.focus();
-  await page.keyboard.press("Enter");
-  const targetEmployeeButton = page.getByRole("button", { name: "Expand direct reports for Taylor Target" });
-  await expect(targetEmployeeButton).toBeVisible();
-  await expect(page.getByRole("button", { name: "Farah Field", exact: true })).toHaveCount(0);
-  await targetEmployeeButton.click();
-  const fieldEmployeeButton = page.getByRole("button", { name: "Farah Field", exact: true });
-  const fieldEmployeeShell = page.locator(".employee-flow-node-shell").filter({ has: fieldEmployeeButton });
-  await expect(fieldEmployeeShell.getByText("Field Engineer", { exact: true })).toBeVisible();
-  await expect(fieldEmployeeShell.getByText("Field Operations", { exact: true })).toBeVisible();
-  await expect(fieldEmployeeShell.getByText("Additional Manager: Amina Admin", { exact: true })).toBeVisible();
-  await expect(page.locator(".employee-flow-line.secondary")).toHaveCount(0);
-  await page.getByRole("checkbox", { name: "Show additional Manager links" }).check();
-  await expect(page.locator(".employee-flow-line.secondary")).toHaveCount(1);
-  const unassignedButton = page.getByRole("button", { name: /Unassigned reporting lines/ });
-  await expect(page.getByText("Uma Unassigned", { exact: true })).toHaveCount(0);
-  await unassignedButton.click();
-  await expect(page.getByText("Uma Unassigned", { exact: true })).toBeVisible();
-  await fieldEmployeeShell.getByRole("button", { name: "Edit reporting" }).click();
-  const reportingEditor = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Edit reporting: Farah Field" }) });
-  await expect(reportingEditor.getByRole("combobox").nth(0)).toHaveValue("target-employee");
-  await expect(reportingEditor.getByRole("combobox").nth(1)).toHaveValue("admin-employee");
-  const reportingSaved = page.waitForRequest(request => request.url().endsWith("/api/v1/employees/field-employee") && request.method() === "PATCH");
-  await reportingEditor.getByRole("button", { name: "Save reporting" }).click();
-  expect(JSON.parse((await reportingSaved).postData() || "{}")).toEqual({ lineManagerId: "target-employee", managerId: "admin-employee" });
-  await expect(page.getByText("Reporting lines updated in Employees and Hierarchy.")).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
-  const employeeFlowViewport = page.locator(".employee-flow-viewport");
-  expect(await employeeFlowViewport.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
-  expect(await page.locator(".employee-flow-line").evaluateAll(lines => lines.length > 0 && lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole("tab", { name: "Access role inheritance" }).click();
-  await expect(page.getByRole("heading", { name: "Access role inheritance" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Role hierarchy" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Role hierarchy filter" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Filter users by HR role" })).toHaveCount(0);
   await page.getByRole("button", { name: "All users", exact: true }).click();

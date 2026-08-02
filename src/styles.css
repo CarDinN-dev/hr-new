@@ -2782,46 +2782,132 @@ summary {
   flex: 1;
 }
 
-.hierarchy-tabs {
-  display: inline-flex;
-  width: fit-content;
-  gap: 0.3rem;
-  padding: 0.3rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel-2);
-}
-
-.hierarchy-tabs button {
-  min-height: 40px;
-  padding: 0.55rem 0.85rem;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 800;
-}
-
-.hierarchy-tabs button[aria-selected="true"] {
-  border-color: var(--line);
-  background: var(--panel);
-  color: var(--ink);
-  box-shadow: 0 4px 12px rgba(17, 29, 44, 0.07);
-}
-
-.employee-flow {
+.organization-chart {
   display: grid;
-  gap: 0.9rem;
+  gap: 1rem;
   padding-top: 0.35rem;
 }
 
-.employee-flow-summary {
+.hierarchy-workflow-guide {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--info) 22%, var(--line));
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--info-bg) 76%, transparent), color-mix(in srgb, var(--panel) 92%, transparent)),
+    var(--panel-2);
+}
+
+.hierarchy-workflow-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.hierarchy-workflow-heading span,
+.hierarchy-workflow-heading strong {
+  display: block;
+}
+
+.hierarchy-workflow-heading span {
+  color: var(--info);
+  font-size: 0.66rem;
+  font-weight: 820;
+  letter-spacing: 0.1em;
+}
+
+.hierarchy-workflow-heading strong {
+  margin-top: 0.1rem;
+  font-size: 0.94rem;
+}
+
+.hierarchy-workflow-heading p {
+  max-width: 32rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-align: right;
+}
+
+.hierarchy-role-flow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.hierarchy-role-stage {
+  position: relative;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+
+.hierarchy-role-stage > span,
+.hierarchy-role-stage > strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hierarchy-role-stage > span {
+  color: var(--info);
+  font-size: 0.62rem;
+  font-weight: 820;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.hierarchy-role-stage > strong {
+  margin-top: 0.16rem;
+  font-size: 0.73rem;
+}
+
+.hierarchy-role-stage > i {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 0.11rem);
+  z-index: 1;
+  color: var(--line-strong);
+  font-size: 0.86rem;
+  font-style: normal;
+  transform: translateY(-50%);
+}
+
+.hierarchy-approval-routes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.hierarchy-approval-routes span {
+  padding: 0.55rem 0.65rem;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--soft) 74%, transparent);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.hierarchy-approval-routes strong {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--ink);
+  font-size: 0.65rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.organization-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.6rem;
 }
 
-.employee-flow-summary span {
+.organization-overview span {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -2830,21 +2916,21 @@ summary {
   font-size: 0.72rem;
 }
 
-.employee-flow-summary strong {
+.organization-overview strong {
   margin-right: 0.28rem;
   color: var(--ink);
   font-size: 0.96rem;
 }
 
-.employee-flow-summary .has-issues {
+.organization-overview .has-issues {
   border-color: color-mix(in srgb, var(--warn) 32%, var(--line));
   background: var(--warn-bg);
   color: var(--warn);
 }
 
-.employee-flow-toolbar {
+.organization-toolbar {
   display: grid;
-  grid-template-columns: minmax(250px, 1fr) auto auto;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
   align-items: center;
   gap: 0.7rem;
   padding: 0.7rem;
@@ -2853,11 +2939,11 @@ summary {
   background: var(--panel-2);
 }
 
-.employee-flow-search {
+.organization-search {
   position: relative;
 }
 
-.employee-flow-search svg {
+.organization-search svg {
   position: absolute;
   top: 50%;
   left: 0.75rem;
@@ -2866,27 +2952,165 @@ summary {
   transform: translateY(-50%);
 }
 
-.employee-flow-search input {
+.organization-search input {
   width: 100%;
   padding-left: 2.25rem;
   background: var(--panel);
 }
 
-.employee-flow-match-count {
+.organization-match-count {
   color: var(--muted);
   font-size: 0.72rem;
   white-space: nowrap;
 }
 
-.employee-flow-actions {
+.organization-tree-actions {
   display: flex;
+  gap: 0.45rem;
+}
+
+.organization-tree-actions button {
+  min-height: 38px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.7rem;
+}
+
+.organization-tree {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.organization-branch {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.organization-node {
+  display: grid;
+  grid-template-columns: 34px 42px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  min-height: 66px;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel);
+  box-shadow: 0 5px 18px rgba(17, 29, 44, 0.045);
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.organization-node:hover {
+  border-color: color-mix(in srgb, var(--info) 34%, var(--line));
+  box-shadow: 0 10px 24px rgba(17, 29, 44, 0.08);
+  transform: translateY(-1px);
+}
+
+.organization-node-coo,
+.organization-node-cpo,
+.organization-node-hr {
+  border-left: 4px solid var(--info);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--info-bg) 72%, var(--panel)), var(--panel) 32%);
+}
+
+.organization-node-coo {
+  border-left-color: var(--red);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bad-bg) 54%, var(--panel)), var(--panel) 32%);
+}
+
+.organization-node-toggle,
+.organization-node-toggle-spacer {
+  width: 34px;
+  height: 34px;
+}
+
+.organization-node-toggle {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 9px;
+  background: var(--soft);
+  color: var(--muted);
+}
+
+.organization-node-toggle:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.organization-node-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, var(--navy-2), var(--navy));
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: 0.04em;
+}
+
+.organization-node-copy {
+  min-width: 0;
+}
+
+.organization-node-heading {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.organization-node-heading strong {
+  overflow: hidden;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-role-badge {
+  flex: 0 0 auto;
+  padding: 0.16rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--info) 24%, var(--line));
+  border-radius: 999px;
+  background: var(--info-bg);
+  color: var(--info);
+  font-size: 0.6rem;
+  font-weight: 780;
+  line-height: 1.25;
+}
+
+.organization-node-meta {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.16rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-report-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.organization-node-actions {
+  display: flex;
   gap: 0.4rem;
 }
 
-.employee-flow-actions button,
-.employee-flow-node-actions button {
+.organization-node-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2896,310 +3120,73 @@ summary {
   font-size: 0.68rem;
 }
 
-.employee-flow-legend {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.7rem 1rem;
-  color: var(--muted);
-  font-size: 0.7rem;
+.organization-node-actions .organization-node-add {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--line));
+  color: var(--red);
 }
 
-.employee-flow-legend span,
-.employee-flow-legend label {
+.organization-children {
+  position: relative;
+  display: grid;
+  gap: 0.5rem;
+  margin-left: 1.05rem;
+  padding-left: 1.35rem;
+  border-left: 1px solid var(--line-strong);
+}
+
+.organization-children > .organization-branch {
+  position: relative;
+}
+
+.organization-children > .organization-branch::before {
+  position: absolute;
+  top: 2rem;
+  left: -1.35rem;
+  width: 1.35rem;
+  height: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.organization-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  margin: 1.5rem auto 0;
+  color: var(--muted);
+}
+
+.organization-empty button {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
-.employee-flow-legend label {
-  cursor: pointer;
-}
-
-.employee-flow-legend i {
-  display: block;
-  width: 26px;
-  border-top: 2px solid color-mix(in srgb, var(--info) 64%, var(--line-strong));
-}
-
-.employee-flow-legend .employee-flow-legend-dashed {
-  border-top-style: dashed;
-}
-
-.employee-flow-viewport {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0.25rem 0 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--panel-2) 78%, var(--panel));
-  overscroll-behavior-inline: contain;
-  scrollbar-color: var(--line-strong) transparent;
-  scrollbar-width: thin;
-}
-
-.employee-flow-canvas {
-  position: relative;
-  display: grid;
-  gap: 2.5rem;
-  width: 100%;
-  padding: 1rem;
-}
-
-.employee-flow-connectors {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.employee-flow-line {
-  fill: none;
-  stroke: color-mix(in srgb, var(--info) 64%, var(--line-strong));
-  stroke-linecap: round;
-  stroke-width: 1.6;
-  vector-effect: non-scaling-stroke;
-}
-
-.employee-flow-line.secondary {
-  stroke: color-mix(in srgb, var(--warn) 70%, var(--line-strong));
-  stroke-dasharray: 6 5;
-}
-
-.employee-flow-connectors marker path {
-  fill: color-mix(in srgb, var(--info) 64%, var(--line-strong));
-}
-
-.employee-flow-level {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1rem;
-  min-width: 100%;
-}
-
-.employee-flow-node-shell {
-  display: grid;
-  align-content: start;
-  gap: 0.42rem;
-  width: 236px;
-  animation: employee-flow-reveal 180ms ease-out both;
-}
-
-.employee-flow-card {
-  position: relative;
-  display: grid;
-  align-content: start;
-  gap: 0.38rem;
-  width: 100%;
-  min-height: 182px;
-  padding: 0.78rem;
-  border-color: var(--line-strong);
-  border-radius: 12px;
-  background: var(--panel);
-  color: var(--ink);
-  text-align: left;
-  box-shadow: 0 5px 16px rgba(17, 29, 44, 0.05);
-  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
-}
-
-.employee-flow-card:hover,
-.employee-flow-card.expanded {
-  border-color: color-mix(in srgb, var(--info) 48%, var(--line-strong));
-  box-shadow: 0 9px 20px rgba(17, 29, 44, 0.08);
-}
-
-.employee-flow-card:hover {
-  transform: translateY(-1px);
-}
-
-.employee-flow-card-title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0.5rem;
-}
-
-.employee-flow-card-title strong {
-  overflow-wrap: anywhere;
-  font-size: 0.8rem;
-  line-height: 1.25;
-}
-
-.employee-flow-card-title small {
-  padding: 0.14rem 0.35rem;
-  border-radius: 999px;
-  background: var(--soft);
-  color: var(--muted);
-  font-size: 0.58rem;
-  font-weight: 760;
-  white-space: nowrap;
-}
-
-.employee-flow-role {
-  overflow-wrap: anywhere;
-  color: var(--ink);
-  font-size: 0.72rem;
-  font-weight: 760;
-}
-
-.employee-flow-department {
-  overflow-wrap: anywhere;
-  color: var(--muted);
-  font-size: 0.66rem;
-}
-
-.employee-flow-capacities {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.28rem;
-}
-
-.employee-flow-capacities i,
-.employee-flow-leave {
-  width: fit-content;
-  padding: 0.15rem 0.38rem;
-  border: 1px solid color-mix(in srgb, var(--info) 25%, var(--line));
-  border-radius: 999px;
-  background: var(--info-bg);
-  color: var(--info);
-  font-size: 0.58rem;
-  font-style: normal;
-  font-weight: 790;
-}
-
-.employee-flow-relationship,
-.employee-flow-secondary-manager {
-  padding-top: 0.35rem;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.62rem;
-  line-height: 1.35;
-}
-
-.employee-flow-secondary-manager {
-  padding-top: 0;
-  border-top: 0;
-  color: var(--warn);
-}
-
-.employee-flow-report-count {
-  display: flex;
-  align-items: center;
-  gap: 0.28rem;
-  margin-top: auto;
-  color: var(--muted);
-  font-size: 0.64rem;
-}
-
-.employee-flow-report-count svg:last-child {
-  margin-left: auto;
-}
-
-.employee-flow-leave {
-  position: absolute;
-  right: 0.72rem;
-  bottom: 0.68rem;
-  border-color: color-mix(in srgb, var(--warn) 30%, var(--line));
-  background: var(--warn-bg);
-  color: var(--warn);
-}
-
-.employee-flow-node-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.4rem;
-}
-
-.employee-flow-unassigned {
-  min-height: 112px;
-  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
-  border-style: dashed;
-  background: color-mix(in srgb, var(--warn-bg) 62%, var(--panel));
-}
-
-.employee-flow-unassigned .employee-flow-card-title {
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-}
-
-.employee-flow-unassigned > span:not(.employee-flow-card-title):not(.employee-flow-disclosure) {
-  color: var(--muted);
-  font-size: 0.66rem;
-  line-height: 1.35;
-}
-
-.employee-flow-disclosure {
-  position: absolute;
-  right: 0.65rem;
-  bottom: 0.58rem;
-  display: grid;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  border-radius: 7px;
-  background: var(--soft);
-  color: var(--muted);
-}
-
-.employee-flow-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6rem;
-  min-height: 150px;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  color: var(--muted);
-}
-
-.employee-flow-issues {
-  padding: 0.7rem 0.8rem;
+.organization-unresolved {
+  padding: 0.75rem 0.85rem;
   border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--line));
   border-radius: 10px;
   background: color-mix(in srgb, var(--warn-bg) 72%, var(--panel));
 }
 
-.employee-flow-issues div {
-  display: grid;
-  gap: 0.38rem;
-  margin-top: 0.55rem;
+.organization-unresolved p {
+  margin: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 
-.employee-flow-issues span {
-  padding: 0.32rem 0.5rem;
+.organization-unresolved div {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.organization-unresolved span {
+  padding: 0.3rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
-  font-size: 0.7rem;
-}
-
-.reporting-editor-fields label {
-  gap: 0.2rem;
-}
-
-.reporting-editor-fields small {
-  min-height: 2.3em;
-  color: var(--muted);
-  font-size: 0.66rem;
-  font-weight: 500;
-  line-height: 1.3;
-}
-
-@keyframes employee-flow-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(-5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  font-size: 0.72rem;
 }
 
 .hierarchy-access-note {
@@ -3483,55 +3470,90 @@ summary {
     flex-direction: column;
   }
 
-  .hierarchy-tabs {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .hierarchy-tabs button {
-    min-width: 0;
-    padding-inline: 0.45rem;
-  }
-
-  .employee-flow-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .employee-flow-toolbar {
-    grid-template-columns: 1fr auto;
-  }
-
-  .employee-flow-search,
-  .employee-flow-actions {
-    grid-column: 1 / -1;
-  }
-
-  .employee-flow-actions {
-    justify-content: flex-start;
-  }
-
-  .employee-flow-legend {
+  .hierarchy-workflow-heading {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .employee-flow-viewport {
-    margin-inline: -0.35rem;
-    padding-inline: 0.35rem;
+  .hierarchy-workflow-heading p {
+    text-align: left;
   }
 
-  .employee-flow-canvas {
-    gap: 2.2rem;
-    padding-inline: 0.65rem;
+  .hierarchy-role-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .employee-flow-level {
-    gap: 0.75rem;
+  .hierarchy-role-stage > i {
+    display: none;
   }
 
-  .employee-flow-node-shell {
-    width: 220px;
+  .hierarchy-approval-routes {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .organization-toolbar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .organization-search {
+    grid-column: 1 / -1;
+  }
+
+  .organization-node {
+    grid-template-columns: 28px 34px minmax(0, 1fr) auto;
+    gap: 0.4rem;
+    padding: 0.55rem;
+  }
+
+  .organization-node-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .organization-node-toggle,
+  .organization-node-toggle-spacer {
+    width: 28px;
+    height: 30px;
+  }
+
+  .organization-node-toggle {
+    min-width: 28px;
+    min-height: 30px;
+  }
+
+  .organization-report-count {
+    display: none;
+  }
+
+  .organization-node-actions button span {
+    display: none;
+  }
+
+  .organization-node-actions button {
+    width: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+  }
+
+  .organization-node-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .organization-children {
+    margin-left: 0.45rem;
+    padding-left: 0.55rem;
+  }
+
+  .organization-children > .organization-branch::before {
+    left: -0.55rem;
+    width: 0.55rem;
   }
 
   .role-flowchart-viewport {

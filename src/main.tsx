@@ -587,18 +587,17 @@ function App() {
           {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
-          {nav === "Hierarchy" && <HierarchyPage session={backendSession} notify={notify} employees={state.employees} onAddNode={parent => {
+          {nav === "Hierarchy" && <HierarchyPage session={backendSession} notify={notify} employees={state.employees} onAddNode={(role, parent) => {
             const draft = createEmptyEmployee(nextEmployeeCode(state.employees));
             draft.fields = {
               ...draft.fields,
+              Designation: ({ HR: "HR", MANAGER: "Manager", LINE_MANAGER: "Line manager", EMPLOYEE: "Employee" } as const)[role],
               Department: parent?.fields.Department || "",
               "Joining Date": todayISO(),
-              "Line Manager Employee Code/Name": parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
-              "Manager Employee Code/Name": "",
-              "Reporting Manager Employee Code/Name": parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
+              "Line Manager Employee Code/Name": role === "EMPLOYEE" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
+              "Manager Employee Code/Name": role === "LINE_MANAGER" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : role === "EMPLOYEE" ? parent?.fields["Manager Employee Code/Name"] || "" : "",
+              "Reporting Manager Employee Code/Name": role === "EMPLOYEE" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
             };
-            draft.lineManagerId = parent?.id ?? null;
-            draft.managerId = null;
             setModal(<EmployeeEditor state={state} template={draft} close={closeModal} notify={notify} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
           }} onUpdateReporting={async (employeeId, reporting) => {
             await apiRequest(`/employees/${employeeId}`, { method: "PATCH", csrfToken: backendSession.csrfToken, body: JSON.stringify(reporting) });
