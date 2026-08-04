@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload } from "./features/hierarchy-page";
+import { buildOrganizationHierarchy, groupOrganizationBranches, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload } from "./features/hierarchy-page";
 import { accessRoleLabel, buildCompanyRoleHierarchy } from "./roleHierarchy";
 
 const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
@@ -68,6 +68,22 @@ describe("hierarchy page", () => {
     expect(manager.children[0]).toMatchObject({ role: "LINE_MANAGER", roleLabel: "Line manager" });
     expect(manager.children[0].children[0].employee.id).toBe("staff");
     expect(hierarchy.issues).toEqual([{ employee: expect.objectContaining({ id: "fallback" }), message: "Line Manager does not match another active employee." }]);
+  });
+
+  it("branches direct reports by department without changing their reporting placement", () => {
+    const hierarchy = buildOrganizationHierarchy([
+      employee("coo", "COO-01", { Department: "Management" }, ["COO"]),
+      employee("finance", "FIN-01", { Department: "Finance", "Manager Employee Code/Name": "COO-01 - coo" }),
+      employee("engineering", "ENG-01", { Department: "Engineering", "Manager Employee Code/Name": "COO-01 - coo" }),
+      employee("unassigned", "EMP-01", { Department: "", "Manager Employee Code/Name": "COO-01 - coo" }),
+    ]);
+
+    expect(groupOrganizationBranches(hierarchy.roots[0].children).map(group => [group.department, group.nodes.map(node => node.employee.id)])).toEqual([
+      ["Engineering", ["engineering"]],
+      ["Finance", ["finance"]],
+      ["Department not assigned", ["unassigned"]],
+    ]);
+    expect(hierarchy.roots[0].children).toHaveLength(3);
   });
 
   it("uses the dedicated links for manager and line-manager hierarchy levels", () => {

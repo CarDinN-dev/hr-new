@@ -2903,7 +2903,7 @@ summary {
 
 .organization-overview {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.6rem;
 }
 
@@ -3007,6 +3007,36 @@ summary {
   box-shadow: 0 10px 24px rgba(17, 29, 44, 0.08);
   transform: translateY(-1px);
 }
+
+.organization-department-node {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 58px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--info) 32%, var(--line));
+  border-left: 4px solid var(--info);
+  border-radius: 13px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--info-bg) 72%, var(--panel)), var(--panel) 38%);
+}
+
+.organization-department-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.organization-department-node strong,
+.organization-department-node small {
+  display: block;
+}
+
+.organization-department-node strong { font-size: 0.82rem; }
+.organization-department-node small { margin-top: 0.16rem; color: var(--muted); font-size: 0.68rem; }
 
 .organization-node-coo,
 .organization-node-cpo,

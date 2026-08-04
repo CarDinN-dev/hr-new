@@ -6,7 +6,7 @@ import { buildCompanyRoleHierarchy, type DepartmentRoleGroup, type RoleHierarchy
 
 export type OrganizationalRole = "HR" | "MANAGER" | "LINE_MANAGER" | "EMPLOYEE";
 type ReportingRelation = "LINE_MANAGER" | "MANAGER" | null;
-type OrganizationHierarchyNode = { employee: EmployeeRecord; role: OrganizationalRole; roleLabel: string; parentRelation: ReportingRelation; children: OrganizationHierarchyNode[] };
+export type OrganizationHierarchyNode = { employee: EmployeeRecord; role: OrganizationalRole; roleLabel: string; parentRelation: ReportingRelation; children: OrganizationHierarchyNode[] };
 type OrganizationHierarchyIssue = { employee: EmployeeRecord; message: string };
 type CompanyRoleEdge = { sourceId: string; targetId: string };
 type CompanyRoleConnector = CompanyRoleEdge & { path: string };
@@ -25,6 +25,21 @@ export function hierarchyLineManagerCode(employee: EmployeeRecord) {
 
 export function hierarchyReportingPayload(lineManagerId: string, managerId: string) {
   return { lineManagerId: lineManagerId || null, managerId: managerId || null };
+}
+
+function organizationDepartment(employee: EmployeeRecord) {
+  return employee.fields.Department?.trim() || "Department not assigned";
+}
+
+export function groupOrganizationBranches(nodes: OrganizationHierarchyNode[]) {
+  const groups = new Map<string, OrganizationHierarchyNode[]>();
+  nodes.forEach(node => {
+    const department = organizationDepartment(node.employee);
+    groups.set(department, [...(groups.get(department) ?? []), node]);
+  });
+  return [...groups.entries()]
+    .sort(([left], [right]) => left === "Department not assigned" ? 1 : right === "Department not assigned" ? -1 : left.localeCompare(right))
+    .map(([department, departmentNodes]) => ({ department, nodes: departmentNodes }));
 }
 
 export function buildOrganizationHierarchy(employees: EmployeeRecord[]) {
@@ -150,6 +165,7 @@ function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditRep
   const effectiveCollapsed = collapsedIds ?? defaultCollapsed;
   const matches = normalizedSearch ? allNodes.filter(({ node }) => organizationNodeMatches(node, normalizedSearch)).length : allNodes.length;
   const reportingLeads = allNodes.filter(({ node }) => node.children.length).length;
+  const departmentCount = new Set(allNodes.map(({ node }) => organizationDepartment(node.employee))).size;
   const toggle = (employeeId: string) => setCollapsedIds(current => {
     const next = new Set(current ?? defaultCollapsed);
     if (next.has(employeeId)) next.delete(employeeId);
@@ -161,21 +177,20 @@ function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditRep
     <HierarchyWorkflowGuide employees={employees} />
     <div className="organization-overview" aria-label="Hierarchy summary">
       <span><strong>{allNodes.length}</strong> active employees</span>
+      <span><strong>{departmentCount}</strong> departments</span>
       <span><strong>{reportingLeads}</strong> reporting leads</span>
       <span><strong>{hierarchy.roots.length}</strong> top-level roots</span>
       <span className={hierarchy.issues.length ? "has-issues" : ""}><strong>{hierarchy.issues.length}</strong> unresolved</span>
     </div>
     <div className="organization-toolbar">
-      <label className="organization-search"><span className="sr-only">Find an employee</span><Search size={17} aria-hidden="true" /><input type="search" value={search} placeholder="Find an employee or code" onChange={event => setSearch(event.target.value)} /></label>
+      <label className="organization-search"><span className="sr-only">Find an employee or department</span><Search size={17} aria-hidden="true" /><input type="search" value={search} placeholder="Find employee, code, or department" onChange={event => setSearch(event.target.value)} /></label>
       <span className="organization-match-count" aria-live="polite">{normalizedSearch ? `${matches} match${matches === 1 ? "" : "es"}` : `${allNodes.length} employees`}</span>
       <div className="organization-tree-actions">
         <button type="button" onClick={() => setCollapsedIds(new Set())}>Expand all</button>
         <button type="button" onClick={() => setCollapsedIds(new Set(branchIds))}>Collapse all</button>
       </div>
     </div>
-    {hierarchy.roots.length ? <div className="organization-tree">{hierarchy.roots.map(node =>
-      <OrganizationBranch node={node} query={normalizedSearch} collapsedIds={effectiveCollapsed} canCreate={canCreate} canEdit={canEdit} onToggle={toggle} onAddNode={onAddNode} onEditReporting={onEditReporting} key={node.employee.id} />
-    )}{normalizedSearch && matches === 0 && <div className="organization-empty"><Search size={20} /><span>No employees match “{search.trim()}”.</span></div>}</div> : <div className="organization-empty"><span>No active employees yet.</span>{canCreate && <button type="button" onClick={() => onAddNode("MANAGER")}><Plus size={16} /> Add employee</button>}</div>}
+    {hierarchy.roots.length ? <div className="organization-tree"><OrganizationBranches nodes={normalizedSearch ? hierarchy.roots.filter(node => organizationBranchMatches(node, normalizedSearch)) : hierarchy.roots} query={normalizedSearch} collapsedIds={effectiveCollapsed} canCreate={canCreate} canEdit={canEdit} onToggle={toggle} onAddNode={onAddNode} onEditReporting={onEditReporting} root />{normalizedSearch && matches === 0 && <div className="organization-empty"><Search size={20} /><span>No employees or departments match “{search.trim()}”.</span></div>}</div> : <div className="organization-empty"><span>No active employees yet.</span>{canCreate && <button type="button" onClick={() => onAddNode("MANAGER")}><Plus size={16} /> Add employee</button>}</div>}
     {hierarchy.issues.length > 0 && <details className="organization-unresolved"><summary>{hierarchy.issues.length} unresolved reporting relationship{hierarchy.issues.length === 1 ? "" : "s"}</summary><p>Employees remain visible, using the next valid reporting relationship where possible.</p><div>{hierarchy.issues.map((issue, index) => <span key={`${issue.employee.id}-${index}`}><strong>{issue.employee.fields["Full Name"] || issue.employee.fields["Employee Code"]}:</strong> {issue.message}</span>)}</div></details>}
   </div>;
 }
@@ -187,10 +202,21 @@ function OrganizationBranch({ node, query, collapsedIds, canCreate, canEdit, onT
 
   return <div className="organization-branch">
     <EmployeeHierarchyNode node={node} expanded={expanded} canCreate={canCreate} canEdit={canEdit} onToggle={onToggle} onAddNode={onAddNode} onEditReporting={onEditReporting} />
-    {expanded && <div className="organization-children">{visibleChildren.map(child =>
-      <OrganizationBranch node={child} query={query} collapsedIds={collapsedIds} canCreate={canCreate} canEdit={canEdit} onToggle={onToggle} onAddNode={onAddNode} onEditReporting={onEditReporting} key={child.employee.id} />
-    )}</div>}
+    {expanded && <div className="organization-children"><OrganizationBranches nodes={visibleChildren} parentDepartment={organizationDepartment(node.employee)} query={query} collapsedIds={collapsedIds} canCreate={canCreate} canEdit={canEdit} onToggle={onToggle} onAddNode={onAddNode} onEditReporting={onEditReporting} /></div>}
   </div>;
+}
+
+function OrganizationBranches({ nodes, parentDepartment, root = false, ...branchProps }: { nodes: OrganizationHierarchyNode[]; parentDepartment?: string; root?: boolean; query: string; collapsedIds: Set<string>; canCreate: boolean; canEdit: boolean; onToggle: (employeeId: string) => void; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onEditReporting: (employee: EmployeeRecord) => void }) {
+  const directNodes = root ? nodes.filter(node => ["COO", "CPO", "HR"].includes(node.roleLabel)) : [];
+  const groupedNodes = groupOrganizationBranches(root ? nodes.filter(node => !directNodes.includes(node)) : nodes);
+  return <>{directNodes.map(node => <OrganizationBranch node={node} {...branchProps} key={node.employee.id} />)}{groupedNodes.flatMap(group =>
+    group.department === parentDepartment
+      ? group.nodes.map(node => <OrganizationBranch node={node} {...branchProps} key={node.employee.id} />)
+      : [<div className="organization-branch organization-department-branch" key={`department-${group.department}`}>
+        <div className="organization-department-node"><span className="organization-department-icon"><Building2 size={18} aria-hidden="true" /></span><span><strong>{group.department}</strong><small>{group.nodes.length} reporting branch{group.nodes.length === 1 ? "" : "es"}</small></span></div>
+        <div className="organization-children">{group.nodes.map(node => <OrganizationBranch node={node} {...branchProps} key={node.employee.id} />)}</div>
+      </div>]
+  )}</>;
 }
 
 function EmployeeHierarchyNode({ node, expanded, canCreate, canEdit, onToggle, onAddNode, onEditReporting }: { node: OrganizationHierarchyNode; expanded: boolean; canCreate: boolean; canEdit: boolean; onToggle: (employeeId: string) => void; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onEditReporting: (employee: EmployeeRecord) => void }) {
@@ -251,7 +277,7 @@ function flattenOrganizationHierarchy(roots: OrganizationHierarchyNode[]) {
 }
 
 function organizationNodeMatches(node: OrganizationHierarchyNode, query: string) {
-  return [node.employee.fields["Employee Code"], node.employee.fields["Full Name"], node.roleLabel].some(value => value?.toLocaleLowerCase().includes(query));
+  return [node.employee.fields["Employee Code"], node.employee.fields["Full Name"], node.employee.fields.Department, node.roleLabel].some(value => value?.toLocaleLowerCase().includes(query));
 }
 
 function organizationBranchMatches(node: OrganizationHierarchyNode, query: string): boolean {
