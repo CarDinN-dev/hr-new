@@ -1321,7 +1321,7 @@ td button {
 .company-role-leadership {
   display: grid;
   gap: 10px;
-  width: 470px;
+  width: 330px;
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--pro-brand) 40%, var(--pro-border)) !important;
   border-radius: 15px !important;
@@ -1403,7 +1403,7 @@ td button {
   justify-items: center;
   align-content: start;
   gap: 34px;
-  min-width: 230px;
+  min-width: 244px;
   animation: role-branch-reveal 180ms ease-out both;
 }
 
@@ -1468,8 +1468,19 @@ td button {
 .company-role-card-shell {
   display: grid;
   gap: 7px;
-  width: 204px;
+  width: 218px;
   animation: role-branch-reveal 180ms ease-out both;
+}
+
+.company-role-branch-children {
+  display: grid;
+  justify-items: center;
+  gap: 34px;
+  padding-top: 27px;
+}
+
+.company-role-branch-children .company-role-card-shell {
+  width: 202px;
 }
 
 .company-role-card {
@@ -1495,6 +1506,24 @@ td button {
 
 .company-role-card.expanded {
   border-color: color-mix(in srgb, var(--pro-success) 58%, var(--pro-border)) !important;
+}
+
+.company-role-card-manager {
+  border-color: color-mix(in srgb, var(--pro-info) 42%, var(--pro-border)) !important;
+}
+
+.company-role-card-manager .company-role-node-icon {
+  background: color-mix(in srgb, var(--pro-info) 11%, var(--pro-surface));
+  color: var(--pro-info);
+}
+
+.company-role-card-employee {
+  border-color: var(--pro-border) !important;
+}
+
+.company-role-card-employee .company-role-node-icon {
+  background: color-mix(in srgb, var(--pro-border-strong) 18%, var(--pro-surface));
+  color: var(--pro-text-soft);
 }
 
 .company-role-roster {
@@ -1614,7 +1643,7 @@ td button {
   }
 
   .company-role-leadership {
-    width: 350px;
+    width: 300px;
   }
 
   .company-role-executive strong {

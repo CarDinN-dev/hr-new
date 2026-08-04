@@ -10,23 +10,25 @@ export type RoleHierarchyMember = {
   roleCodes: string[];
 };
 
-export type DepartmentReportingLevel = {
+export type RoleHierarchyBranch = {
   id: string;
   code: "MANAGER" | "LINE_MANAGER" | "EMPLOYEE";
   label: string;
+  member?: RoleHierarchyMember;
   members: RoleHierarchyMember[];
+  children: RoleHierarchyBranch[];
 };
 
 export type RoleHierarchyDepartment = {
   id: string;
   name: string;
   memberCount: number;
-  levels: DepartmentReportingLevel[];
+  branches: RoleHierarchyBranch[];
 };
 
 export type CompanyRoleHierarchy = {
   activeEmployees: RoleHierarchyMember[];
-  executives: Array<{ code: "COO" | "CPO"; label: string; members: RoleHierarchyMember[] }>;
+  executives: Array<{ id: string; code: "COO" | "CPO"; label: string; members: RoleHierarchyMember[] }>;
   departments: RoleHierarchyDepartment[];
   managerCount: number;
   lineManagerCount: number;
@@ -71,6 +73,9 @@ function compareMembers(left: RoleHierarchyMember, right: RoleHierarchyMember) {
   return left.name.localeCompare(right.name) || left.employeeCode.localeCompare(right.employeeCode);
 }
 
+type LineManagerDraft = { member: RoleHierarchyMember; employees: RoleHierarchyMember[] };
+type ManagerDraft = { member: RoleHierarchyMember; lineManagers: Map<string, LineManagerDraft>; employees: RoleHierarchyMember[] };
+
 export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyRoleHierarchy {
   const activeRecords = employees.filter(employee => employee.status === "Active" || employee.status === "On Leave");
   const activeEmployees = activeRecords.map(member).sort(compareMembers);
@@ -81,20 +86,28 @@ export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyR
     if (role) executiveById.set(employee.id, role);
   });
 
+  const resolve = (value: string, employeeId: string) => {
+    const reference = memberByCode.get(employeeCode(value));
+    return reference && reference.id !== employeeId && !executiveById.has(reference.id) ? reference : undefined;
+  };
+  const managerFor = (employee: EmployeeRecord) => resolve(employee.fields["Manager Employee Code/Name"] || "", employee.id);
+  const lineManagerFor = (employee: EmployeeRecord) => resolve(employee.fields["Line Manager Employee Code/Name"] || employee.fields["Reporting Manager Employee Code/Name"] || "", employee.id);
   const managerIds = new Set<string>();
   const lineManagerIds = new Set<string>();
   activeRecords.forEach(employee => {
-    const manager = memberByCode.get(employeeCode(employee.fields["Manager Employee Code/Name"] || ""));
-    const lineManager = memberByCode.get(employeeCode(employee.fields["Line Manager Employee Code/Name"] || employee.fields["Reporting Manager Employee Code/Name"] || ""));
-    if (manager && manager.id !== employee.id) managerIds.add(manager.id);
-    if (lineManager && lineManager.id !== employee.id) lineManagerIds.add(lineManager.id);
+    const manager = managerFor(employee);
+    const lineManager = lineManagerFor(employee);
+    if (manager) managerIds.add(manager.id);
+    if (lineManager) lineManagerIds.add(lineManager.id);
   });
 
   const executives = (["COO", "CPO"] as const).map(code => ({
+    id: `company-${code.toLocaleLowerCase()}`,
     code,
     label: roleLabels[code],
     members: activeEmployees.filter(employee => executiveById.get(employee.id) === code),
   }));
+  const recordById = new Map(activeRecords.map(employee => [employee.id, employee]));
   const departmentMembers = new Map<string, RoleHierarchyMember[]>();
   activeEmployees.filter(employee => !executiveById.has(employee.id)).forEach(employee => {
     departmentMembers.set(employee.department, [...(departmentMembers.get(employee.department) ?? []), employee]);
@@ -102,23 +115,78 @@ export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyR
 
   const departments = [...departmentMembers.entries()]
     .sort(([left], [right]) => left === "Department not assigned" ? 1 : right === "Department not assigned" ? -1 : left.localeCompare(right))
-    .map(([name, members], departmentIndex) => {
+    .map(([name, members], departmentIndex): RoleHierarchyDepartment => {
       const id = `department-${departmentIndex}`;
-      const level = (code: DepartmentReportingLevel["code"], levelMembers: RoleHierarchyMember[], index: number): DepartmentReportingLevel => ({
-        id: `${id}-level-${index}`,
-        code,
-        label: roleLabels[code],
-        members: levelMembers.sort(compareMembers),
+      const managers = new Map<string, ManagerDraft>();
+      const lineManagers = new Map<string, LineManagerDraft>();
+      const directEmployees: RoleHierarchyMember[] = [];
+      const ensureManager = (manager: RoleHierarchyMember) => {
+        const existing = managers.get(manager.id);
+        if (existing) return existing;
+        const created = { member: manager, lineManagers: new Map<string, LineManagerDraft>(), employees: [] };
+        managers.set(manager.id, created);
+        return created;
+      };
+      const ensureLineManager = (collection: Map<string, LineManagerDraft>, lineManager: RoleHierarchyMember) => {
+        const existing = collection.get(lineManager.id);
+        if (existing) return existing;
+        const created = { member: lineManager, employees: [] };
+        collection.set(lineManager.id, created);
+        return created;
+      };
+
+      members.forEach(employee => {
+        if (managerIds.has(employee.id) || lineManagerIds.has(employee.id)) return;
+        const record = recordById.get(employee.id)!;
+        const manager = managerFor(record);
+        const lineManager = lineManagerFor(record);
+        if (manager && lineManager) ensureLineManager(ensureManager(manager).lineManagers, lineManager).employees.push(employee);
+        else if (manager) ensureManager(manager).employees.push(employee);
+        else if (lineManager) ensureLineManager(lineManagers, lineManager).employees.push(employee);
+        else directEmployees.push(employee);
       });
+
+      // Keep referenced role holders visible in their own department even when their reports sit elsewhere.
+      members.forEach(employee => {
+        if (managerIds.has(employee.id)) ensureManager(employee);
+        if (lineManagerIds.has(employee.id) && ![...managers.values()].some(manager => manager.lineManagers.has(employee.id))) ensureLineManager(lineManagers, employee);
+      });
+
+      const employeeBranch = (branchId: string, branchMembers: RoleHierarchyMember[]): RoleHierarchyBranch => ({
+        id: branchId,
+        code: "EMPLOYEE",
+        label: roleLabels.EMPLOYEE,
+        members: branchMembers.sort(compareMembers),
+        children: [],
+      });
+      const lineManagerBranch = (branchId: string, draft: LineManagerDraft): RoleHierarchyBranch => ({
+        id: branchId,
+        code: "LINE_MANAGER",
+        label: roleLabels.LINE_MANAGER,
+        member: draft.member,
+        members: [],
+        children: draft.employees.length ? [employeeBranch(`${branchId}-employees`, draft.employees)] : [],
+      });
+      const managerBranches = [...managers.values()].sort((left, right) => compareMembers(left.member, right.member)).map(draft => {
+        const branchId = `${id}-manager-${draft.member.id}`;
+        return {
+          id: branchId,
+          code: "MANAGER" as const,
+          label: roleLabels.MANAGER,
+          member: draft.member,
+          members: [],
+          children: [
+            ...[...draft.lineManagers.values()].sort((left, right) => compareMembers(left.member, right.member)).map(lineManager => lineManagerBranch(`${branchId}-line-manager-${lineManager.member.id}`, lineManager)),
+            ...(draft.employees.length ? [employeeBranch(`${branchId}-employees`, draft.employees)] : []),
+          ],
+        };
+      });
+      const lineManagerBranches = [...lineManagers.values()].sort((left, right) => compareMembers(left.member, right.member)).map(draft => lineManagerBranch(`${id}-line-manager-${draft.member.id}`, draft));
       return {
         id,
         name,
         memberCount: members.length,
-        levels: [
-          level("MANAGER", members.filter(employee => managerIds.has(employee.id)), 0),
-          level("LINE_MANAGER", members.filter(employee => lineManagerIds.has(employee.id)), 1),
-          level("EMPLOYEE", members.filter(employee => !managerIds.has(employee.id) && !lineManagerIds.has(employee.id)), 2),
-        ],
+        branches: [...managerBranches, ...lineManagerBranches, ...(directEmployees.length ? [employeeBranch(`${id}-employees`, directEmployees)] : [])],
       };
     });
 

@@ -10,7 +10,7 @@ const employee = (id: string, code: string, fields: Record<string, string> = {},
 });
 
 describe("hierarchy page", () => {
-  it("places COO and CPO above department reporting levels", () => {
+  it("builds named Manager and Line Manager branches below separate COO and CPO levels", () => {
     const hierarchy = buildCompanyRoleHierarchy([
       employee("coo", "EX-001", { "Full Name": "Omar Operations", Designation: "Director" }, ["COO"]),
       employee("cpo", "EX-002", { "Full Name": "Priya People", Designation: "Chief People Officer" }),
@@ -24,10 +24,17 @@ describe("hierarchy page", () => {
       ["CPO", ["Priya People"]],
     ]);
     expect(hierarchy.departments.map(department => department.name)).toEqual(["Engineering"]);
-    expect(hierarchy.departments[0].levels.map(level => [level.code, level.members.map(member => member.name)])).toEqual([
-      ["MANAGER", ["Amy Manager"]],
-      ["LINE_MANAGER", ["Leo Lead"]],
-      ["EMPLOYEE", ["Ben Engineer"]],
+    expect(hierarchy.executives.map(executive => executive.id)).toEqual(["company-coo", "company-cpo"]);
+    expect(hierarchy.departments[0].branches).toEqual([
+      expect.objectContaining({
+        code: "MANAGER",
+        member: expect.objectContaining({ name: "Amy Manager" }),
+        children: [expect.objectContaining({
+          code: "LINE_MANAGER",
+          member: expect.objectContaining({ name: "Leo Lead" }),
+          children: [expect.objectContaining({ code: "EMPLOYEE", members: [expect.objectContaining({ name: "Ben Engineer" })] })],
+        })],
+      }),
     ]);
     expect(hierarchy).toMatchObject({ managerCount: 1, lineManagerCount: 1, employeeCount: 1 });
   });
@@ -42,13 +49,36 @@ describe("hierarchy page", () => {
     ]);
 
     const operations = hierarchy.departments[0];
-    expect(operations.levels[0].members.map(member => member.id)).toEqual(["hybrid"]);
-    expect(operations.levels[1].members.map(member => member.id)).toEqual(["hybrid"]);
-    expect(operations.levels[2].members.map(member => member.id)).toEqual(["line-report", "manager-report"]);
+    expect(operations.branches.map(branch => [branch.code, branch.member?.id])).toEqual([
+      ["MANAGER", "hybrid"],
+      ["LINE_MANAGER", "hybrid"],
+    ]);
+    expect(operations.branches[0].children[0].members.map(member => member.id)).toEqual(["manager-report"]);
+    expect(operations.branches[1].children[0].members.map(member => member.id)).toEqual(["line-report"]);
     expect(hierarchy.departments[1]).toMatchObject({ name: "Department not assigned", memberCount: 1 });
-    expect(hierarchy.departments[1].levels[2].members[0]).toMatchObject({ name: "EMP-003", designation: "Designation not assigned" });
+    expect(hierarchy.departments[1].branches[0].members[0]).toMatchObject({ name: "EMP-003", designation: "Designation not assigned" });
     expect(hierarchy.activeEmployees.map(member => member.id)).not.toContain("former");
     expect(hierarchy).toMatchObject({ managerCount: 1, lineManagerCount: 1, employeeCount: 3 });
+  });
+
+  it("places incomplete references directly without merging Manager and Line Manager fields", () => {
+    const hierarchy = buildCompanyRoleHierarchy([
+      employee("manager", "MGR-01", { Department: "Operations" }),
+      employee("line", "LINE-01", { Department: "Operations" }),
+      employee("both", "EMP-01", { Department: "Operations", "Manager Employee Code/Name": "MGR-01 - manager", "Line Manager Employee Code/Name": "LINE-01 - line" }),
+      employee("manager-only", "EMP-02", { Department: "Operations", "Manager Employee Code/Name": "MGR-01 - manager" }),
+      employee("line-only", "EMP-03", { Department: "Operations", "Line Manager Employee Code/Name": "LINE-01 - line" }),
+      employee("legacy", "EMP-04", { Department: "Operations", "Reporting Manager Employee Code/Name": "LINE-01 - line" }),
+      employee("missing", "EMP-05", { Department: "Operations", "Manager Employee Code/Name": "UNKNOWN", "Line Manager Employee Code/Name": "MISSING" }),
+    ]);
+
+    const [managerBranch, lineManagerBranch, employeeBranch] = hierarchy.departments[0].branches;
+    expect(managerBranch).toMatchObject({ code: "MANAGER", member: { id: "manager" } });
+    expect(managerBranch.children[0]).toMatchObject({ code: "LINE_MANAGER", member: { id: "line" } });
+    expect(managerBranch.children[0].children[0].members.map(member => member.id)).toEqual(["both"]);
+    expect(managerBranch.children[1].members.map(member => member.id)).toEqual(["manager-only"]);
+    expect(lineManagerBranch.children[0].members.map(member => member.id)).toEqual(["legacy", "line-only"]);
+    expect(employeeBranch).toMatchObject({ code: "EMPLOYEE", members: [expect.objectContaining({ id: "missing" })] });
   });
 
   it("builds the employee tree from reporting assignments instead of job titles", () => {

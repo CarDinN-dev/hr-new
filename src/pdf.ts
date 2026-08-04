@@ -4,7 +4,7 @@ import type { RowInput } from "jspdf-autotable";
 import type { EmployeeRecord, EosRecord, HrSettings, HrState, PdfTemplate, PayrollSlip } from "./data";
 import { months, pdfTemplates, reportTemplates } from "./data";
 import { attendanceStats, employeeName, employeeSalary, eosSummary, formatDate, formatMoney, moneyValue } from "./domain";
-import { buildCompanyRoleHierarchy, type RoleHierarchyMember } from "./roleHierarchy";
+import { buildCompanyRoleHierarchy, type RoleHierarchyBranch, type RoleHierarchyMember } from "./roleHierarchy";
 
 type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
 export type GeneratedPdf = { filename: string; dataUrl: string; sizeBytes: number };
@@ -150,48 +150,42 @@ export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings
 export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSettings) {
   const hierarchy = buildCompanyRoleHierarchy(employees);
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
-  doc.setProperties({ title: "Company Role Hierarchy", subject: "Departments and saved reporting responsibilities", author: settings.company.legalName, creator: "MedTech HR ERP" });
+  doc.setProperties({ title: "Company Role Hierarchy", subject: "Departments and separate Manager and Line Manager references", author: settings.company.legalName, creator: "MedTech HR ERP" });
   const departmentPages = hierarchy.departments.length ? chunk(hierarchy.departments, 4) : [[]];
 
   departmentPages.forEach((departments, pageIndex) => {
     if (pageIndex) doc.addPage();
     roleHierarchyPageTitle(doc, "Company Role Hierarchy", `${hierarchy.activeEmployees.length} active employees · ${hierarchy.departments.length} departments · ${hierarchy.managerCount} managers · ${hierarchy.lineManagerCount} line managers`);
-    roleHierarchyBox(doc, 116, 35, 65, 12, "Executive leadership", ["COO · CPO"], "leadership");
-    const executiveXs = [61, 166];
-    hierarchy.executives.forEach((executive, index) => {
-      const names = executive.members.length ? executive.members.map(member => member.name) : ["Position not assigned"];
-      roleHierarchyBox(doc, executiveXs[index], 57, 70, 29, `${executive.code} · ${executive.label}`, names, "executive");
-      roleHierarchyConnector(doc, 148.5, 47, executiveXs[index] + 35, 57);
-    });
+    const coo = hierarchy.executives.find(executive => executive.code === "COO")!;
+    const cpo = hierarchy.executives.find(executive => executive.code === "CPO")!;
+    roleHierarchyBox(doc, 106, 42, 85, 22, `COO · ${coo.label}`, coo.members.length ? coo.members.map(member => member.name) : ["Position not assigned"], "executive");
+    roleHierarchyConnector(doc, 148.5, 64, 148.5, 73);
+    roleHierarchyBox(doc, 106, 73, 85, 22, `CPO · ${cpo.label}`, cpo.members.length ? cpo.members.map(member => member.name) : ["Position not assigned"], "executive");
     const boxWidth = 58;
     const gap = 10;
     const totalWidth = departments.length * boxWidth + Math.max(0, departments.length - 1) * gap;
     const firstX = (297 - totalWidth) / 2;
     departments.forEach((department, index) => {
       const x = firstX + index * (boxWidth + gap);
-      roleHierarchyConnector(doc, 148.5, 86, x + boxWidth / 2, 116);
-      roleHierarchyBox(doc, x, 116, boxWidth, 32, department.name, [`${department.memberCount} employees`, "Manager > Line Manager > Employee"], "department");
+      roleHierarchyConnector(doc, 148.5, 95, x + boxWidth / 2, 119);
+      roleHierarchyBox(doc, x, 119, boxWidth, 32, department.name, [`${department.memberCount} employees`, "Named reporting branches"], "department");
     });
     if (!departments.length) roleHierarchyEmpty(doc, "No active employees are available below executive leadership.");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(...brand.muted);
-    doc.text("Department overview", 148.5, 158, { align: "center" });
+    doc.text("COO → CPO → Department → Manager → Line Manager → Employee", 148.5, 161, { align: "center" });
   });
 
   hierarchy.departments.forEach(department => {
-    doc.addPage();
-    roleHierarchyPageTitle(doc, department.name, `${department.memberCount} employees · saved reporting hierarchy`);
-    roleHierarchyBox(doc, 103.5, 36, 90, 24, department.name, [`${department.memberCount} active employees`, "Manager > Line Manager > Employee"], "department");
-    const levelWidth = 82;
-    const gap = 9;
-    const totalWidth = department.levels.length * levelWidth + Math.max(0, department.levels.length - 1) * gap;
-    const firstX = (297 - totalWidth) / 2;
-    department.levels.forEach((level, index) => {
-      const x = firstX + index * (levelWidth + gap);
-      if (index === 0) roleHierarchyConnector(doc, 148.5, 60, x + levelWidth / 2, 82);
-      else roleHierarchyHorizontalConnector(doc, x - gap, x, 92);
-      roleHierarchyRoleBox(doc, x, 82, levelWidth, level.label, level.code, level.members);
+    const rows = roleHierarchyRows(department.branches);
+    const pages = rows.length ? chunk(rows, 14) : [[]];
+    pages.forEach((pageRows, pageIndex) => {
+      doc.addPage();
+      roleHierarchyPageTitle(doc, department.name, `${department.memberCount} employees · named reporting branches${pages.length > 1 ? ` · part ${pageIndex + 1}/${pages.length}` : ""}`);
+      roleHierarchyBox(doc, 103.5, 40, 90, 22, department.name, [`${department.memberCount} active employees`, "Manager and Line Manager references kept separate"], "department");
+      pageRows.forEach((row, index) => roleHierarchyTreeRow(doc, row, 72 + index * 8.6));
+      if (!pageRows.length) roleHierarchyEmpty(doc, "No reporting branches are assigned in this department.");
     });
   });
 
@@ -204,6 +198,37 @@ export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSe
   const dataUrl = doc.output("datauristring");
   doc.save(filename);
   return { filename, dataUrl, sizeBytes: Math.round((dataUrl.length * 3) / 4) };
+}
+
+type RoleHierarchyPdfRow = { depth: number; code: RoleHierarchyBranch["code"]; member: RoleHierarchyMember };
+
+function roleHierarchyRows(branches: RoleHierarchyBranch[], depth = 0): RoleHierarchyPdfRow[] {
+  return branches.flatMap(branch => [
+    ...(branch.member ? [{ depth, code: branch.code, member: branch.member }] : branch.members.map(member => ({ depth, code: branch.code, member }))),
+    ...roleHierarchyRows(branch.children, depth + 1),
+  ]);
+}
+
+function roleHierarchyTreeRow(doc: jsPDF, row: RoleHierarchyPdfRow, y: number) {
+  const x = 22 + row.depth * 18;
+  const width = 253 - row.depth * 18;
+  if (row.depth) {
+    doc.setDrawColor(74, 119, 181);
+    doc.setLineWidth(0.35);
+    doc.line(x - 9, y + 3.6, x - 2, y + 3.6);
+  }
+  doc.setFillColor(row.code === "MANAGER" ? 241 : row.code === "LINE_MANAGER" ? 245 : 250, row.code === "MANAGER" ? 246 : row.code === "LINE_MANAGER" ? 249 : 250, row.code === "MANAGER" ? 254 : row.code === "LINE_MANAGER" ? 246 : 251);
+  doc.setDrawColor(187, 198, 213);
+  doc.setLineWidth(0.25);
+  doc.roundedRect(x, y, width, 7.2, 1.4, 1.4, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6.5);
+  doc.setTextColor(...brand.ink);
+  doc.text(row.code.replaceAll("_", " "), x + 3, y + 4.6);
+  doc.text(doc.splitTextToSize(row.member.name, 78)[0], x + 39, y + 4.6);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...brand.muted);
+  doc.text(doc.splitTextToSize(`${row.member.employeeCode} · ${row.member.designation}`, Math.max(40, width - 124))[0], x + 121, y + 4.6);
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -232,14 +257,6 @@ function roleHierarchyConnector(doc: jsPDF, sourceX: number, sourceY: number, ta
   doc.triangle(targetX - 1.2, targetY - 2, targetX + 1.2, targetY - 2, targetX, targetY, "F");
 }
 
-function roleHierarchyHorizontalConnector(doc: jsPDF, sourceX: number, targetX: number, y: number) {
-  doc.setDrawColor(74, 119, 181);
-  doc.setLineWidth(0.45);
-  doc.line(sourceX, y, targetX - 2, y);
-  doc.setFillColor(74, 119, 181);
-  doc.triangle(targetX - 2, y - 1.2, targetX - 2, y + 1.2, targetX, y, "F");
-}
-
 function roleHierarchyBox(doc: jsPDF, x: number, y: number, width: number, height: number, title: string, lines: string[], kind: "leadership" | "executive" | "department") {
   const colors = kind === "leadership" ? { fill: [35, 49, 74], line: [35, 49, 74], text: [255, 255, 255] } : kind === "executive" ? { fill: [241, 246, 254], line: [74, 119, 181], text: brand.ink } : { fill: [250, 250, 251], line: [187, 198, 213], text: brand.ink };
   doc.setFillColor(...colors.fill as [number, number, number]);
@@ -254,38 +271,6 @@ function roleHierarchyBox(doc: jsPDF, x: number, y: number, width: number, heigh
   doc.setFontSize(6.8);
   doc.setTextColor(...(kind === "leadership" ? [220, 228, 240] as [number, number, number] : brand.muted));
   doc.text(doc.splitTextToSize(lines.join("\n"), width - 8) as string[], x + width / 2, y + (kind === "leadership" ? 10.5 : 18), { align: "center", lineHeightFactor: 1.25 });
-}
-
-function roleHierarchyRoleBox(doc: jsPDF, x: number, y: number, width: number, title: string, code: string, members: RoleHierarchyMember[]) {
-  const visibleMembers = members.slice(0, 8);
-  const height = 42 + visibleMembers.length * 8 + (members.length > visibleMembers.length ? 6 : 0);
-  doc.setFillColor(255, 255, 255);
-  doc.setDrawColor(187, 198, 213);
-  doc.roundedRect(x, y, width, height, 2.2, 2.2, "FD");
-  doc.setFillColor(239, 244, 251);
-  doc.roundedRect(x + 0.5, y + 0.5, width - 1, 21, 1.7, 1.7, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(...brand.ink);
-  doc.text(doc.splitTextToSize(title, width - 10) as string[], x + 5, y + 7, { lineHeightFactor: 1.05 });
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(6.5);
-  doc.setTextColor(...brand.muted);
-  doc.text(`${code.replaceAll("_", " ")} · ${members.length} assigned`, x + 5, y + 17);
-  visibleMembers.forEach((member, index) => {
-    const memberY = y + 29 + index * 8;
-    doc.setFillColor(...brand.soft);
-    doc.circle(x + 6.2, memberY - 1.3, 2.5, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(6.8);
-    doc.setTextColor(...brand.ink);
-    doc.text(doc.splitTextToSize(member.name, width - 19)[0], x + 11, memberY - 1.2);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(5.8);
-    doc.setTextColor(...brand.muted);
-    doc.text(doc.splitTextToSize(`${member.employeeCode} · ${member.designation}`, width - 19)[0], x + 11, memberY + 2.2);
-  });
-  if (members.length > visibleMembers.length) doc.text(`+ ${members.length - visibleMembers.length} more employees`, x + 5, y + height - 4);
 }
 
 function roleHierarchyEmpty(doc: jsPDF, message: string) {
