@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, groupOrganizationBranches, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload } from "./features/hierarchy-page";
-import { accessRoleLabel, buildCompanyRoleHierarchy } from "./roleHierarchy";
+import { buildOrganizationHierarchy, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload } from "./features/hierarchy-page";
+import { buildCompanyRoleHierarchy } from "./roleHierarchy";
 
 const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
   id,
@@ -10,46 +10,45 @@ const employee = (id: string, code: string, fields: Record<string, string> = {},
 });
 
 describe("hierarchy page", () => {
-  it("places COO and CPO above department role groups", () => {
+  it("places COO and CPO above department reporting levels", () => {
     const hierarchy = buildCompanyRoleHierarchy([
       employee("coo", "EX-001", { "Full Name": "Omar Operations", Designation: "Director" }, ["COO"]),
       employee("cpo", "EX-002", { "Full Name": "Priya People", Designation: "Chief People Officer" }),
-      employee("hr", "HR-001", { "Full Name": "Ava HR", Department: "People", Designation: "HR Partner" }, ["HR"]),
-      employee("engineer", "EN-001", { "Full Name": "Ben Engineer", Department: "Engineering", Designation: "Engineer" }, ["EMPLOYEE"]),
+      employee("manager", "MGR-001", { "Full Name": "Amy Manager", Department: "Engineering" }, ["SUPER_ADMIN"]),
+      employee("line", "LINE-001", { "Full Name": "Leo Lead", Department: "Engineering", "Manager Employee Code/Name": "MGR-001 - Amy Manager" }),
+      employee("engineer", "EN-001", { "Full Name": "Ben Engineer", Department: "Engineering", "Manager Employee Code/Name": "MGR-001 - Amy Manager", "Line Manager Employee Code/Name": "LINE-001 - Leo Lead" }, ["CUSTOM_ACCESS_ROLE"]),
     ]);
 
     expect(hierarchy.executives.map(group => [group.code, group.members.map(member => member.name)])).toEqual([
       ["COO", ["Omar Operations"]],
       ["CPO", ["Priya People"]],
     ]);
-    expect(hierarchy.departments.map(department => department.name)).toEqual(["Engineering", "People"]);
-    expect(hierarchy.departments.flatMap(department => department.roles.map(role => role.code))).toEqual(["EMPLOYEE", "HR"]);
+    expect(hierarchy.departments.map(department => department.name)).toEqual(["Engineering"]);
+    expect(hierarchy.departments[0].levels.map(level => [level.code, level.members.map(member => member.name)])).toEqual([
+      ["MANAGER", ["Amy Manager"]],
+      ["LINE_MANAGER", ["Leo Lead"]],
+      ["EMPLOYEE", ["Ben Engineer"]],
+    ]);
+    expect(hierarchy).toMatchObject({ managerCount: 1, lineManagerCount: 1, employeeCount: 1 });
   });
 
-  it("groups every direct role, excludes former employees, and supplies safe fallbacks", () => {
+  it("uses saved reporting assignments instead of access roles", () => {
     const hierarchy = buildCompanyRoleHierarchy([
-      employee("amy", "EMP-001", { "Full Name": "Amy Adams", Department: "Engineering", Designation: "Lead" }, ["MANAGER", "HR", "CUSTOM_FINANCE_APPROVER", "MANAGER"]),
-      { ...employee("zoe", "EMP-002", { "Full Name": "Zoe Zane", Department: "Engineering", Designation: "Engineer" }, ["EMPLOYEE", "CUSTOM_FINANCE_APPROVER"]), status: "On Leave" as const },
-      employee("fallback", "EMP-003", { "Full Name": "", Department: "", Designation: "" }),
-      { ...employee("former", "EMP-004", { Department: "Finance" }, ["HR"]), status: "Resigned" as const },
-      { ...employee("terminated", "EMP-005", { Department: "Finance" }, ["HR"]), status: "Terminated" as const },
+      employee("hybrid", "LEAD-001", { "Full Name": "Hybrid Lead", Department: "Operations" }, ["ADMIN"]),
+      employee("manager-report", "EMP-001", { Department: "Operations", "Manager Employee Code/Name": "LEAD-001 - Hybrid Lead" }),
+      employee("line-report", "EMP-002", { Department: "Operations", "Line Manager Employee Code/Name": "LEAD-001 - Hybrid Lead" }),
+      employee("fallback", "EMP-003", { "Full Name": "", Department: "", Designation: "", "Manager Employee Code/Name": "MISSING - Missing" }, ["SUPER_ADMIN"]),
+      { ...employee("former", "EMP-004", { Department: "Finance", "Manager Employee Code/Name": "LEAD-001 - Hybrid Lead" }), status: "Resigned" as const },
     ]);
 
-    const engineering = hierarchy.departments[0];
-    expect(engineering.name).toBe("Engineering");
-    expect(engineering.memberCount).toBe(2);
-    expect(engineering.roles.map(role => role.code)).toEqual(["HR", "MANAGER", "EMPLOYEE", "CUSTOM_FINANCE_APPROVER"]);
-    expect(engineering.roles.find(role => role.code === "HR")?.members[0].name).toBe("Amy Adams");
-    expect(engineering.roles.find(role => role.code === "MANAGER")?.members).toHaveLength(1);
-    expect(engineering.roles.find(role => role.code === "CUSTOM_FINANCE_APPROVER")?.members.map(member => member.name)).toEqual(["Amy Adams", "Zoe Zane"]);
+    const operations = hierarchy.departments[0];
+    expect(operations.levels[0].members.map(member => member.id)).toEqual(["hybrid"]);
+    expect(operations.levels[1].members.map(member => member.id)).toEqual(["hybrid"]);
+    expect(operations.levels[2].members.map(member => member.id)).toEqual(["line-report", "manager-report"]);
     expect(hierarchy.departments[1]).toMatchObject({ name: "Department not assigned", memberCount: 1 });
-    expect(hierarchy.departments[1].roles[0]).toMatchObject({ code: "NO_ACCESS_ROLE", label: "No access role assigned" });
-    expect(hierarchy.departments[1].roles[0].members[0]).toMatchObject({ name: "EMP-003", designation: "Designation not assigned" });
+    expect(hierarchy.departments[1].levels[2].members[0]).toMatchObject({ name: "EMP-003", designation: "Designation not assigned" });
     expect(hierarchy.activeEmployees.map(member => member.id)).not.toContain("former");
-    expect(hierarchy.activeEmployees.map(member => member.id)).not.toContain("terminated");
-    expect(hierarchy.roleAssignmentCount).toBe(6);
-    expect(hierarchy.unassignedCount).toBe(1);
-    expect(accessRoleLabel("CUSTOM_FINANCE_APPROVER")).toBe("Custom Finance Approver");
+    expect(hierarchy).toMatchObject({ managerCount: 1, lineManagerCount: 1, employeeCount: 3 });
   });
 
   it("builds the employee tree from reporting assignments instead of job titles", () => {
@@ -68,22 +67,6 @@ describe("hierarchy page", () => {
     expect(manager.children[0]).toMatchObject({ role: "LINE_MANAGER", roleLabel: "Line manager" });
     expect(manager.children[0].children[0].employee.id).toBe("staff");
     expect(hierarchy.issues).toEqual([{ employee: expect.objectContaining({ id: "fallback" }), message: "Line Manager does not match another active employee." }]);
-  });
-
-  it("branches direct reports by department without changing their reporting placement", () => {
-    const hierarchy = buildOrganizationHierarchy([
-      employee("coo", "COO-01", { Department: "Management" }, ["COO"]),
-      employee("finance", "FIN-01", { Department: "Finance", "Manager Employee Code/Name": "COO-01 - coo" }),
-      employee("engineering", "ENG-01", { Department: "Engineering", "Manager Employee Code/Name": "COO-01 - coo" }),
-      employee("unassigned", "EMP-01", { Department: "", "Manager Employee Code/Name": "COO-01 - coo" }),
-    ]);
-
-    expect(groupOrganizationBranches(hierarchy.roots[0].children).map(group => [group.department, group.nodes.map(node => node.employee.id)])).toEqual([
-      ["Engineering", ["engineering"]],
-      ["Finance", ["finance"]],
-      ["Department not assigned", ["unassigned"]],
-    ]);
-    expect(hierarchy.roots[0].children).toHaveLength(3);
   });
 
   it("uses the dedicated links for manager and line-manager hierarchy levels", () => {

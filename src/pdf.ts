@@ -150,12 +150,12 @@ export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings
 export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSettings) {
   const hierarchy = buildCompanyRoleHierarchy(employees);
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
-  doc.setProperties({ title: "Company Role Hierarchy", subject: "Departments and direct access-role assignments", author: settings.company.legalName, creator: "MedTech HR ERP" });
+  doc.setProperties({ title: "Company Role Hierarchy", subject: "Departments and saved reporting responsibilities", author: settings.company.legalName, creator: "MedTech HR ERP" });
   const departmentPages = hierarchy.departments.length ? chunk(hierarchy.departments, 4) : [[]];
 
   departmentPages.forEach((departments, pageIndex) => {
     if (pageIndex) doc.addPage();
-    roleHierarchyPageTitle(doc, "Company Role Hierarchy", `${hierarchy.activeEmployees.length} active employees · ${hierarchy.departments.length} departments · ${hierarchy.roleAssignmentCount} direct role assignments`);
+    roleHierarchyPageTitle(doc, "Company Role Hierarchy", `${hierarchy.activeEmployees.length} active employees · ${hierarchy.departments.length} departments · ${hierarchy.managerCount} managers · ${hierarchy.lineManagerCount} line managers`);
     roleHierarchyBox(doc, 116, 35, 65, 12, "Executive leadership", ["COO · CPO"], "leadership");
     const executiveXs = [61, 166];
     hierarchy.executives.forEach((executive, index) => {
@@ -170,7 +170,7 @@ export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSe
     departments.forEach((department, index) => {
       const x = firstX + index * (boxWidth + gap);
       roleHierarchyConnector(doc, 148.5, 86, x + boxWidth / 2, 116);
-      roleHierarchyBox(doc, x, 116, boxWidth, 32, department.name, [`${department.memberCount} employees`, `${department.roles.length} direct access roles`], "department");
+      roleHierarchyBox(doc, x, 116, boxWidth, 32, department.name, [`${department.memberCount} employees`, "Manager > Line Manager > Employee"], "department");
     });
     if (!departments.length) roleHierarchyEmpty(doc, "No active employees are available below executive leadership.");
     doc.setFont("helvetica", "normal");
@@ -180,19 +180,18 @@ export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSe
   });
 
   hierarchy.departments.forEach(department => {
-    chunk(department.roles, 3).forEach((roles, rolePageIndex) => {
-      doc.addPage();
-      roleHierarchyPageTitle(doc, department.name, `${department.memberCount} employees · direct access roles${rolePageIndex ? ` · continued ${rolePageIndex + 1}` : ""}`);
-      roleHierarchyBox(doc, 103.5, 36, 90, 24, department.name, [`${department.memberCount} active employees`, `${department.roles.length} access roles`], "department");
-      const roleWidth = 82;
-      const gap = 9;
-      const totalWidth = roles.length * roleWidth + Math.max(0, roles.length - 1) * gap;
-      const firstX = (297 - totalWidth) / 2;
-      roles.forEach((role, index) => {
-        const x = firstX + index * (roleWidth + gap);
-        roleHierarchyConnector(doc, 148.5, 60, x + roleWidth / 2, 82);
-        roleHierarchyRoleBox(doc, x, 82, roleWidth, role.label, role.code, role.members);
-      });
+    doc.addPage();
+    roleHierarchyPageTitle(doc, department.name, `${department.memberCount} employees · saved reporting hierarchy`);
+    roleHierarchyBox(doc, 103.5, 36, 90, 24, department.name, [`${department.memberCount} active employees`, "Manager > Line Manager > Employee"], "department");
+    const levelWidth = 82;
+    const gap = 9;
+    const totalWidth = department.levels.length * levelWidth + Math.max(0, department.levels.length - 1) * gap;
+    const firstX = (297 - totalWidth) / 2;
+    department.levels.forEach((level, index) => {
+      const x = firstX + index * (levelWidth + gap);
+      if (index === 0) roleHierarchyConnector(doc, 148.5, 60, x + levelWidth / 2, 82);
+      else roleHierarchyHorizontalConnector(doc, x - gap, x, 92);
+      roleHierarchyRoleBox(doc, x, 82, levelWidth, level.label, level.code, level.members);
     });
   });
 
@@ -231,6 +230,14 @@ function roleHierarchyConnector(doc: jsPDF, sourceX: number, sourceY: number, ta
   doc.line(targetX, middleY, targetX, targetY);
   doc.setFillColor(74, 119, 181);
   doc.triangle(targetX - 1.2, targetY - 2, targetX + 1.2, targetY - 2, targetX, targetY, "F");
+}
+
+function roleHierarchyHorizontalConnector(doc: jsPDF, sourceX: number, targetX: number, y: number) {
+  doc.setDrawColor(74, 119, 181);
+  doc.setLineWidth(0.45);
+  doc.line(sourceX, y, targetX - 2, y);
+  doc.setFillColor(74, 119, 181);
+  doc.triangle(targetX - 2, y - 1.2, targetX - 2, y + 1.2, targetX, y, "F");
 }
 
 function roleHierarchyBox(doc: jsPDF, x: number, y: number, width: number, height: number, title: string, lines: string[], kind: "leadership" | "executive" | "department") {

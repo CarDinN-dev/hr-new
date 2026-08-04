@@ -1137,7 +1137,7 @@ td button {
   }
 }
 
-/* Department-based access-role hierarchy. The organizational hierarchy above is intentionally independent. */
+/* Department-based reporting hierarchy. The organizational hierarchy above remains a separate employee tree. */
 .hierarchy-tabs {
   display: inline-flex;
   width: fit-content;
@@ -1195,12 +1195,6 @@ td button {
   margin-right: 4px;
   color: var(--pro-text);
   font-size: 15px;
-}
-
-.company-role-summary .has-issues {
-  border-color: color-mix(in srgb, var(--pro-warning) 35%, var(--pro-border));
-  background: color-mix(in srgb, var(--pro-warning) 8%, var(--pro-surface));
-  color: var(--pro-warning);
 }
 
 .company-role-toolbar {
@@ -1281,7 +1275,7 @@ td button {
 
 .company-role-legend i.leadership { background: var(--pro-brand); }
 .company-role-legend i.department { background: var(--pro-info); }
-.company-role-legend i.access-role { background: var(--pro-success); }
+.company-role-legend i.reporting-level { background: var(--pro-success); }
 
 .company-role-legend p {
   flex: 1 1 360px;
@@ -1465,10 +1459,9 @@ td button {
 }
 
 .company-role-cards {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 14px;
+  display: grid;
+  justify-items: center;
+  gap: 34px;
   width: 100%;
 }
 
