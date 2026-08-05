@@ -1178,7 +1178,7 @@ td button {
 
 .company-role-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1197,9 +1197,16 @@ td button {
   font-size: 15px;
 }
 
+.company-role-summary .warning strong {
+  color: var(--pro-warning);
+}
+
 .company-role-toolbar {
+  position: sticky;
+  top: 8px;
+  z-index: 8;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, 240px) auto auto;
   align-items: center;
   gap: 10px;
   padding: 10px;
@@ -1223,8 +1230,30 @@ td button {
 
 .company-role-search input {
   width: 100%;
-  padding-left: 36px !important;
+  padding-inline: 36px !important;
   background: var(--pro-surface) !important;
+}
+
+.company-role-search button {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--pro-text-soft) !important;
+  transform: translateY(-50%);
+}
+
+.company-role-department-jump select {
+  width: 100%;
+  min-height: 38px;
+  background: var(--pro-surface);
+  font-size: 11.5px;
 }
 
 .company-role-match-count {
@@ -1235,6 +1264,8 @@ td button {
 
 .company-role-actions {
   display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -1275,12 +1306,57 @@ td button {
 
 .company-role-legend i.leadership { background: var(--pro-brand); }
 .company-role-legend i.department { background: var(--pro-info); }
-.company-role-legend i.reporting-level { background: var(--pro-success); }
+.company-role-legend i.manager { background: var(--pro-info); }
+.company-role-legend i.line-manager { background: var(--pro-success); }
+.company-role-legend i.employee { background: var(--pro-border-strong); }
+.company-role-legend i.selected-path { background: var(--pro-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pro-brand) 14%, transparent); }
 
 .company-role-legend p {
   flex: 1 1 360px;
   margin: 0;
   text-align: right;
+}
+
+.company-role-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--pro-brand) 20%, var(--pro-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pro-brand-soft) 38%, var(--pro-surface));
+  color: var(--pro-text-soft);
+  font-size: 10.5px;
+}
+
+.company-role-breadcrumb span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.company-role-breadcrumb span:last-child {
+  color: var(--pro-text);
+  font-weight: 750;
+}
+
+.company-role-search-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--pro-text-soft);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.company-role-search-navigation button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
 }
 
 .company-role-viewport {
@@ -1425,6 +1501,34 @@ td button {
   gap: 48px;
 }
 
+.company-role-owned-lane {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 24px;
+  min-width: 266px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--pro-border) 72%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--pro-surface) 52%, transparent);
+}
+
+.company-role-owned-lane.company-role-executive-subtree {
+  gap: 24px;
+}
+
+.company-role-lane-label {
+  justify-self: start;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--pro-surface-subtle);
+  color: var(--pro-text-soft);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
 .company-role-unassigned-subtree {
   min-width: 100%;
   padding-top: 28px;
@@ -1467,6 +1571,14 @@ td button {
   animation: role-branch-reveal 180ms ease-out both;
 }
 
+.company-role-department-shell {
+  display: grid;
+  justify-items: stretch;
+  gap: 5px;
+  width: 218px;
+  transition: opacity var(--pro-transition), filter var(--pro-transition);
+}
+
 .company-role-department {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 18px;
@@ -1483,6 +1595,25 @@ td button {
 
 .company-role-department.expanded {
   border-color: color-mix(in srgb, var(--pro-info) 60%, var(--pro-border)) !important;
+}
+
+.company-role-department-focus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--pro-text-soft) !important;
+  font-size: 9.5px;
+}
+
+.company-role-department-focus:hover {
+  border-color: var(--pro-border) !important;
+  background: var(--pro-surface) !important;
+  color: var(--pro-text) !important;
 }
 
 .company-role-node-icon {
@@ -1571,6 +1702,84 @@ td button {
   align-items: center;
   justify-content: flex-end;
   gap: 5px;
+}
+
+.company-role-card-copy {
+  min-width: 0;
+}
+
+.company-role-role-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.company-role-role-badge {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--pro-surface-subtle);
+  color: var(--pro-text-soft);
+  font-size: 7.5px;
+  font-weight: 850;
+  letter-spacing: .035em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.company-role-role-badge-manager {
+  background: color-mix(in srgb, var(--pro-info) 11%, var(--pro-surface));
+  color: var(--pro-info);
+}
+
+.company-role-role-badge-line_manager {
+  background: color-mix(in srgb, var(--pro-success) 11%, var(--pro-surface));
+  color: var(--pro-success);
+}
+
+.company-role-report-count {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 4px;
+  border-radius: 999px;
+  background: var(--pro-surface-subtle);
+  color: var(--pro-text-soft);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.company-role-leadership,
+.company-role-unassigned,
+.company-role-department-shell,
+.company-role-card {
+  transition: opacity var(--pro-transition), filter var(--pro-transition), border-color var(--pro-transition), box-shadow var(--pro-transition), transform var(--pro-transition);
+}
+
+.company-role-leadership.path-muted,
+.company-role-unassigned.path-muted,
+.company-role-department-shell.path-muted,
+.company-role-card.path-muted {
+  opacity: .36;
+  filter: saturate(.55);
+}
+
+.company-role-leadership.path-active,
+.company-role-unassigned.path-active,
+.company-role-department-shell.path-active .company-role-department,
+.company-role-hierarchy .company-role-card.path-active {
+  border-color: color-mix(in srgb, var(--pro-brand) 70%, var(--pro-border)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pro-brand) 13%, transparent), var(--pro-shadow-sm) !important;
+}
+
+.company-role-leadership.selected,
+.company-role-unassigned.selected,
+.company-role-department.selected,
+.company-role-hierarchy .company-role-card.selected {
+  border-color: var(--pro-brand) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pro-brand) 18%, transparent), var(--pro-shadow) !important;
 }
 
 .company-role-card .company-role-node-icon {
@@ -1664,14 +1873,31 @@ td button {
 }
 
 .company-role-canvas .role-flowchart-line {
+  --company-role-connector-opacity: 1;
+  opacity: var(--company-role-connector-opacity);
   stroke-dasharray: 1;
   stroke-dashoffset: 0;
+  transition: opacity var(--pro-transition), stroke var(--pro-transition), stroke-width var(--pro-transition);
   animation: company-role-connector-reveal 220ms ease-out both;
+}
+
+.company-role-canvas .role-flowchart-line.path-muted {
+  --company-role-connector-opacity: .16;
+}
+
+.company-role-canvas .role-flowchart-line.path-active {
+  stroke: var(--pro-brand);
+  stroke-width: 2.5;
+}
+
+.company-role-canvas .role-flowchart-line.direct-active {
+  stroke: var(--pro-success);
+  stroke-width: 2.25;
 }
 
 @keyframes company-role-connector-reveal {
   from { opacity: 0; stroke-dashoffset: 1; }
-  to { opacity: 1; stroke-dashoffset: 0; }
+  to { opacity: var(--company-role-connector-opacity); stroke-dashoffset: 0; }
 }
 
 .company-role-canvas .role-flowchart-empty {
@@ -1699,17 +1925,19 @@ td button {
   }
 
   .company-role-toolbar {
-    grid-template-columns: 1fr auto;
+    position: static;
+    grid-template-columns: 1fr;
   }
 
   .company-role-search,
+  .company-role-department-jump,
   .company-role-actions {
     grid-column: 1 / -1;
   }
 
   .company-role-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .company-role-match-count {
@@ -1724,18 +1952,58 @@ td button {
   .company-role-viewport {
     margin-inline: -4px;
     border-radius: 10px;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .company-role-canvas {
+    width: 100%;
+    min-width: 100% !important;
     padding-inline: 14px;
   }
 
-  .company-role-leadership {
-    width: 300px;
+  .company-role-executive-children,
+  .company-role-departments {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    width: 100%;
+    min-width: 0;
   }
 
+  .company-role-owned-lane,
+  .company-role-executive-subtree,
+  .company-role-unassigned-subtree,
+  .company-role-department-branch,
+  .company-role-department-shell,
+  .company-role-department,
+  .company-role-cards,
+  .company-role-card-shell,
+  .company-role-branch-children .company-role-card-shell {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .company-role-owned-lane {
+    padding: 10px;
+  }
+
+  .company-role-leadership,
   .company-role-unassigned {
-    width: 300px;
+    width: min(100%, 360px);
+  }
+
+  .company-role-branch-children {
+    justify-items: stretch;
+    margin-left: 14px;
+    padding-left: 12px;
+    border-left: 1px solid var(--pro-border-strong);
+  }
+
+  .company-role-breadcrumb {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    white-space: nowrap;
   }
 
   .company-role-executive strong {
