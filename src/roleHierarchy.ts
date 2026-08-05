@@ -73,8 +73,11 @@ function compareMembers(left: RoleHierarchyMember, right: RoleHierarchyMember) {
   return left.name.localeCompare(right.name) || left.employeeCode.localeCompare(right.employeeCode);
 }
 
-type LineManagerDraft = { member: RoleHierarchyMember; employees: RoleHierarchyMember[] };
-type ManagerDraft = { member: RoleHierarchyMember; lineManagers: Map<string, LineManagerDraft>; employees: RoleHierarchyMember[] };
+type ReportingDraft = {
+  member: RoleHierarchyMember;
+  code: "MANAGER" | "LINE_MANAGER";
+  employees: RoleHierarchyMember[];
+};
 
 export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyRoleHierarchy {
   const activeRecords = employees.filter(employee => employee.status === "Active" || employee.status === "On Leave");
@@ -117,39 +120,72 @@ export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyR
     .sort(([left], [right]) => left === "Department not assigned" ? 1 : right === "Department not assigned" ? -1 : left.localeCompare(right))
     .map(([name, members], departmentIndex): RoleHierarchyDepartment => {
       const id = `department-${departmentIndex}`;
-      const managers = new Map<string, ManagerDraft>();
-      const lineManagers = new Map<string, LineManagerDraft>();
+      const reportingPeople = new Map<string, ReportingDraft>();
+      const parentById = new Map<string, string>();
       const directEmployees: RoleHierarchyMember[] = [];
-      const ensureManager = (manager: RoleHierarchyMember) => {
-        const existing = managers.get(manager.id);
+      const ensureReportingPerson = (person: RoleHierarchyMember) => {
+        const existing = reportingPeople.get(person.id);
         if (existing) return existing;
-        const created = { member: manager, lineManagers: new Map<string, LineManagerDraft>(), employees: [] };
-        managers.set(manager.id, created);
+        // A person with both references is still one person in the tree; their direct reports stay under that one node.
+        const created: ReportingDraft = {
+          member: person,
+          code: managerIds.has(person.id) ? "MANAGER" : "LINE_MANAGER",
+          employees: [],
+        };
+        reportingPeople.set(person.id, created);
         return created;
       };
-      const ensureLineManager = (collection: Map<string, LineManagerDraft>, lineManager: RoleHierarchyMember) => {
-        const existing = collection.get(lineManager.id);
-        if (existing) return existing;
-        const created = { member: lineManager, employees: [] };
-        collection.set(lineManager.id, created);
-        return created;
+      const reportingParent = (record: EmployeeRecord) => {
+        const manager = managerFor(record);
+        const lineManager = lineManagerFor(record);
+        return lineManager && lineManager.id !== manager?.id ? lineManager : manager;
+      };
+      const createsCycle = (childId: string, parentId: string) => {
+        const seen = new Set([childId]);
+        let currentId: string | undefined = parentId;
+        while (currentId) {
+          if (seen.has(currentId)) return true;
+          seen.add(currentId);
+          currentId = parentById.get(currentId);
+        }
+        return false;
+      };
+      const setParent = (childId: string, parent: RoleHierarchyMember | undefined) => {
+        if (!parent || parent.id === childId || createsCycle(childId, parent.id)) return;
+        ensureReportingPerson(parent);
+        parentById.set(childId, parent.id);
       };
 
+      // Include local role holders and referenced leaders, including leaders who belong to another department.
       members.forEach(employee => {
-        if (managerIds.has(employee.id) || lineManagerIds.has(employee.id)) return;
+        const record = recordById.get(employee.id)!;
+        if (managerIds.has(employee.id) || lineManagerIds.has(employee.id)) ensureReportingPerson(employee);
+        const manager = managerFor(record);
+        const lineManager = lineManagerFor(record);
+        if (manager) ensureReportingPerson(manager);
+        if (lineManager) ensureReportingPerson(lineManager);
+      });
+
+      // A line manager connects to the manager saved on that line manager's own record.
+      [...reportingPeople.values()].forEach(({ member: person }) => {
+        const record = recordById.get(person.id);
+        if (record) setParent(person.id, reportingParent(record));
+      });
+
+      // Older data can specify the manager only on a shared report. Infer that one link when unambiguous.
+      members.forEach(employee => {
         const record = recordById.get(employee.id)!;
         const manager = managerFor(record);
         const lineManager = lineManagerFor(record);
-        if (manager && lineManager) ensureLineManager(ensureManager(manager).lineManagers, lineManager).employees.push(employee);
-        else if (manager) ensureManager(manager).employees.push(employee);
-        else if (lineManager) ensureLineManager(lineManagers, lineManager).employees.push(employee);
-        else directEmployees.push(employee);
+        if (!manager || !lineManager || manager.id === lineManager.id || parentById.has(lineManager.id)) return;
+        setParent(lineManager.id, manager);
       });
 
-      // Keep referenced role holders visible in their own department even when their reports sit elsewhere.
       members.forEach(employee => {
-        if (managerIds.has(employee.id)) ensureManager(employee);
-        if (lineManagerIds.has(employee.id) && ![...managers.values()].some(manager => manager.lineManagers.has(employee.id))) ensureLineManager(lineManagers, employee);
+        if (reportingPeople.has(employee.id)) return;
+        const parent = reportingParent(recordById.get(employee.id)!);
+        if (parent) ensureReportingPerson(parent).employees.push(employee);
+        else directEmployees.push(employee);
       });
 
       const employeeBranch = (branchId: string, branchMembers: RoleHierarchyMember[]): RoleHierarchyBranch => ({
@@ -159,34 +195,34 @@ export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyR
         members: branchMembers.sort(compareMembers),
         children: [],
       });
-      const lineManagerBranch = (branchId: string, draft: LineManagerDraft): RoleHierarchyBranch => ({
-        id: branchId,
-        code: "LINE_MANAGER",
-        label: roleLabels.LINE_MANAGER,
-        member: draft.member,
-        members: [],
-        children: draft.employees.length ? [employeeBranch(`${branchId}-employees`, draft.employees)] : [],
+      const childrenById = new Map<string, string[]>();
+      parentById.forEach((parentId, childId) => {
+        childrenById.set(parentId, [...(childrenById.get(parentId) ?? []), childId]);
       });
-      const managerBranches = [...managers.values()].sort((left, right) => compareMembers(left.member, right.member)).map(draft => {
-        const branchId = `${id}-manager-${draft.member.id}`;
+      const reportingBranch = (personId: string): RoleHierarchyBranch => {
+        const draft = reportingPeople.get(personId)!;
+        const branchId = `${id}-${draft.code.toLocaleLowerCase().replace("_", "-")}-${personId}`;
         return {
           id: branchId,
-          code: "MANAGER" as const,
-          label: roleLabels.MANAGER,
+          code: draft.code,
+          label: roleLabels[draft.code],
           member: draft.member,
           members: [],
           children: [
-            ...[...draft.lineManagers.values()].sort((left, right) => compareMembers(left.member, right.member)).map(lineManager => lineManagerBranch(`${branchId}-line-manager-${lineManager.member.id}`, lineManager)),
+            ...(childrenById.get(personId) ?? []).sort((left, right) => compareMembers(reportingPeople.get(left)!.member, reportingPeople.get(right)!.member)).map(reportingBranch),
             ...(draft.employees.length ? [employeeBranch(`${branchId}-employees`, draft.employees)] : []),
           ],
         };
-      });
-      const lineManagerBranches = [...lineManagers.values()].sort((left, right) => compareMembers(left.member, right.member)).map(draft => lineManagerBranch(`${id}-line-manager-${draft.member.id}`, draft));
+      };
+      const reportingBranches = [...reportingPeople.values()]
+        .filter(({ member: person }) => !parentById.has(person.id))
+        .sort((left, right) => compareMembers(left.member, right.member))
+        .map(({ member: person }) => reportingBranch(person.id));
       return {
         id,
         name,
         memberCount: members.length,
-        branches: [...managerBranches, ...lineManagerBranches, ...(directEmployees.length ? [employeeBranch(`${id}-employees`, directEmployees)] : [])],
+        branches: [...reportingBranches, ...(directEmployees.length ? [employeeBranch(`${id}-employees`, directEmployees)] : [])],
       };
     });
 

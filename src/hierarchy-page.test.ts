@@ -49,12 +49,8 @@ describe("hierarchy page", () => {
     ]);
 
     const operations = hierarchy.departments[0];
-    expect(operations.branches.map(branch => [branch.code, branch.member?.id])).toEqual([
-      ["MANAGER", "hybrid"],
-      ["LINE_MANAGER", "hybrid"],
-    ]);
-    expect(operations.branches[0].children[0].members.map(member => member.id)).toEqual(["manager-report"]);
-    expect(operations.branches[1].children[0].members.map(member => member.id)).toEqual(["line-report"]);
+    expect(operations.branches.map(branch => [branch.code, branch.member?.id])).toEqual([["MANAGER", "hybrid"]]);
+    expect(operations.branches[0].children[0].members.map(member => member.id)).toEqual(["line-report", "manager-report"]);
     expect(hierarchy.departments[1]).toMatchObject({ name: "Department not assigned", memberCount: 1 });
     expect(hierarchy.departments[1].branches[0].members[0]).toMatchObject({ name: "EMP-003", designation: "Designation not assigned" });
     expect(hierarchy.activeEmployees.map(member => member.id)).not.toContain("former");
@@ -72,12 +68,11 @@ describe("hierarchy page", () => {
       employee("missing", "EMP-05", { Department: "Operations", "Manager Employee Code/Name": "UNKNOWN", "Line Manager Employee Code/Name": "MISSING" }),
     ]);
 
-    const [managerBranch, lineManagerBranch, employeeBranch] = hierarchy.departments[0].branches;
+    const [managerBranch, employeeBranch] = hierarchy.departments[0].branches;
     expect(managerBranch).toMatchObject({ code: "MANAGER", member: { id: "manager" } });
     expect(managerBranch.children[0]).toMatchObject({ code: "LINE_MANAGER", member: { id: "line" } });
-    expect(managerBranch.children[0].children[0].members.map(member => member.id)).toEqual(["both"]);
     expect(managerBranch.children[1].members.map(member => member.id)).toEqual(["manager-only"]);
-    expect(lineManagerBranch.children[0].members.map(member => member.id)).toEqual(["legacy", "line-only"]);
+    expect(managerBranch.children[0].children[0].members.map(member => member.id)).toEqual(["both", "legacy", "line-only"]);
     expect(employeeBranch).toMatchObject({ code: "EMPLOYEE", members: [expect.objectContaining({ id: "missing" })] });
   });
 
