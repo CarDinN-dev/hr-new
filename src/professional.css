@@ -1341,6 +1341,15 @@ td button {
   gap: 7px;
 }
 
+.company-role-chevron {
+  flex: 0 0 auto;
+  transition: transform var(--pro-transition);
+}
+
+[aria-expanded="true"] .company-role-chevron {
+  transform: rotate(90deg);
+}
+
 .company-role-leadership-heading > span {
   justify-content: flex-start;
   color: var(--pro-brand);
@@ -1396,6 +1405,57 @@ td button {
   justify-content: center;
   gap: 22px;
   min-width: 100%;
+}
+
+.company-role-executive-children {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 22px;
+  min-width: 100%;
+  animation: role-branch-reveal 180ms ease-out both;
+}
+
+.company-role-executive-subtree,
+.company-role-unassigned-subtree {
+  display: grid;
+  justify-items: center;
+  gap: 48px;
+}
+
+.company-role-unassigned-subtree {
+  min-width: 100%;
+  padding-top: 28px;
+  border-top: 1px dashed var(--pro-border-strong);
+}
+
+.company-role-unassigned {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 4px 10px;
+  width: 330px;
+  padding: 11px 12px;
+  border: 1px dashed color-mix(in srgb, var(--pro-warning) 58%, var(--pro-border)) !important;
+  border-radius: 12px !important;
+  background: color-mix(in srgb, var(--pro-warning) 7%, var(--pro-surface)) !important;
+  color: var(--pro-text) !important;
+  text-align: left;
+  box-shadow: var(--pro-shadow-sm) !important;
+}
+
+.company-role-unassigned > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.company-role-unassigned small {
+  grid-column: 1 / -1;
+  color: var(--pro-text-soft);
+  font-size: 9.5px;
 }
 
 .company-role-department-branch {
@@ -1497,6 +1557,22 @@ td button {
   text-align: left;
 }
 
+.company-role-card-leaf {
+  cursor: default;
+}
+
+.company-role-card-leaf:hover {
+  box-shadow: var(--pro-shadow-sm) !important;
+  transform: none;
+}
+
+.company-role-card-trailing {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .company-role-card .company-role-node-icon {
   width: 30px;
   height: 30px;
@@ -1575,7 +1651,8 @@ td button {
 .company-role-member strong { font-size: 10.5px; }
 .company-role-member small { margin-top: 2px; color: var(--pro-text-soft); font-size: 9px; }
 
-.company-role-member em {
+.company-role-member em,
+.company-role-card em {
   padding: 2px 5px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--pro-warning) 10%, var(--pro-surface));
@@ -1584,6 +1661,17 @@ td button {
   font-style: normal;
   font-weight: 750;
   white-space: nowrap;
+}
+
+.company-role-canvas .role-flowchart-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: company-role-connector-reveal 220ms ease-out both;
+}
+
+@keyframes company-role-connector-reveal {
+  from { opacity: 0; stroke-dashoffset: 1; }
+  to { opacity: 1; stroke-dashoffset: 0; }
 }
 
 .company-role-canvas .role-flowchart-empty {
@@ -1643,6 +1731,10 @@ td button {
   }
 
   .company-role-leadership {
+    width: 300px;
+  }
+
+  .company-role-unassigned {
     width: 300px;
   }
 

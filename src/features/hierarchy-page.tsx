@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Building2, ChevronDown, ChevronRight, Download, Pencil, Plus, Search, ShieldCheck, Users } from "lucide-react";
 import { hasPermission, type BackendSession } from "../api";
 import type { EmployeeRecord } from "../data";
@@ -290,16 +290,16 @@ function roleHierarchyMemberMatches(member: RoleHierarchyMember, query: string) 
   return [member.name, member.employeeCode, member.designation, member.department].some(value => value.toLocaleLowerCase().includes(query));
 }
 
-function roleHierarchyBranchMatches(branch: RoleHierarchyBranch, query: string): boolean {
-  return branch.label.toLocaleLowerCase().includes(query)
-    || branch.code.toLocaleLowerCase().includes(query)
-    || Boolean(branch.member && roleHierarchyMemberMatches(branch.member, query))
-    || branch.members.some(member => roleHierarchyMemberMatches(member, query))
-    || branch.children.some(child => roleHierarchyBranchMatches(child, query));
+function filterRoleHierarchyBranch(branch: RoleHierarchyBranch, query: string): RoleHierarchyBranch | null {
+  if (!query || branch.label.toLocaleLowerCase().includes(query) || branch.code.toLocaleLowerCase().includes(query) || roleHierarchyMemberMatches(branch.member, query)) return branch;
+  const children = branch.children.map(child => filterRoleHierarchyBranch(child, query)).filter((child): child is RoleHierarchyBranch => Boolean(child));
+  return children.length ? { ...branch, children } : null;
 }
 
-function roleHierarchyDepartmentMatches(department: RoleHierarchyDepartment, query: string) {
-  return department.name.toLocaleLowerCase().includes(query) || department.branches.some(branch => roleHierarchyBranchMatches(branch, query));
+function filterRoleHierarchyDepartment(department: RoleHierarchyDepartment, query: string): RoleHierarchyDepartment | null {
+  if (!query || department.name.toLocaleLowerCase().includes(query)) return department;
+  const branches = department.branches.map(branch => filterRoleHierarchyBranch(branch, query)).filter((branch): branch is RoleHierarchyBranch => Boolean(branch));
+  return branches.length ? { ...department, branches } : null;
 }
 
 function flattenRoleHierarchyBranches(branches: RoleHierarchyBranch[]): RoleHierarchyBranch[] {
@@ -307,37 +307,46 @@ function flattenRoleHierarchyBranches(branches: RoleHierarchyBranch[]): RoleHier
 }
 
 export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees: EmployeeRecord[]; onExportPdf: () => void }) {
-  const hierarchy = buildCompanyRoleHierarchy(employees);
-  const [cooExpanded, setCooExpanded] = useState(true);
-  const [cpoExpanded, setCpoExpanded] = useState(true);
-  const [expandedDepartmentIds, setExpandedDepartmentIds] = useState<Set<string>>(new Set());
+  const hierarchy = useMemo(() => buildCompanyRoleHierarchy(employees), [employees]);
+  const allDepartments = hierarchy.executives.flatMap(executive => executive.departments).concat(hierarchy.unassignedDepartments);
+  const [expandedExecutiveIds, setExpandedExecutiveIds] = useState<Set<string>>(new Set([companyCooId, companyCpoId]));
+  const [expandedDepartmentIds, setExpandedDepartmentIds] = useState<Set<string>>(() => new Set(allDepartments.map(department => department.id)));
   const [expandedBranchIds, setExpandedBranchIds] = useState<Set<string>>(new Set());
+  const [unassignedExpanded, setUnassignedExpanded] = useState(true);
   const [search, setSearch] = useState("");
   const [focusId, setFocusId] = useState(companyCooId);
   const [connectors, setConnectors] = useState<CompanyRoleConnector[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const nodeRefs = useRef(new Map<string, HTMLButtonElement>());
+  const nodeRefs = useRef(new Map<string, HTMLElement>());
   const query = search.trim().toLocaleLowerCase();
-  const cpoVisible = cooExpanded || Boolean(query);
-  const departmentsVisible = cpoVisible && (cpoExpanded || Boolean(query));
+  const executiveExpanded = (id: string) => Boolean(query) || expandedExecutiveIds.has(id);
+  const cpoVisible = executiveExpanded(companyCooId);
   const executiveMatches = Boolean(query) && hierarchy.executives.some(executive => executive.code.toLocaleLowerCase().includes(query) || executive.label.toLocaleLowerCase().includes(query) || executive.members.some(member => roleHierarchyMemberMatches(member, query)));
-  const visibleDepartments = departmentsVisible ? hierarchy.departments.filter(department => !query || roleHierarchyDepartmentMatches(department, query)) : [];
+  const visibleDepartmentsFor = (departments: RoleHierarchyDepartment[]) => departments.map(department => filterRoleHierarchyDepartment(department, query)).filter((department): department is RoleHierarchyDepartment => Boolean(department));
+  const coo = hierarchy.executives.find(executive => executive.code === "COO")!;
+  const cpo = hierarchy.executives.find(executive => executive.code === "CPO")!;
+  const visibleCooDepartments = executiveExpanded(companyCooId) ? visibleDepartmentsFor(coo.departments) : [];
+  const visibleCpoDepartments = cpoVisible && executiveExpanded(companyCpoId) ? visibleDepartmentsFor(cpo.departments) : [];
+  const visibleUnassignedDepartments = (query || unassignedExpanded) ? visibleDepartmentsFor(hierarchy.unassignedDepartments) : [];
   const branchesFor = (department: RoleHierarchyDepartment) => query || expandedDepartmentIds.has(department.id) ? department.branches : [];
-  const visibleBranches = visibleDepartments.map(department => ({ department, branches: branchesFor(department) }));
   const branchEdges = (branch: RoleHierarchyBranch): CompanyRoleEdge[] => {
     const children = query || expandedBranchIds.has(branch.id) ? branch.children : [];
     return children.flatMap(child => [{ sourceId: branch.id, targetId: child.id }, ...branchEdges(child)]);
   };
+  const departmentEdges = (sourceId: string, departments: RoleHierarchyDepartment[]) => departments.flatMap(department => {
+    const branches = branchesFor(department);
+    return [{ sourceId, targetId: department.id }, ...branches.flatMap(branch => [{ sourceId: department.id, targetId: branch.id }, ...branchEdges(branch)])];
+  });
   const edges: CompanyRoleEdge[] = [
     ...(cpoVisible ? [{ sourceId: companyCooId, targetId: companyCpoId }] : []),
-    ...visibleBranches.flatMap(({ department, branches }) => [
-      { sourceId: companyCpoId, targetId: department.id },
-      ...branches.flatMap(branch => [{ sourceId: department.id, targetId: branch.id }, ...branchEdges(branch)]),
-    ]),
+    ...departmentEdges(companyCooId, visibleCooDepartments),
+    ...departmentEdges(companyCpoId, visibleCpoDepartments),
+    ...(hierarchy.unassignedDepartments.length && (query || unassignedExpanded) ? departmentEdges("company-unassigned", visibleUnassignedDepartments) : []),
   ];
   const signature = `${edges.map(edge => `${edge.sourceId}>${edge.targetId}`).join("|")}:${[...expandedBranchIds].sort().join("|")}`;
-  const canvasMinWidth = Math.max(680, visibleBranches.length * 244 + Math.max(0, visibleBranches.length - 1) * 22);
+  const visibleDepartmentCount = visibleCooDepartments.length + visibleCpoDepartments.length + visibleUnassignedDepartments.length;
+  const canvasMinWidth = Math.max(720, visibleDepartmentCount * 244 + Math.max(0, visibleDepartmentCount - 1) * 22);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -391,7 +400,7 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
     };
   }, [signature, focusId]);
 
-  const setNodeRef = (id: string) => (node: HTMLButtonElement | null) => {
+  const setNodeRef = (id: string) => (node: HTMLElement | null) => {
     if (node) nodeRefs.current.set(id, node);
     else nodeRefs.current.delete(id);
   };
@@ -400,20 +409,14 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
     setExpandedBranchIds(new Set());
     setSearch("");
   };
-  const toggleCoo = () => {
-    setFocusId(companyCooId);
-    if (cpoVisible) {
-      setCooExpanded(false);
-      setCpoExpanded(false);
-      clearDescendants();
-    } else setCooExpanded(true);
-  };
-  const toggleCpo = () => {
-    setFocusId(companyCpoId);
-    if (departmentsVisible) {
-      setCpoExpanded(false);
-      clearDescendants();
-    } else setCpoExpanded(true);
+  const toggleExecutive = (id: string) => {
+    setFocusId(id);
+    setExpandedExecutiveIds(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
   const toggleDepartment = (department: RoleHierarchyDepartment) => {
     setFocusId(department.id);
@@ -428,7 +431,7 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
     });
   };
   const toggleBranch = (branch: RoleHierarchyBranch) => {
-    if (!branch.children.length && !branch.members.length) return;
+    if (!branch.children.length) return;
     setFocusId(branch.id);
     setExpandedBranchIds(current => {
       const next = new Set(current);
@@ -439,76 +442,84 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
   };
   const expandAll = () => {
     setSearch("");
-    setCooExpanded(true);
-    setCpoExpanded(true);
-    setExpandedDepartmentIds(new Set(hierarchy.departments.map(department => department.id)));
-    setExpandedBranchIds(new Set(hierarchy.departments.flatMap(department => flattenRoleHierarchyBranches(department.branches).filter(branch => branch.children.length || branch.members.length).map(branch => branch.id))));
+    setExpandedExecutiveIds(new Set([companyCooId, companyCpoId]));
+    setExpandedDepartmentIds(new Set(allDepartments.map(department => department.id)));
+    setExpandedBranchIds(new Set(allDepartments.flatMap(department => flattenRoleHierarchyBranches(department.branches).filter(branch => branch.children.length).map(branch => branch.id))));
+    setUnassignedExpanded(true);
     setFocusId(companyCooId);
   };
   const collapseAll = () => {
-    setCooExpanded(false);
-    setCpoExpanded(false);
+    setExpandedExecutiveIds(new Set());
+    setUnassignedExpanded(false);
     clearDescendants();
     setFocusId(companyCooId);
   };
-  const executive = (code: "COO" | "CPO") => hierarchy.executives.find(item => item.code === code)!;
   const executiveCard = (code: "COO" | "CPO", expanded: boolean, controls: string, onClick: () => void) => {
-    const item = executive(code);
+    const item = hierarchy.executives.find(executive => executive.code === code)!;
     return <button ref={setNodeRef(item.id)} type="button" className={`company-role-leadership company-role-leadership-${code.toLocaleLowerCase()}${expanded ? " expanded" : ""}`} aria-expanded={expanded} aria-controls={controls} onClick={onClick}>
-      <span className="company-role-leadership-heading"><span><ShieldCheck size={18} aria-hidden="true" /> {code}</span>{expanded ? <ChevronDown size={18} aria-hidden="true" /> : <ChevronRight size={18} aria-hidden="true" />}</span>
+      <span className="company-role-leadership-heading"><span><ShieldCheck size={18} aria-hidden="true" /> {code}</span><ChevronRight className="company-role-chevron" size={18} aria-hidden="true" /></span>
       <span className="company-role-executive"><small>EXECUTIVE LEADERSHIP</small><strong>{item.label}</strong><span>{item.members.length ? item.members.map(member => member.name).join(", ") : "Position not assigned"}</span></span>
     </button>;
   };
-  const renderMember = (member: RoleHierarchyMember, key: string) => <div className="company-role-member" role="listitem" key={key}><span className="company-role-avatar" aria-hidden="true">{member.name.split(/\s+/).slice(0, 2).map(part => part[0]).join("").toLocaleUpperCase()}</span><span><strong>{member.name}</strong><small>{member.employeeCode} · {member.designation}</small></span>{member.status === "On Leave" && <em>On leave</em>}</div>;
   const renderBranch = (branch: RoleHierarchyBranch): React.ReactNode => {
-    const expandable = Boolean(branch.children.length || branch.members.length);
+    const expandable = Boolean(branch.children.length);
     const expanded = expandable && (Boolean(query) || expandedBranchIds.has(branch.id));
-    const description = branch.member ? `${branch.label} · ${branch.member.employeeCode} · ${branch.member.designation}` : `${branch.members.length} assigned`;
+    const description = `${branch.label} · ${branch.member.employeeCode} · ${branch.member.designation}`;
+    const contents = <><span className="company-role-node-icon"><Users size={17} aria-hidden="true" /></span><span><strong>{branch.member.name}</strong><small>{description}</small></span>{(branch.member.status === "On Leave" || expandable) && <span className="company-role-card-trailing">{branch.member.status === "On Leave" && <em>On leave</em>}{expandable && <ChevronRight className="company-role-chevron" size={16} aria-hidden="true" />}</span>}</>;
     return <div className={`company-role-card-shell company-role-card-shell-${branch.code.toLocaleLowerCase()}`} key={branch.id}>
-      <button ref={setNodeRef(branch.id)} type="button" className={`company-role-card company-role-card-${branch.code.toLocaleLowerCase()}${expanded ? " expanded" : ""}`} aria-expanded={expandable ? expanded : undefined} aria-controls={expandable ? `${branch.id}-children` : undefined} onClick={() => toggleBranch(branch)}>
-        <span className="company-role-node-icon"><Users size={17} aria-hidden="true" /></span><span><strong>{branch.member?.name || branch.label}</strong><small>{description}</small></span>{expandable && (expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />)}
-      </button>
+      {expandable
+        ? <button ref={setNodeRef(branch.id)} type="button" className={`company-role-card company-role-card-${branch.code.toLocaleLowerCase()}${expanded ? " expanded" : ""}`} aria-expanded={expanded} aria-controls={`${branch.id}-children`} onClick={() => toggleBranch(branch)}>{contents}</button>
+        : <div ref={setNodeRef(branch.id)} className={`company-role-card company-role-card-${branch.code.toLocaleLowerCase()} company-role-card-leaf`} role="listitem">{contents}</div>}
       {expanded && <div id={`${branch.id}-children`} className="company-role-branch-children">
         {branch.children.map(renderBranch)}
-        {branch.members.length > 0 && <div className="company-role-roster" role="list" aria-label={`${branch.label} employees`}>{branch.members.map(member => renderMember(member, `${branch.id}-${member.id}`))}</div>}
       </div>}
     </div>;
   };
+  const renderDepartment = (department: RoleHierarchyDepartment) => {
+    const expanded = Boolean(query) || expandedDepartmentIds.has(department.id);
+    const branches = branchesFor(department);
+    return <section className="company-role-department-branch" aria-labelledby={`${department.id}-name`} key={department.id}>
+      <button ref={setNodeRef(department.id)} type="button" className={`company-role-department${expanded ? " expanded" : ""}`} aria-expanded={expanded} aria-controls={`${department.id}-branches`} onClick={() => toggleDepartment(department)}>
+        <span className="company-role-node-icon"><Building2 size={18} aria-hidden="true" /></span><span><strong id={`${department.id}-name`}>{department.name}</strong><small>{department.memberCount} {department.memberCount === 1 ? "person" : "people"} · {department.branches.length} direct report{department.branches.length === 1 ? "" : "s"}</small></span><ChevronRight className="company-role-chevron" size={17} aria-hidden="true" />
+      </button>
+      {expanded && <div id={`${department.id}-branches`} className="company-role-cards" role="list" aria-label={`${department.name} reporting branches`}>{branches.map(renderBranch)}</div>}
+    </section>;
+  };
+  const matchingPeople = query ? [...visibleCooDepartments, ...visibleCpoDepartments, ...visibleUnassignedDepartments].reduce((total, department) => total + department.branches.length, 0) : 0;
 
   return <div className="company-role-hierarchy" role="group" aria-label="Company role hierarchy">
     <div className="company-role-summary" aria-label="Role hierarchy summary">
       <span><strong>{hierarchy.activeEmployees.length}</strong> active employees</span>
-      <span><strong>{hierarchy.departments.length}</strong> departments</span>
+      <span><strong>{hierarchy.departmentCount}</strong> departments</span>
       <span><strong>{hierarchy.managerCount}</strong> managers</span>
       <span><strong>{hierarchy.lineManagerCount}</strong> line managers</span>
     </div>
     <div className="company-role-toolbar">
-      <label className="company-role-search"><span className="sr-only">Find a department, reporting role, or employee</span><Search size={17} aria-hidden="true" /><input type="search" value={search} placeholder="Find department, manager, or employee" onChange={event => { setSearch(event.target.value); if (event.target.value) { setCooExpanded(true); setCpoExpanded(true); } }} /></label>
-      <span className="company-role-match-count" aria-live="polite">{query ? `${visibleDepartments.length} department${visibleDepartments.length === 1 ? "" : "s"}${executiveMatches ? " · executive match" : ""}` : `${hierarchy.departments.length} departments`}</span>
+      <label className="company-role-search"><span className="sr-only">Find a department, reporting role, or employee</span><Search size={17} aria-hidden="true" /><input type="search" value={search} placeholder="Find department, manager, or employee" onChange={event => setSearch(event.target.value)} /></label>
+      <span className="company-role-match-count" aria-live="polite">{query ? `${matchingPeople} matching reporting path${matchingPeople === 1 ? "" : "s"}${executiveMatches ? " · executive match" : ""}` : `${hierarchy.departmentCount} departments`}</span>
       <div className="company-role-actions"><button type="button" onClick={expandAll}>Expand all</button><button type="button" onClick={collapseAll}>Collapse all</button><button type="button" className="primary" onClick={onExportPdf}><Download size={16} aria-hidden="true" /> Export PDF</button></div>
     </div>
-    <div className="company-role-legend"><span><i className="leadership" /> Executive leadership</span><span><i className="department" /> Department</span><span><i className="reporting-level" /> Reporting branch</span><p>Manager and Line Manager branches use their separate saved references; missing references are skipped without hiding employees.</p></div>
+    <div className="company-role-legend"><span><i className="leadership" /> Executive leadership</span><span><i className="department" /> Department</span><span><i className="reporting-level" /> Reporting relationship</span><p>Direct COO and CPO reports are separated by department; every named card follows its saved reporting relationship.</p></div>
     <div className="role-flowchart-viewport company-role-viewport" ref={viewportRef} tabIndex={0} aria-label="Interactive role hierarchy flowchart. Scroll horizontally to explore departments.">
       <div className="role-flowchart-canvas company-role-canvas" id="company-role-hierarchy-flowchart" ref={canvasRef} style={{ minWidth: `${canvasMinWidth}px` }}>
         <svg className="role-flowchart-connectors" aria-hidden="true">
           <defs><marker id="company-role-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
-          {connectors.map(connector => <path className="role-flowchart-line" d={connector.path} markerEnd="url(#company-role-arrow)" key={`${connector.sourceId}-${connector.targetId}`} />)}
+          {connectors.map(connector => <path className="role-flowchart-line" data-source-id={connector.sourceId} data-target-id={connector.targetId} pathLength="1" d={connector.path} markerEnd="url(#company-role-arrow)" key={`${connector.sourceId}-${connector.targetId}`} />)}
         </svg>
-        <div className="role-flowchart-level role-flowchart-root-level">{executiveCard("COO", cpoVisible, "company-role-cpo-level", toggleCoo)}</div>
-        {cpoVisible && <div id="company-role-cpo-level" className="role-flowchart-level">{executiveCard("CPO", departmentsVisible, "company-role-departments", toggleCpo)}</div>}
-        {departmentsVisible && <div id="company-role-departments" className="company-role-departments" role="group" aria-label="Departments">
-          {visibleBranches.map(({ department, branches }) => {
-            const departmentExpanded = Boolean(query) || expandedDepartmentIds.has(department.id);
-            return <section className="company-role-department-branch" aria-labelledby={`${department.id}-name`} key={department.id}>
-              <button ref={setNodeRef(department.id)} type="button" className={`company-role-department${departmentExpanded ? " expanded" : ""}`} aria-expanded={departmentExpanded} aria-controls={`${department.id}-branches`} onClick={() => toggleDepartment(department)}>
-                <span className="company-role-node-icon"><Building2 size={18} aria-hidden="true" /></span><span><strong id={`${department.id}-name`}>{department.name}</strong><small>{department.memberCount} employee{department.memberCount === 1 ? "" : "s"} · {department.branches.length} direct branch{department.branches.length === 1 ? "" : "es"}</small></span>{departmentExpanded ? <ChevronDown size={17} aria-hidden="true" /> : <ChevronRight size={17} aria-hidden="true" />}
-              </button>
-              {departmentExpanded && <div id={`${department.id}-branches`} className="company-role-cards" role="group" aria-label={`${department.name} reporting branches`}>{branches.map(renderBranch)}</div>}
-            </section>;
-          })}
+        <div className="role-flowchart-level role-flowchart-root-level">{executiveCard("COO", executiveExpanded(companyCooId), "company-role-coo-children", () => toggleExecutive(companyCooId))}</div>
+        {cpoVisible && <div id="company-role-coo-children" className="company-role-executive-children">
+          <div className="company-role-executive-subtree">
+            <div className="role-flowchart-level">{executiveCard("CPO", executiveExpanded(companyCpoId), "company-role-cpo-departments", () => toggleExecutive(companyCpoId))}</div>
+            {executiveExpanded(companyCpoId) && <div id="company-role-cpo-departments" className="company-role-departments" role="group" aria-label="CPO departments">{visibleCpoDepartments.map(renderDepartment)}</div>}
+          </div>
+          {visibleCooDepartments.map(renderDepartment)}
         </div>}
-        {departmentsVisible && hierarchy.departments.length === 0 && <div className="role-flowchart-empty">No active employees are available below executive leadership.</div>}
-        {departmentsVisible && query && !executiveMatches && visibleDepartments.length === 0 && <div className="role-flowchart-empty"><Search size={18} aria-hidden="true" /> No departments, reporting branches, or employees match “{search.trim()}”.</div>}
+        {hierarchy.unassignedDepartments.length > 0 && <div className="company-role-unassigned-subtree">
+          <button ref={setNodeRef("company-unassigned")} type="button" className={`company-role-unassigned${unassignedExpanded || query ? " expanded" : ""}`} aria-expanded={Boolean(query) || unassignedExpanded} aria-controls="company-role-unassigned-departments" onClick={() => { setFocusId("company-unassigned"); setUnassignedExpanded(current => !current); }}><span><Users size={17} aria-hidden="true" /><strong>Unassigned reporting</strong></span><small>{hierarchy.unassignedDepartments.reduce((total, department) => total + department.memberCount, 0)} people without a valid active reporting reference</small><ChevronRight className="company-role-chevron" size={17} aria-hidden="true" /></button>
+          {(query || unassignedExpanded) && <div id="company-role-unassigned-departments" className="company-role-departments" role="group" aria-label="Unassigned reporting departments">{visibleUnassignedDepartments.map(renderDepartment)}</div>}
+        </div>}
+        {hierarchy.activeEmployees.length === hierarchy.executives.reduce((total, executive) => total + executive.members.length, 0) && <div className="role-flowchart-empty">No active employees are available below executive leadership.</div>}
+        {query && !executiveMatches && matchingPeople === 0 && <div className="role-flowchart-empty"><Search size={18} aria-hidden="true" /> No departments, reporting relationships, or employees match “{search.trim()}”.</div>}
       </div>
     </div>
   </div>;

@@ -35,11 +35,13 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
   const employees = [
     { id: "admin-employee", employeeCode: "ADM-001", firstName: "Amina", lastName: "Admin", email: admin.email, hireDate: "2020-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Platform Administrator", code: "PLATFORM_ADMIN" }, user: { roles: sessionRoles.map(code => ({ role: { code } })) }, manager: null, lineManager: null },
     { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations", email: "coo@example.invalid", hireDate: "2018-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Chief Operating Officer", code: "COO" }, user: { roles: [{ role: { code: "COO" } }] }, manager: null, lineManager: null },
-    { id: "cpo-employee", employeeCode: "EXE-002", firstName: "Priya", lastName: "People", email: "cpo@example.invalid", hireDate: "2019-01-01", employmentStatus: "ACTIVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "Chief People Officer", code: "CPO" }, user: { roles: [{ role: { code: "CPO" } }] }, manager: null, lineManager: null },
-    { id: "hr-manager", employeeCode: "HR-MGR", firstName: "Dana", lastName: "Manager", email: "hr.manager@example.invalid", hireDate: "2020-02-01", employmentStatus: "ACTIVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "People Manager", code: "PEOPLE_MANAGER" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: null, lineManager: null },
+    { id: "cpo-employee", employeeCode: "EXE-002", firstName: "Priya", lastName: "People", email: "cpo@example.invalid", hireDate: "2019-01-01", employmentStatus: "ACTIVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "Chief People Officer", code: "CPO" }, user: { roles: [{ role: { code: "CPO" } }] }, manager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" }, lineManager: null },
+    { id: "hr-manager", employeeCode: "HR-MGR", firstName: "Dana", lastName: "Manager", email: "hr.manager@example.invalid", hireDate: "2020-02-01", employmentStatus: "ACTIVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "People Manager", code: "PEOPLE_MANAGER" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "cpo-employee", employeeCode: "EXE-002", firstName: "Priya", lastName: "People" }, lineManager: null },
     { id: "hr-line-manager", employeeCode: "HR-LM", firstName: "Lina", lastName: "Lead", email: "hr.lead@example.invalid", hireDate: "2021-02-01", employmentStatus: "ACTIVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "People Lead", code: "PEOPLE_LEAD" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "hr-manager", employeeCode: "HR-MGR", firstName: "Dana", lastName: "Manager" }, lineManager: null },
     { id: "target-employee", employeeCode: "EMP-001", firstName: "Taylor", lastName: "Target", email: target.email, hireDate: "2022-04-10", employmentStatus: "ON_LEAVE", department: { id: "department-hr", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR_SPECIALIST" }, user: { roles: [{ role: { code: "HR" } }, { role: { code: "EMPLOYEE" } }] }, manager: { id: "hr-manager", employeeCode: "HR-MGR", firstName: "Dana", lastName: "Manager" }, lineManager: { id: "hr-line-manager", employeeCode: "HR-LM", firstName: "Lina", lastName: "Lead" } },
-    { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager", email: "manager@example.invalid", hireDate: "2021-06-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Operations Manager", code: "OPS_MANAGER" }, user: { roles: [{ role: { code: "MANAGER" } }] }, manager: null, lineManager: null },
+    { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager", email: "manager@example.invalid", hireDate: "2021-06-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Operations Manager", code: "OPS_MANAGER" }, user: { roles: [{ role: { code: "MANAGER" } }] }, manager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" }, lineManager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" } },
+    { id: "coo-direct", employeeCode: "OPS-002", firstName: "Corey", lastName: "Direct", email: "coo.direct@example.invalid", hireDate: "2022-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Executive Analyst", code: "EXEC_ANALYST" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" }, lineManager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" } },
+    { id: "operations-report", employeeCode: "OPS-003", firstName: "Riley", lastName: "Report", email: "operations.report@example.invalid", hireDate: "2022-06-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Operations Specialist", code: "OPS_SPECIALIST" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager" }, lineManager: null },
   ];
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
@@ -198,11 +200,24 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect(coo).toBeVisible();
   await expect(cpo).toBeVisible();
   expect((await coo.boundingBox())!.y).toBeLessThan((await cpo.boundingBox())!.y);
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="company-coo"][data-target-id="company-cpo"]')).toHaveCount(1);
 
-  const humanResources = page.locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Human Resources.*3 employees.*1 direct branch/ }) });
-  const humanResourcesButton = humanResources.getByRole("button", { name: /Human Resources.*3 employees.*1 direct branch/ });
-  await expect(humanResourcesButton).toHaveAttribute("aria-expanded", "false");
-  await humanResourcesButton.click();
+  const cooChildren = page.locator(".company-role-executive-children");
+  const executiveOffice = cooChildren.locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Executive Office.*1 person.*1 direct report/ }) });
+  await expect(executiveOffice.getByText("Corey Direct")).toBeVisible();
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="company-coo"][data-target-id="coo-department-0"]')).toHaveCount(1);
+
+  const operations = cooChildren.locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Operations.*2 people.*1 direct report/ }) });
+  const operationsManager = operations.getByRole("button", { name: /Morgan Manager.*Manager.*OPS-001/ });
+  await expect(operationsManager).toHaveAttribute("aria-expanded", "false");
+  await operationsManager.click();
+  await expect(operations.getByText("Riley Report")).toBeVisible();
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-operations-manager"][data-target-id="reporting-operations-report"]')).toHaveCount(1);
+
+  const humanResources = page.locator(".company-role-executive-subtree").locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Human Resources.*3 people.*1 direct report/ }) });
+  const humanResourcesButton = humanResources.getByRole("button", { name: /Human Resources.*3 people.*1 direct report/ });
+  await expect(humanResourcesButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="company-cpo"][data-target-id="cpo-department-0"]')).toHaveCount(1);
   const managerBranch = humanResources.getByRole("button", { name: /Dana Manager.*Manager.*HR-MGR/ });
   await expect(managerBranch).toHaveAttribute("aria-expanded", "false");
   await expect(humanResources.getByText("Taylor Target")).toHaveCount(0);
@@ -210,13 +225,20 @@ test("Admin can explore and export the department role hierarchy without changin
   await managerBranch.focus();
   await page.keyboard.press("Enter");
   const lineManagerBranch = humanResources.getByRole("button", { name: /Lina Lead.*Line Manager.*HR-LM/ });
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-manager"][data-target-id="reporting-hr-line-manager"]')).toHaveCount(1);
   await lineManagerBranch.click();
-  const employeeBranch = humanResources.getByRole("button", { name: /Employee.*1 assigned/ });
-  await employeeBranch.click();
-  const roster = humanResources.getByRole("list", { name: "Employee employees" });
-  await expect(roster.getByText("Taylor Target")).toBeVisible();
-  await expect(roster.getByText(/EMP-001.*HR Specialist/)).toBeVisible();
-  await expect(roster.getByText("On leave")).toBeVisible();
+  const target = humanResources.getByRole("listitem").filter({ hasText: "Taylor Target" });
+  await expect(target).toBeVisible();
+  await expect(target.getByText(/EMP-001.*HR Specialist/)).toBeVisible();
+  await expect(target.getByText("On leave")).toBeVisible();
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-line-manager"][data-target-id="reporting-target-employee"]')).toHaveCount(1);
+  expect(await target.evaluate(element => parseFloat(getComputedStyle(element.closest(".company-role-card-shell")!).animationDuration))).toBeLessThan(0.001);
+
+  const search = page.getByPlaceholder("Find department, manager, or employee");
+  await search.fill("Riley Report");
+  await expect(operations.getByText("Riley Report")).toBeVisible();
+  await expect(page.getByText("1 matching reporting path")).toBeVisible();
+  await search.fill("");
 
   await page.setViewportSize({ width: 390, height: 844 });
   const flowViewport = page.locator(".company-role-viewport");
@@ -225,7 +247,7 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect.poll(() => page.locator(".company-role-canvas .role-flowchart-line").count()).toBeGreaterThan(0);
   expect(await page.locator(".company-role-canvas .role-flowchart-line").evaluateAll(lines => lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
   await page.getByLabel("Switch to dark mode").click();
-  await expect(roster.getByText("Taylor Target")).toBeVisible();
+  await expect(target.getByText("Taylor Target")).toBeVisible();
   await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(21, 34, 56)");
   await page.getByLabel("Switch to light mode").click();
 

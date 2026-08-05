@@ -150,42 +150,58 @@ export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings
 export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSettings) {
   const hierarchy = buildCompanyRoleHierarchy(employees);
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
-  doc.setProperties({ title: "Company Role Hierarchy", subject: "Departments and separate Manager and Line Manager references", author: settings.company.legalName, creator: "MedTech HR ERP" });
-  const departmentPages = hierarchy.departments.length ? chunk(hierarchy.departments, 4) : [[]];
+  doc.setProperties({ title: "Company Role Hierarchy", subject: "Executive-owned departments and named reporting relationships", author: settings.company.legalName, creator: "MedTech HR ERP" });
+  const coo = hierarchy.executives.find(executive => executive.code === "COO")!;
+  const cpo = hierarchy.executives.find(executive => executive.code === "CPO")!;
+  const cooDepartmentPages = chunk(coo.departments, 3);
+  const cpoDepartmentPages = chunk(cpo.departments, 4);
+  const overviewPages = Math.max(1, cooDepartmentPages.length, cpoDepartmentPages.length);
 
-  departmentPages.forEach((departments, pageIndex) => {
+  Array.from({ length: overviewPages }, (_, pageIndex) => pageIndex).forEach(pageIndex => {
     if (pageIndex) doc.addPage();
-    roleHierarchyPageTitle(doc, "Company Role Hierarchy", `${hierarchy.activeEmployees.length} active employees · ${hierarchy.departments.length} departments · ${hierarchy.managerCount} managers · ${hierarchy.lineManagerCount} line managers`);
-    const coo = hierarchy.executives.find(executive => executive.code === "COO")!;
-    const cpo = hierarchy.executives.find(executive => executive.code === "CPO")!;
-    roleHierarchyBox(doc, 106, 42, 85, 22, `COO · ${coo.label}`, coo.members.length ? coo.members.map(member => member.name) : ["Position not assigned"], "executive");
-    roleHierarchyConnector(doc, 148.5, 64, 148.5, 73);
-    roleHierarchyBox(doc, 106, 73, 85, 22, `CPO · ${cpo.label}`, cpo.members.length ? cpo.members.map(member => member.name) : ["Position not assigned"], "executive");
+    roleHierarchyPageTitle(doc, "Company Role Hierarchy", `${hierarchy.activeEmployees.length} active employees · ${hierarchy.departmentCount} departments · ${hierarchy.managerCount} managers · ${hierarchy.lineManagerCount} line managers`);
+    roleHierarchyBox(doc, 106, 36, 85, 22, `COO · ${coo.label}`, coo.members.length ? coo.members.map(member => member.name) : ["Position not assigned"], "executive");
+    const cooDepartments = cooDepartmentPages[pageIndex] ?? [];
+    const directChildren = [{ name: `CPO · ${cpo.label}`, memberCount: cpo.members.length, executive: true }, ...cooDepartments.map(department => ({ ...department, executive: false }))];
     const boxWidth = 58;
-    const gap = 10;
-    const totalWidth = departments.length * boxWidth + Math.max(0, departments.length - 1) * gap;
+    const gap = 8;
+    const totalWidth = directChildren.length * boxWidth + Math.max(0, directChildren.length - 1) * gap;
     const firstX = (297 - totalWidth) / 2;
-    departments.forEach((department, index) => {
+    directChildren.forEach((child, index) => {
       const x = firstX + index * (boxWidth + gap);
-      roleHierarchyConnector(doc, 148.5, 95, x + boxWidth / 2, 119);
-      roleHierarchyBox(doc, x, 119, boxWidth, 32, department.name, [`${department.memberCount} employees`, "Named reporting branches"], "department");
+      roleHierarchyConnector(doc, 148.5, 58, x + boxWidth / 2, 76);
+      roleHierarchyBox(doc, x, 76, boxWidth, 26, child.name, child.executive ? (cpo.members.length ? cpo.members.map(member => member.name) : ["Position not assigned"]) : [`${child.memberCount} people`, "Direct COO branch"], child.executive ? "executive" : "department");
     });
-    if (!departments.length) roleHierarchyEmpty(doc, "No active employees are available below executive leadership.");
+    const cpoX = firstX + boxWidth / 2;
+    const cpoDepartments = cpoDepartmentPages[pageIndex] ?? [];
+    const cpoTotalWidth = cpoDepartments.length * boxWidth + Math.max(0, cpoDepartments.length - 1) * gap;
+    const cpoFirstX = (297 - cpoTotalWidth) / 2;
+    cpoDepartments.forEach((department, index) => {
+      const x = cpoFirstX + index * (boxWidth + gap);
+      roleHierarchyConnector(doc, cpoX, 102, x + boxWidth / 2, 126);
+      roleHierarchyBox(doc, x, 126, boxWidth, 28, department.name, [`${department.memberCount} people`, "Direct CPO branch"], "department");
+    });
+    if (!cooDepartments.length && !cpoDepartments.length) roleHierarchyEmpty(doc, "No active employees are assigned below executive leadership.");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(...brand.muted);
-    doc.text("COO → CPO → Department → Manager → Line Manager → Employee", 148.5, 161, { align: "center" });
+    doc.text("COO → CPO and executive-owned departments → named reporting relationships", 148.5, 166, { align: "center" });
   });
 
-  hierarchy.departments.forEach(department => {
+  const ownedDepartments = [
+    ...coo.departments.map(department => ({ owner: "COO", department })),
+    ...cpo.departments.map(department => ({ owner: "CPO", department })),
+    ...hierarchy.unassignedDepartments.map(department => ({ owner: "Unassigned reporting", department })),
+  ];
+  ownedDepartments.forEach(({ owner, department }) => {
     const rows = roleHierarchyRows(department.branches);
     const pages = rows.length ? chunk(rows, 14) : [[]];
     pages.forEach((pageRows, pageIndex) => {
       doc.addPage();
-      roleHierarchyPageTitle(doc, department.name, `${department.memberCount} employees · named reporting branches${pages.length > 1 ? ` · part ${pageIndex + 1}/${pages.length}` : ""}`);
-      roleHierarchyBox(doc, 103.5, 40, 90, 22, department.name, [`${department.memberCount} active employees`, "Manager and Line Manager references kept separate"], "department");
+      roleHierarchyPageTitle(doc, `${owner} · ${department.name}`, `${department.memberCount} people · named reporting relationships${pages.length > 1 ? ` · part ${pageIndex + 1}/${pages.length}` : ""}`);
+      roleHierarchyBox(doc, 103.5, 40, 90, 22, department.name, [`${department.memberCount} people in this branch`, owner], "department");
       pageRows.forEach((row, index) => roleHierarchyTreeRow(doc, row, 72 + index * 8.6));
-      if (!pageRows.length) roleHierarchyEmpty(doc, "No reporting branches are assigned in this department.");
+      if (!pageRows.length) roleHierarchyEmpty(doc, "No reporting relationships are assigned in this department branch.");
     });
   });
 
@@ -204,7 +220,7 @@ type RoleHierarchyPdfRow = { depth: number; code: RoleHierarchyBranch["code"]; m
 
 function roleHierarchyRows(branches: RoleHierarchyBranch[], depth = 0): RoleHierarchyPdfRow[] {
   return branches.flatMap(branch => [
-    ...(branch.member ? [{ depth, code: branch.code, member: branch.member }] : branch.members.map(member => ({ depth, code: branch.code, member }))),
+    { depth, code: branch.code, member: branch.member },
     ...roleHierarchyRows(branch.children, depth + 1),
   ]);
 }
