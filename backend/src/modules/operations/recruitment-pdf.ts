@@ -14,6 +14,7 @@ let brandMark: string | undefined;
 const pageWidth = 595.28;
 const pageHeight = 841.89;
 const margin = 38;
+const letterheadTop = 110;
 
 function logo() {
   brandMark ??= `data:image/png;base64,${readFileSync(resolve(assetDirectory, 'brand-mark.png')).toString('base64')}`;
@@ -38,10 +39,6 @@ function document() {
   return new jsPDF({ unit: 'pt', format: 'a4', compress: true });
 }
 
-function addBrand(doc: jsPDF, y = 18) {
-  doc.addImage(logo(), 'PNG', pageWidth - margin - 26, y, 26, 21, `brand-${doc.getCurrentPageInfo().pageNumber}`, 'FAST');
-}
-
 function write(doc: jsPDF, value: unknown, x: number, y: number, width: number, size = 10, bold = false, align: 'left' | 'center' | 'right' = 'left') {
   const content = text(value);
   if (!content) return y;
@@ -58,11 +55,12 @@ function rule(doc: jsPDF, y: number) {
   doc.line(margin, y, pageWidth - margin, y);
 }
 
-function offerHeader(doc: jsPDF, issueDate: unknown) {
+function offerHeader(doc: jsPDF, issueDate: unknown, showDate: boolean) {
+  if (!showDate) return;
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-  doc.text('Date', margin, 51);
-  doc.line(margin, 53, margin + 24, 53);
-  doc.setFont('helvetica', 'normal'); doc.text(date(issueDate), margin + 33, 51);
+  doc.text('Date', margin, letterheadTop);
+  doc.line(margin, letterheadTop + 2, margin + 24, letterheadTop + 2);
+  doc.setFont('helvetica', 'normal'); doc.text(date(issueDate), margin + 33, letterheadTop);
 }
 
 function section(doc: jsPDF, number: string, title: string, y: number) {
@@ -78,9 +76,9 @@ function offerPage(doc: jsPDF, offer: Record<string, unknown>, candidate: Candid
   const lineOfBusiness = text(offer.lineOfBusiness) || candidate.job.department?.name || '';
   const total = Number(offer.basic ?? 0) + Number(offer.hra ?? 0) + Number(offer.conveyance ?? 0) + Number(offer.otherAllowance ?? 0);
   let y = 0;
-  offerHeader(doc, offer.issueDate);
+  offerHeader(doc, offer.issueDate, page === 1);
   if (page === 1) {
-    y = 107;
+    y = letterheadTop + 45;
     y = write(doc, 'Strictly Private & Confidential', margin, y, 240, 11, true); doc.line(margin, y - 8, margin + 150, y - 8); y += 20;
     y = write(doc, name, margin, y, 300, 10); y = write(doc, 'Doha-Qatar', margin, y + 4, 200, 11, true); y += 31;
     y = write(doc, 'Contract of Employment', margin, y, 250, 12, true); doc.line(margin, y - 8, margin + 145, y - 8); y += 18;
@@ -100,7 +98,7 @@ function offerPage(doc: jsPDF, offer: Record<string, unknown>, candidate: Candid
     }
     write(doc, 'Your Performance may be reviewed annually based on your performance.', margin + 60, y + 10, 420, 10.5);
   } else if (page === 2) {
-    y = 89;
+    y = letterheadTop;
     y = section(doc, '4.', 'VARIABLE PAY', y);
     y = write(doc, 'Subject to the Company’s sole discretion, you may be eligible for Bonus and / or incentive (short or long term) as the case may be in accordance with the Company’s approved policies and plans. The amount payable will be subject to the Group’s performance, or your unit’s performance, or your own performance or a combination of the above.', margin + 34, y, 475, 10); y += 18;
     y = section(doc, '5.', 'BENEFITS', y);
@@ -116,7 +114,7 @@ function offerPage(doc: jsPDF, offer: Record<string, unknown>, candidate: Candid
     y += 8; y = write(doc, 'Maternity Leave (Calendar Years)', margin + 34, y, 475, 10, true); y += 4;
     for (const item of ['50 Days', 'This leave shall be granted only after the employee completes one full year with the company.', 'This leave shall be granted subject to a medical certificate issued by a licensed physician stating the probable date of delivery.']) { y = write(doc, `• ${item}`, margin + 42, y, 467, 9.5); y += 3; }
   } else if (page === 3) {
-    y = 89;
+    y = letterheadTop;
     y = write(doc, 'Additional Leave:', margin + 34, y, 475, 10, true); y += 6;
     for (const item of ['Eid El- Fitr — 3 working days', 'Eid El- Adha — 3 working days', 'National Day — 1 working day', 'Three working days to be specified by the employer.']) { y = write(doc, `• ${item}`, margin + 42, y, 467, 9.5); y += 3; }
     y += 10; y = write(doc, 'Note:', margin + 34, y, 475, 10, true); y += 5;
@@ -126,12 +124,12 @@ function offerPage(doc: jsPDF, offer: Record<string, unknown>, candidate: Candid
     y = write(doc, 'Employees of the Company will follow standardized working days and hours as follows:', margin + 34, y, 475, 10); y += 14;
     for (const [label, value] of [['Weekly Working Days', '5 days (Sunday to Thursday)'], ['Weekly Working Hours', '44 hours'], ['Work Timings', '07:30-16:30']] as const) { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text(label, margin + 34, y); doc.text(`- ${value}`, 276, y); y += 24; }
     y = write(doc, 'During the period of Ramadan, the timings shall be notified.', margin + 34, y + 5, 475, 10); y += 18;
-    write(doc, 'You would be required to perform your duties as per the requirement and nature of your work. As your activity is involved in customer service in Healthcare Industry, Day and time is subjective and whenever needed to be present to perform your duties.', margin + 34, y, 475, 10);
-  } else {
-    y = 89;
+    y = write(doc, 'You would be required to perform your duties as per the requirement and nature of your work. As your activity is involved in customer service in Healthcare Industry, Day and time is subjective and whenever needed to be present to perform your duties.', margin + 34, y, 475, 10); y += 20;
     y = section(doc, '7.', 'MEDICAL AND RESIDENCE VISAS', y);
     y = write(doc, 'Your employment is expressly dependent upon you being medically fit to reside and work in the State of Qatar as per the Qatari Labor Law and upon the same being permitted by the competent authorities in the Qatar and upon your holding and continuing to hold a valid residence visa and / or work permit and other requisite consents, approvals and authorizations arising out of your employment with Medtech Corporation.', margin + 34, y, 475, 9.5); y += 10;
-    y = write(doc, 'Medtech Corporation will sponsor your visa by providing you with an employment visa. Thereafter, it will be your responsibility to apply for resident visas and sponsor your family and dependents.', margin + 34, y, 475, 9.5); y += 17;
+    write(doc, 'Medtech Corporation will sponsor your visa by providing you with an employment visa. Thereafter, it will be your responsibility to apply for resident visas and sponsor your family and dependents.', margin + 34, y, 475, 9.5);
+  } else {
+    y = letterheadTop;
     y = section(doc, '8.', 'PROBATION AND NOTICE PERIOD', y);
     y = write(doc, 'You will be on probation for a period of Six months during which period your services may be terminated by the company on giving one day’s notice. Your confirmation in the service will be subject to satisfactory performance in the job and receipt of favorable reference letter from your previous employers.', margin + 34, y, 475, 10); y += 10;
     y = write(doc, 'Subsequent to your confirmation, you or the Company may terminate this Contract of Employment upon giving one month’s notice or any in lieu of notice.', margin + 34, y, 475, 10); y += 21;
@@ -161,23 +159,25 @@ function ndaPage(doc: jsPDF, offer: Record<string, unknown>, candidate: Candidat
   const signedDate = date(offer.issueDate);
   let y = 0;
   if (page === 1) {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('EMPLOYEE NON-DISCLOSURE AGREEMENT', pageWidth / 2, 75, { align: 'center' });
-    y = 128; doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.text('This Non-Disclosure Agreement is entered between', margin, y); doc.setFont('helvetica', 'bold'); doc.text(name, 337, y); doc.text('and Medtech', 343 + doc.getTextWidth(name), y); doc.text('Corporation Trading as of', margin, y + 20); doc.setFont('helvetica', 'normal'); doc.text(signedDate, 172, y + 20); y += 55;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('EMPLOYEE NON-DISCLOSURE AGREEMENT', pageWidth / 2, letterheadTop + 30, { align: 'center' });
+    y = letterheadTop + 83; doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.text('This Non-Disclosure Agreement is entered between', margin, y); doc.setFont('helvetica', 'bold'); doc.text(name, 337, y); doc.text('and Medtech', 343 + doc.getTextWidth(name), y); doc.text('Corporation Trading as of', margin, y + 20); doc.setFont('helvetica', 'normal'); doc.text(signedDate, 172, y + 20); y += 55;
     y = ndaSection(doc, 'RECITALS:', y);
     for (const value of ["A. The success of an Employer’s business depends on the Employer’s possession of confidential, proprietary information, not generally known to others, including specialized information about research, development, production, marketing, and management in Employer's chosen fields.", 'B. Employer wishes to protect its confidential proprietary information and ensure that all employees agree to maintain the confidentiality of this information.', 'C. Employee acknowledges that the Employer desires to protect his confidential proprietary information, that his/her employment creates a duty of trust and confidentiality to Employer with respect to its confidential proprietary information and, as a condition of employment or continued employment with Employer, Employee agrees to be bound by the terms of this Agreement.']) y = ndaParagraph(doc, value, y);
     y += 20; y = ndaSection(doc, 'AGREEMENT:', y); y = ndaParagraph(doc, 'The Employer and Employee agree as follows:', y + 2); y += 28; y = ndaSection(doc, 'ARTICLE I: CONFIDENTIAL INFORMATION', y); ndaParagraph(doc, ndaArticleOne, y);
   } else if (page === 2) {
-    y = 82;
+    y = letterheadTop + 20;
     for (const value of ['B. Employee understands and agrees that the Confidential Information and Proprietary Data always constitute trade secrets of the Employer and that material to this Agreement, Employer has taken all reasonable steps to protect the confidentiality of this information.', 'C. Employee agrees not to use Confidential Information and/or Proprietary Data for the benefit of any other person, corporation or entity, other than the Employer, during the term of employee\'s employment with Employer, or any time thereafter. For purposes of this Agreement, the period of Employee\'s employment shall include any time during which Employee was retained as a consultant by Employer.', 'D. Employee agrees that the Confidential Information and Proprietary Data shall be and remains the exclusive property of Employer and shall not be removed from the premises of Employer under any circumstances whatsoever without the prior written consent of Employer, and if removed, shall be immediately returned to Employer upon any termination of Employee\'s employment, and no copies thereof may be kept by Employee.', 'E. All notes, notebooks, memorandums, computer disks and other similar repositories of information containing or relating in any way to Confidential Information and/or Proprietary Data shall be the property of Employer. All such items made or compiled by Employee or made available to Employee during the period of employment, including all copies thereof, shall be held by Employee in trust and solely for the benefit of Employer and shall be delivered to the Employer by Employee upon termination of employment with Employer, or at any other time upon the request of the Employer.', 'F. Employee agrees that Employee shall not disclose to any other person or entity, either directly or indirectly, the Confidential Information and/or Proprietary Data. Employee understands that the use or disclosure of any of the Confidential Information and/or Proprietary Data may be cause for an action at law or in equity in an appropriate court of the State of Qatar or of any State of the United States, or in any federal court, and that without waiving the right to collect damages from Employee, Employer shall be entitled to an injunction prohibiting the use or disclosure of the Confidential Information and Proprietary Data.']) y = ndaParagraph(doc, value, y);
     y += 5; y = ndaSection(doc, 'ARTICLE II: INVENTIONS', y); ndaParagraph(doc, 'A. Employee shall promptly disclose to Employer, in writing, all inventions, ideas, discoveries, and improvements whether patentable or registrable under Copyright or similar statutes, made or conceived or reduced to practice or learned by Employee, either alone or jointly with others, during the period of employment with Employer. Employees agree that all such inventions (intellectual, visual or material) are the sole property of Employer.', y);
   } else if (page === 3) {
-    y = 82;
+    y = letterheadTop + 20;
     for (const value of ['B. Employee assigns to Employer all right, title and interest in and to all inventions, ideas, discoveries, and improvements, with the exception of inventions, ideas, discoveries, and improvements that qualify for protection under Section C below.', 'C. This Agreement does not require assignment of an invention that is fully qualified for protection under relevant state labor code(s), which may provide as follows:', 'Any provision in an employment agreement which provides that an employee shall assign or offer to assign any of his or her rights in an invention to his or her employer shall not apply to an invention for which no equipment, supplies, facility or trade secret information of the employer was used and which was developed entirely on the employee’s time, and (a) which does not relate (1) to the business of the employer or (2) to the employer’s actual or demonstrably anticipated research or development, or (b) which does not result from any work performed by the employee for the employer.', 'D. Any inventions, ideas, discoveries, and improvements conceived or made by employee prior to the execution of this Agreement and not intended to be included within its provisions are listed or described on Exhibit "A" attached to this Agreement, and the absence of any such list or description indicates that there are no such inventions, ideas, discoveries, or improvements not covered by this Agreement.']) y = ndaParagraph(doc, value, y);
-    y += 8; y = ndaSection(doc, 'ARTICLE III: NATURE OF RELATIONSHIP', y); ndaParagraph(doc, 'It is expressly understood and agreed that this Agreement does not create or define the terms of any contract of employment, whether expressed or implied, nor does this Agreement create any guarantee of continuing employment between Employer and Employee. The parties understand and agree that Employee\'s relationship with Employer is terminable "at will," such that either Employer or Employee may terminate the relationship with or without cause or prior notice to the other party.', y);
-  } else {
-    y = 82;
+    y += 8; y = ndaSection(doc, 'ARTICLE III: NATURE OF RELATIONSHIP', y); y = ndaParagraph(doc, 'It is expressly understood and agreed that this Agreement does not create or define the terms of any contract of employment, whether expressed or implied, nor does this Agreement create any guarantee of continuing employment between Employer and Employee. The parties understand and agree that Employee\'s relationship with Employer is terminable "at will," such that either Employer or Employee may terminate the relationship with or without cause or prior notice to the other party.', y); y += 8;
     y = ndaSection(doc, 'ARTICLE IV: MISCELLANEOUS PROVISIONS', y);
-    for (const value of ['A. This Agreement shall inure to the benefit of the successors and assigns of the Employer, and shall be binding upon the Employee\'s heirs, assigns, administrators and representatives.', 'B. All provisions of this Agreement shall be severable for purposes of enforcement. If any provision or clause of this Agreement is unenforceable at law or in equity, such clause or provision shall be severed from the remainder of this Agreement, and the remainder of this Agreement shall continue to be enforceable, according to its terms.', 'C. This Agreement shall be interpreted under and governed by the laws of the State of Qatar as applied to an agreement made and wholly performed within said State.', 'D. This Agreement sets forth the entire Agreement as to its subject matter. No modification, amendment, termination or waiver of this Agreement shall be binding unless in writing and signed by a duly authorized officer of Employer. Failure of Employer to insist upon strict compliance with any of the terms, covenants or conditions of this Agreement shall not be deemed a waiver of such terms, covenants or conditions.', 'E. This Agreement constitutes the entire agreement between the parties hereto relating to the subject matter hereof and supersedes any previous agreements between the parties relating to inventions and confidentiality.', 'F. In the event of any dispute related to this Agreement, the prevailing party in that dispute shall recover its attorney fees.', 'G. This Agreement shall be effective on the date last written below.']) y = ndaParagraph(doc, value, y);
+    for (const value of ['A. This Agreement shall inure to the benefit of the successors and assigns of the Employer, and shall be binding upon the Employee\'s heirs, assigns, administrators and representatives.', 'B. All provisions of this Agreement shall be severable for purposes of enforcement. If any provision or clause of this Agreement is unenforceable at law or in equity, such clause or provision shall be severed from the remainder of this Agreement, and the remainder of this Agreement shall continue to be enforceable, according to its terms.', 'C. This Agreement shall be interpreted under and governed by the laws of the State of Qatar as applied to an agreement made and wholly performed within said State.']) y = ndaParagraph(doc, value, y);
+  } else {
+    y = letterheadTop + 20;
+    y = write(doc, 'ARTICLE IV: MISCELLANEOUS PROVISIONS (CONTINUED)', margin, y, pageWidth - margin * 2, 11.5, true) + 10;
+    for (const value of ['D. This Agreement sets forth the entire Agreement as to its subject matter. No modification, amendment, termination or waiver of this Agreement shall be binding unless in writing and signed by a duly authorized officer of Employer. Failure of Employer to insist upon strict compliance with any of the terms, covenants or conditions of this Agreement shall not be deemed a waiver of such terms, covenants or conditions.', 'E. This Agreement constitutes the entire agreement between the parties hereto relating to the subject matter hereof and supersedes any previous agreements between the parties relating to inventions and confidentiality.', 'F. In the event of any dispute related to this Agreement, the prevailing party in that dispute shall recover its attorney fees.', 'G. This Agreement shall be effective on the date last written below.']) y = ndaParagraph(doc, value, y);
     y += 24; rule(doc, y); y += 27; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('Signature of Employee', margin, y); doc.text('Signature of Employer', 294, y); y += 32; doc.setFontSize(10.5); doc.text(name, margin, y); doc.text('Hafiz Hassan Kunhi - COO', 284, y); y += 32; rule(doc, y); y += 28; doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text(signedDate, margin, y); doc.text(signedDate, 300, y);
   }
 }
@@ -238,12 +238,12 @@ export function interviewAssessmentPdf(candidate: CandidateDocumentData) {
 
 export function offerLetterPdf(candidate: CandidateDocumentData) {
   const doc = document(); const offer = candidate.offerDetails ?? {};
-  for (let page = 1; page <= 4; page += 1) { if (page > 1) doc.addPage('a4', 'portrait'); offerPage(doc, offer, candidate, page); addBrand(doc); }
+  for (let page = 1; page <= 4; page += 1) { if (page > 1) doc.addPage('a4', 'portrait'); offerPage(doc, offer, candidate, page); }
   return Buffer.from(doc.output('arraybuffer'));
 }
 
 export function ndaPdf(candidate: CandidateDocumentData) {
   const doc = document(); const offer = candidate.offerDetails ?? {};
-  for (let page = 1; page <= 4; page += 1) { if (page > 1) doc.addPage('a4', 'portrait'); ndaPage(doc, offer, candidate, page); addBrand(doc); }
+  for (let page = 1; page <= 4; page += 1) { if (page > 1) doc.addPage('a4', 'portrait'); ndaPage(doc, offer, candidate, page); }
   return Buffer.from(doc.output('arraybuffer'));
 }
