@@ -1202,9 +1202,8 @@ td button {
 }
 
 .company-role-toolbar {
-  position: sticky;
-  top: 8px;
-  z-index: 8;
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(190px, 240px) auto auto;
   align-items: center;

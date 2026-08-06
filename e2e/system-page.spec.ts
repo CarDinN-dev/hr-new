@@ -195,6 +195,7 @@ test("Admin can explore and export the department role hierarchy without changin
   await page.keyboard.press("ArrowRight");
   await expect(roleTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("group", { name: "Company role hierarchy" })).toBeVisible();
+  await expect(page.locator(".company-role-toolbar")).toHaveCSS("position", "relative");
   const flowViewport = page.getByRole("region", { name: "Interactive role hierarchy canvas" });
   const canvasControls = page.getByRole("group", { name: "Canvas navigation controls" });
   const zoomValue = canvasControls.locator("output");
