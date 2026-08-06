@@ -27,12 +27,12 @@ export class DocumentsController {
 
   @AnyPermission('document.self.read', 'document.hr.read', 'document.read_all', 'document.pdf.download_all')
   @Get(':id/content')
-  async content(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) {
+  async content(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res() response: Response) {
     const result = await this.documentsService.content(id, user);
     response.setHeader('Content-Type', result.contentType);
     response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(result.fileName)}`);
     response.setHeader('Cache-Control', 'private, no-store, max-age=0');
-    return result.buffer;
+    response.send(result.buffer);
   }
 
   @AnyPermission('document.self.read', 'document.hr.read', 'document.read_all')

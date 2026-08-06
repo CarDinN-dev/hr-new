@@ -15,8 +15,6 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, ResponseEnvelo
   intercept(_context: ExecutionContext, next: CallHandler): Observable<ResponseEnvelope<unknown>> {
     return next.handle().pipe(
       map((result: ResponseEnvelope<T>) => {
-        if (Buffer.isBuffer(result)) return result;
-
         if (result && typeof result === 'object' && 'success' in result) {
           return result;
         }

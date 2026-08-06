@@ -54,11 +54,11 @@ export class OperationsController {
   @Permissions('recruitment.manage')
   @Delete('recruitment/candidates/:id') removeCandidate(@Param('id') id: string, @CurrentUser() user: RequestUser) { return this.operations.removeCandidate(id, user); }
   @Permissions('recruitment.read')
-  @Get('recruitment/candidates/:id/interview-assessment.pdf') async interviewAssessment(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) { return this.pdfResponse(await this.operations.interviewAssessmentDocument(id, user), response); }
+  @Get('recruitment/candidates/:id/interview-assessment.pdf') async interviewAssessment(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res() response: Response) { this.pdfResponse(await this.operations.interviewAssessmentDocument(id, user), response); }
   @Permissions('recruitment.read')
-  @Get('recruitment/candidates/:id/offer-letter.pdf') async offerLetter(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) { return this.pdfResponse(await this.operations.offerLetterDocument(id, user), response); }
+  @Get('recruitment/candidates/:id/offer-letter.pdf') async offerLetter(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res() response: Response) { this.pdfResponse(await this.operations.offerLetterDocument(id, user), response); }
   @Permissions('recruitment.read')
-  @Get('recruitment/candidates/:id/nda.pdf') async nda(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) { return this.pdfResponse(await this.operations.ndaDocument(id, user), response); }
+  @Get('recruitment/candidates/:id/nda.pdf') async nda(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res() response: Response) { this.pdfResponse(await this.operations.ndaDocument(id, user), response); }
 
   @Permissions('eos.manage')
   @Post('eos') createEos(@Body() dto: CreateEosDto, @CurrentUser() user: RequestUser) { return this.operations.createEos(dto, user); }
@@ -79,6 +79,6 @@ export class OperationsController {
     response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
     response.setHeader('Cache-Control', 'private, no-store, max-age=0');
     response.setHeader('Pragma', 'no-cache');
-    return document.buffer;
+    response.send(document.buffer);
   }
 }
