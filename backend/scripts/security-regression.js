@@ -3,6 +3,7 @@ const { createHash } = require('node:crypto');
 const test = require('node:test');
 const { plainToInstance } = require('class-transformer');
 const { validateSync } = require('class-validator');
+const { firstValueFrom, of } = require('rxjs');
 const {
   AccessScopeType,
   AttendanceStatus,
@@ -11,6 +12,7 @@ const {
   RoleProtection,
 } = require('@prisma/client');
 const { HttpExceptionFilter } = require('../dist/common/filters/http-exception.filter');
+const { ResponseInterceptor } = require('../dist/common/interceptors/response.interceptor');
 const { listArgs } = require('../dist/common/utils/crud.util');
 const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto');
 const { ReplaceRoleInheritanceDto } = require('../dist/modules/system/dto/system.dto');
@@ -111,6 +113,13 @@ function authorizationStub() {
 }
 
 const audit = { record: async () => undefined };
+
+test('response envelopes preserve PDF buffers as raw binary data', async () => {
+  const pdf = Buffer.from('%PDF-1.7\n%%EOF');
+  const result = await firstValueFrom(new ResponseInterceptor().intercept({}, { handle: () => of(pdf) }));
+  assert.equal(result, pdf);
+  assert.equal(result.subarray(0, 4).toString(), '%PDF');
+});
 
 test('generic list helpers never expose soft-deleted records', () => {
   const args = listArgs({ page: 1, limit: 20, includeDeleted: true }, {});

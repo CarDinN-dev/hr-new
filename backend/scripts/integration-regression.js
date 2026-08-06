@@ -472,7 +472,41 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const uploadedDocument = await api('/documents/upload', { method: 'POST', body: documentBody }, sessions.EMPLOYEE);
   assert.equal(uploadedDocument.status, 201, JSON.stringify(uploadedDocument.payload));
   assert.doesNotMatch(JSON.stringify(uploadedDocument.data), /objectName|objectGeneration/);
-  assert.equal((await api(`/documents/${uploadedDocument.data.id}/content`, {}, sessions.EMPLOYEE)).status, 200);
+  const downloadedDocument = await api(`/documents/${uploadedDocument.data.id}/content`, {}, sessions.EMPLOYEE);
+  assert.equal(downloadedDocument.status, 200);
+  assert.equal(downloadedDocument.buffer.subarray(0, 4).toString(), '%PDF');
+
+  const recruitmentJob = await api('/recruitment/jobs', {
+    method: 'POST', body: {
+      title: 'Integration PDF Specialist', departmentId: testDepartment.id, openings: 1,
+      postedOn: '2099-01-01', description: 'Recruitment PDF transport regression',
+    },
+  }, sessions.HR);
+  assert.equal(recruitmentJob.status, 201, JSON.stringify(recruitmentJob.payload));
+  let recruitmentCandidate = await api('/recruitment/candidates', {
+    method: 'POST', body: {
+      jobId: recruitmentJob.data.id, name: 'Recruitment PDF Candidate', email: 'recruitment.pdf@example.invalid', appliedOn: '2099-01-02',
+    },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 201, JSON.stringify(recruitmentCandidate.payload));
+  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'INTERVIEW', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  const interviewPdf = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment.pdf`, {}, sessions.HR);
+  assert.equal(interviewPdf.status, 200);
+  assert.equal(interviewPdf.contentType.includes('application/pdf'), true);
+  assert.equal(interviewPdf.buffer.subarray(0, 4).toString(), '%PDF');
+  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'OFFER', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  for (const document of ['offer-letter', 'nda']) {
+    const pdf = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/${document}.pdf`, {}, sessions.HR);
+    assert.equal(pdf.status, 200);
+    assert.equal(pdf.contentType.includes('application/pdf'), true);
+    assert.equal(pdf.buffer.subarray(0, 4).toString(), '%PDF');
+  }
 
   const absent = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-02', status: 'ABSENT' } }, sessions.HR);
   const halfDay = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-03', status: 'HALF_DAY' } }, sessions.HR);
