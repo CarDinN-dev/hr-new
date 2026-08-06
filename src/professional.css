@@ -1360,22 +1360,115 @@ td button {
 }
 
 .company-role-viewport {
+  position: relative;
+  height: clamp(430px, 68vh, 760px);
   min-height: 330px;
-  padding: 14px 0 10px;
+  padding: 0;
   border: 1px solid var(--pro-border);
   border-radius: 14px;
+  overflow: auto;
   background:
     radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--pro-border-strong) 42%, transparent) 1px, transparent 1.2px),
     var(--pro-surface-subtle);
   background-size: 20px 20px;
+  cursor: grab;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+
+.company-role-viewport.is-panning {
+  cursor: grabbing;
+  scroll-behavior: auto;
+  user-select: none;
+}
+
+.company-role-canvas-controls {
+  position: sticky;
+  top: 10px;
+  left: 10px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  width: max-content;
+  max-width: calc(100vw - 54px);
+  min-height: 40px;
+  margin: 10px 0 -50px 10px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--pro-border-strong) 72%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--pro-surface) 92%, transparent);
+  box-shadow: var(--pro-shadow-sm);
+  backdrop-filter: blur(10px);
+  cursor: default;
+}
+
+.company-role-canvas-controls button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  color: var(--pro-text-soft) !important;
+  box-shadow: none !important;
+}
+
+.company-role-canvas-controls button:hover:not(:disabled),
+.company-role-canvas-controls button:focus-visible {
+  background: var(--pro-surface-subtle) !important;
+  color: var(--pro-brand) !important;
+}
+
+.company-role-canvas-controls button:disabled {
+  opacity: .35;
+}
+
+.company-role-pan-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 5px;
+  border-right: 1px solid var(--pro-border);
+  color: var(--pro-text-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.company-role-zoom-value {
+  min-width: 45px;
+  color: var(--pro-text);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  text-align: center;
+}
+
+.company-role-stage {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+  touch-action: none;
 }
 
 .company-role-canvas {
+  position: absolute;
+  inset: 0 auto auto 0;
   display: grid;
   width: max-content;
   min-height: 300px;
   gap: 48px;
-  padding: 10px 26px 24px;
+  padding: 62px 26px 24px;
+  transform-origin: top left;
+  transition: transform 160ms ease-out;
+  will-change: transform;
+}
+
+.company-role-viewport.is-panning .company-role-canvas {
+  transition: none;
 }
 
 .company-role-leadership,
@@ -1950,16 +2043,29 @@ td button {
   }
 
   .company-role-viewport {
+    height: min(68vh, 620px);
     margin-inline: -4px;
     border-radius: 10px;
-    overflow-x: hidden;
-    overflow-y: visible;
+    overflow: auto;
   }
 
   .company-role-canvas {
     width: 100%;
     min-width: 100% !important;
-    padding-inline: 14px;
+    padding: 62px 14px 24px;
+  }
+
+  .company-role-stage[data-zoom="1"] {
+    width: 100% !important;
+  }
+
+  .company-role-canvas-controls {
+    max-width: calc(100% - 20px);
+    overflow-x: auto;
+  }
+
+  .company-role-pan-hint {
+    display: none;
   }
 
   .company-role-executive-children,
@@ -2016,7 +2122,8 @@ td button {
 
   .hierarchy-tabs,
   .company-role-toolbar,
-  .company-role-legend {
+  .company-role-legend,
+  .company-role-canvas-controls {
     display: none !important;
   }
 
@@ -2035,7 +2142,15 @@ td button {
   }
 
   .company-role-canvas {
+    position: relative !important;
     width: max-content !important;
+    padding-top: 10px !important;
+    transform: none !important;
     transform-origin: top left;
+  }
+
+  .company-role-stage {
+    width: auto !important;
+    height: auto !important;
   }
 }

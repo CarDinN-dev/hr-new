@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Building2, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Download, Pencil, Plus, Search, ShieldCheck, Users, X } from "lucide-react";
+import { ArrowLeft, Building2, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Download, Maximize2, Minus, Move, Pencil, Plus, RotateCcw, Search, ShieldCheck, Users, X } from "lucide-react";
 import { hasPermission, type BackendSession } from "../api";
 import type { EmployeeRecord } from "../data";
 import { buildCompanyRoleHierarchy, type RoleHierarchyBranch, type RoleHierarchyDepartment, type RoleHierarchyMember } from "../roleHierarchy";
@@ -15,6 +15,9 @@ const organizationalRoleLabel: Record<OrganizationalRole, string> = { HR: "HR", 
 const childRole: Partial<Record<OrganizationalRole, OrganizationalRole>> = { HR: "MANAGER", MANAGER: "LINE_MANAGER", LINE_MANAGER: "EMPLOYEE" };
 const companyCooId = "company-coo";
 const companyCpoId = "company-cpo";
+const companyRoleMinZoom = 0.5;
+const companyRoleMaxZoom = 1.5;
+const companyRoleZoomStep = 0.1;
 
 export function hierarchyManagerCode(employee: EmployeeRecord) {
   return (employee.fields["Manager Employee Code/Name"] || "").split(" - ", 1)[0].trim().toLowerCase();
@@ -390,6 +393,11 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
   const signature = `${edges.map(edge => `${edge.sourceId}>${edge.targetId}`).join("|")}:${[...expandedBranchIds].sort().join("|")}`;
   const visibleDepartmentCount = visibleCooDepartments.length + visibleCpoDepartments.length + visibleUnassignedDepartments.length;
   const canvasMinWidth = Math.max(720, visibleDepartmentCount * 244 + Math.max(0, visibleDepartmentCount - 1) * 22);
+  const [zoom, setZoom] = useState(1);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const zoomRef = useRef(1);
+  const panRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
   const selectedPathIds = useMemo(() => {
     const path = new Set<string>();
     let currentId = selectedId ?? undefined;
@@ -421,16 +429,19 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const canvasRect = canvas.getBoundingClientRect();
+        const scale = zoomRef.current;
+        const nextSize = { width: canvas.scrollWidth, height: canvas.scrollHeight };
+        setCanvasSize(current => current.width === nextSize.width && current.height === nextSize.height ? current : nextSize);
         setConnectors(edges.flatMap(edge => {
           const source = nodeRefs.current.get(edge.sourceId);
           const target = nodeRefs.current.get(edge.targetId);
           if (!source || !target) return [];
           const sourceRect = source.getBoundingClientRect();
           const targetRect = target.getBoundingClientRect();
-          const sourceX = sourceRect.left + sourceRect.width / 2 - canvasRect.left;
-          const sourceY = sourceRect.bottom - canvasRect.top;
-          const targetX = targetRect.left + targetRect.width / 2 - canvasRect.left;
-          const targetY = targetRect.top - canvasRect.top;
+          const sourceX = (sourceRect.left + sourceRect.width / 2 - canvasRect.left) / scale;
+          const sourceY = (sourceRect.bottom - canvasRect.top) / scale;
+          const targetX = (targetRect.left + targetRect.width / 2 - canvasRect.left) / scale;
+          const targetY = (targetRect.top - canvasRect.top) / scale;
           const controlY = sourceY + Math.max(24, (targetY - sourceY) / 2);
           return [{ ...edge, path: `M ${sourceX} ${sourceY} C ${sourceX} ${controlY}, ${targetX} ${controlY}, ${targetX} ${targetY}` }];
         }));
@@ -444,7 +455,8 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
         const viewportRect = viewport.getBoundingClientRect();
         const focusedRect = focused.getBoundingClientRect();
         const left = viewport.scrollLeft + focusedRect.left + focusedRect.width / 2 - viewportRect.left - viewport.clientWidth / 2;
-        viewport.scrollTo({ left: Math.max(0, left), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        const top = viewport.scrollTop + focusedRect.top + focusedRect.height / 2 - viewportRect.top - viewport.clientHeight / 2;
+        viewport.scrollTo({ left: Math.max(0, left), top: Math.max(0, top), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       });
     };
     const refresh = () => { measure(); centerFocused(); };
@@ -469,12 +481,74 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
   };
   const centerNode = (id: string) => {
     const node = nodeRefs.current.get(id);
-    if (!node) return;
-    node.scrollIntoView({
+    const viewport = viewportRef.current;
+    if (!node || !viewport) return;
+    const nodeRect = node.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    viewport.scrollTo({
+      left: Math.max(0, viewport.scrollLeft + nodeRect.left + nodeRect.width / 2 - viewportRect.left - viewport.clientWidth / 2),
+      top: Math.max(0, viewport.scrollTop + nodeRect.top + nodeRect.height / 2 - viewportRect.top - viewport.clientHeight / 2),
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-      block: "nearest",
-      inline: "center",
     });
+  };
+  const changeZoom = (value: number, originX?: number, originY?: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const previous = zoomRef.current;
+    const next = Math.min(companyRoleMaxZoom, Math.max(companyRoleMinZoom, Math.round(value * 100) / 100));
+    if (next === previous) return;
+    const x = originX ?? viewport.clientWidth / 2;
+    const y = originY ?? viewport.clientHeight / 2;
+    const contentX = (viewport.scrollLeft + x) / previous;
+    const contentY = (viewport.scrollTop + y) / previous;
+    zoomRef.current = next;
+    setZoom(next);
+    requestAnimationFrame(() => viewport.scrollTo({ left: Math.max(0, contentX * next - x), top: Math.max(0, contentY * next - y), behavior: "auto" }));
+  };
+  const fitHierarchy = () => {
+    const viewport = viewportRef.current;
+    const canvas = canvasRef.current;
+    if (!viewport || !canvas) return;
+    const next = Math.min(1, (viewport.clientWidth - 28) / canvas.scrollWidth, (viewport.clientHeight - 28) / canvas.scrollHeight);
+    changeZoom(next, 0, 0);
+    requestAnimationFrame(() => viewport.scrollTo({ left: 0, top: 0, behavior: "auto" }));
+  };
+  const resetView = () => {
+    zoomRef.current = 1;
+    setZoom(1);
+    setFocusId(companyCooId);
+    requestAnimationFrame(() => centerNode(companyCooId));
+  };
+  const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as Element).closest("button, input, select, a, .company-role-canvas-controls")) return;
+    const viewport = event.currentTarget;
+    panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+    try { viewport.setPointerCapture(event.pointerId); } catch { /* Pointer capture is unavailable for synthetic/legacy pointer events. */ }
+    setIsPanning(true);
+    event.preventDefault();
+  };
+  const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    event.currentTarget.scrollTo({ left: pan.left - (event.clientX - pan.x), top: pan.top - (event.clientY - pan.y), behavior: "auto" });
+    event.preventDefault();
+  };
+  const endPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (panRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    panRef.current = null;
+    setIsPanning(false);
+  };
+  const onCanvasKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    const viewport = event.currentTarget;
+    if (event.key === "+" || event.key === "=") changeZoom(zoomRef.current + companyRoleZoomStep);
+    else if (event.key === "-") changeZoom(zoomRef.current - companyRoleZoomStep);
+    else if (event.key === "0") resetView();
+    else if (event.key.toLocaleLowerCase() === "f") fitHierarchy();
+    else if (event.key.startsWith("Arrow")) viewport.scrollBy({ left: event.key === "ArrowLeft" ? -64 : event.key === "ArrowRight" ? 64 : 0, top: event.key === "ArrowUp" ? -64 : event.key === "ArrowDown" ? 64 : 0, behavior: "auto" });
+    else return;
+    event.preventDefault();
   };
   const selectAndCenter = (id: string) => {
     setSelectedId(id);
@@ -696,12 +770,28 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
       <label className="company-role-department-jump"><span className="sr-only">Jump to department</span><select value={focusedDepartmentId ?? ""} onChange={event => focusDepartment(event.target.value || null)}><option value="">Company overview</option><optgroup label="Reports directly to COO">{coo.departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</optgroup><optgroup label="Reports through CPO">{cpo.departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</optgroup>{hierarchy.unassignedDepartments.length > 0 && <optgroup label="Needs reporting assignment">{hierarchy.unassignedDepartments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</optgroup>}</select></label>
       <span className="company-role-match-count" aria-live="polite">{query ? `${searchMatches.length} matching ${searchMatches.length === 1 ? "person" : "people"}${executiveMatches ? " · executive match" : ""}` : focusedMeta ? `Focused on ${focusedMeta.department.name}` : `${hierarchy.departmentCount} departments`}</span>
       {query && searchMatches.length > 0 && <div className="company-role-search-navigation" role="group" aria-label="Search result navigation"><button type="button" aria-label="Previous role hierarchy result" onClick={() => showSearchMatch(searchMatches, searchMatchIndex - 1)}><ChevronLeft size={16} aria-hidden="true" /></button><span>{searchMatchIndex + 1} of {searchMatches.length}</span><button type="button" aria-label="Next role hierarchy result" onClick={() => showSearchMatch(searchMatches, searchMatchIndex + 1)}><ChevronRight size={16} aria-hidden="true" /></button></div>}
-      <div className="company-role-actions">{focusedDepartmentId && <button type="button" onClick={() => focusDepartment(null)}><ArrowLeft size={16} aria-hidden="true" /> Overview</button>}<button type="button" onClick={() => centerNode(selectedId ?? focusId)}><Crosshair size={16} aria-hidden="true" /> Center</button><button type="button" onClick={expandAll}>Expand all</button><button type="button" onClick={collapseAll}>Collapse all</button><button type="button" className="primary" onClick={onExportPdf}><Download size={16} aria-hidden="true" /> Export PDF</button></div>
+      <div className="company-role-actions">{focusedDepartmentId && <button type="button" onClick={() => focusDepartment(null)}><ArrowLeft size={16} aria-hidden="true" /> Overview</button>}<button type="button" onClick={expandAll}>Expand all</button><button type="button" onClick={collapseAll}>Collapse all</button><button type="button" className="primary" onClick={onExportPdf}><Download size={16} aria-hidden="true" /> Export PDF</button></div>
     </div>
     {selectedBreadcrumb.length > 0 && <nav className="company-role-breadcrumb" aria-label="Selected reporting path">{selectedBreadcrumb.map((label, index) => <span key={`${label}-${index}`}>{index > 0 && <ChevronRight size={13} aria-hidden="true" />}{label}</span>)}</nav>}
     <div className="company-role-legend"><span><i className="leadership" /> Executive</span><span><i className="department" /> Department</span><span><i className="manager" /> Manager</span><span><i className="line-manager" /> Line Manager</span><span><i className="employee" /> Employee</span><span><i className="selected-path" /> Selected path</span></div>
-    <div className="role-flowchart-viewport company-role-viewport" ref={viewportRef} tabIndex={0} aria-label="Interactive role hierarchy. Use search, department navigation, or disclosure controls to explore reporting paths.">
-      <div className="role-flowchart-canvas company-role-canvas" id="company-role-hierarchy-flowchart" ref={canvasRef} style={{ minWidth: `${canvasMinWidth}px` }}>
+    <p className="sr-only" id="company-role-canvas-help">Drag empty canvas space to move. Use the controls or plus and minus keys to zoom, arrow keys to pan, F to fit, and zero to reset.</p>
+    <div className={`role-flowchart-viewport company-role-viewport${isPanning ? " is-panning" : ""}`} ref={viewportRef} tabIndex={0} role="region" aria-label="Interactive role hierarchy canvas" aria-describedby="company-role-canvas-help" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onKeyDown={onCanvasKeyDown} onWheel={event => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      changeZoom(zoomRef.current + (event.deltaY < 0 ? companyRoleZoomStep : -companyRoleZoomStep), event.clientX - rect.left, event.clientY - rect.top);
+    }}>
+      <div className="company-role-canvas-controls" role="group" aria-label="Canvas navigation controls">
+        <span className="company-role-pan-hint"><Move size={15} aria-hidden="true" /> Drag to move</span>
+        <button type="button" aria-label="Zoom out role hierarchy" title="Zoom out (-)" disabled={zoom <= companyRoleMinZoom} onClick={() => changeZoom(zoomRef.current - companyRoleZoomStep)}><Minus size={16} aria-hidden="true" /></button>
+        <output className="company-role-zoom-value" aria-live="polite">{Math.round(zoom * 100)}%</output>
+        <button type="button" aria-label="Zoom in role hierarchy" title="Zoom in (+)" disabled={zoom >= companyRoleMaxZoom} onClick={() => changeZoom(zoomRef.current + companyRoleZoomStep)}><Plus size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label="Fit role hierarchy in view" title="Fit hierarchy (F)" onClick={fitHierarchy}><Maximize2 size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label="Center selected hierarchy item" title="Center selected" onClick={() => centerNode(selectedId ?? focusId)}><Crosshair size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label="Reset role hierarchy view" title="Reset view (0)" onClick={resetView}><RotateCcw size={16} aria-hidden="true" /></button>
+      </div>
+      <div className="company-role-stage" data-zoom={zoom} style={{ width: canvasSize.width ? `${canvasSize.width * zoom}px` : "100%", height: canvasSize.height ? `${canvasSize.height * zoom}px` : "100%" }}>
+      <div className="role-flowchart-canvas company-role-canvas" id="company-role-hierarchy-flowchart" ref={canvasRef} style={{ minWidth: `${canvasMinWidth}px`, transform: `scale(${zoom})` }}>
         <svg className="role-flowchart-connectors" aria-hidden="true">
           <defs><marker id="company-role-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 8 4 L 0 8 z" /></marker></defs>
           {connectors.map(connector => {
@@ -721,6 +811,7 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
         </div>}
         {hierarchy.activeEmployees.length === hierarchy.executives.reduce((total, executive) => total + executive.members.length, 0) && <div className="role-flowchart-empty">No active employees are available below executive leadership.</div>}
         {query && !visibleSearchContent && <div className="role-flowchart-empty"><Search size={18} aria-hidden="true" /> No departments, reporting relationships, or employees match “{search.trim()}”.</div>}
+      </div>
       </div>
     </div>
   </div>;

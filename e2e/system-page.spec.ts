@@ -195,6 +195,20 @@ test("Admin can explore and export the department role hierarchy without changin
   await page.keyboard.press("ArrowRight");
   await expect(roleTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("group", { name: "Company role hierarchy" })).toBeVisible();
+  const flowViewport = page.getByRole("region", { name: "Interactive role hierarchy canvas" });
+  const canvasControls = page.getByRole("group", { name: "Canvas navigation controls" });
+  const zoomValue = canvasControls.locator("output");
+  await expect(flowViewport).toHaveAttribute("aria-describedby", "company-role-canvas-help");
+  await expect(zoomValue).toHaveText("100%");
+  await page.getByRole("button", { name: "Zoom out role hierarchy" }).click();
+  await expect(zoomValue).toHaveText("90%");
+  await page.getByRole("button", { name: "Zoom in role hierarchy" }).click();
+  await expect(zoomValue).toHaveText("100%");
+  await flowViewport.focus();
+  await page.keyboard.press("=");
+  await expect(zoomValue).toHaveText("110%");
+  await page.keyboard.press("0");
+  await expect(zoomValue).toHaveText("100%");
   const coo = page.getByRole("button", { name: /COO.*Chief Operating Officer.*Omar Operations/ });
   const cpo = page.getByRole("button", { name: /CPO.*Chief People Officer.*Priya People/ });
   await expect(coo).toBeVisible();
@@ -260,10 +274,26 @@ test("Admin can explore and export the department role hierarchy without changin
   await page.getByRole("button", { name: "Overview" }).click();
   await expect(page.locator(".company-role-hierarchy")).not.toHaveClass(/company-role-hierarchy-focused/);
 
+  await page.getByRole("button", { name: "Expand all" }).click();
+  for (let step = 0; step < 5; step += 1) await page.getByRole("button", { name: "Zoom in role hierarchy" }).click();
+  await expect(zoomValue).toHaveText("150%");
+  await expect.poll(() => flowViewport.evaluate(element => element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight)).toBe(true);
+  await flowViewport.evaluate(element => {
+    element.scrollTo({ left: 0, top: 0 });
+    const dispatch = (type: string, clientX: number, clientY: number) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 42, pointerType: "mouse", clientX, clientY }));
+    dispatch("pointerdown", 300, 260);
+    dispatch("pointermove", 160, 160);
+    dispatch("pointerup", 160, 160);
+  });
+  await expect.poll(() => flowViewport.evaluate(element => element.scrollLeft > 0 || element.scrollTop > 0)).toBe(true);
+  await page.getByRole("button", { name: "Fit role hierarchy in view" }).click();
+  await expect.poll(async () => Number((await zoomValue.textContent())?.replace("%", ""))).toBeLessThanOrEqual(100);
+  await page.getByRole("button", { name: "Reset role hierarchy view" }).click();
+  await expect(zoomValue).toHaveText("100%");
+
   await page.setViewportSize({ width: 390, height: 844 });
-  const flowViewport = page.locator(".company-role-viewport");
   await expect(flowViewport).toBeVisible();
-  expect(await flowViewport.evaluate(element => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+  await expect.poll(() => flowViewport.evaluate(element => element.scrollWidth > element.clientWidth + 1)).toBe(false);
   await expect(page.locator(".company-role-departments").first()).toHaveCSS("display", "grid");
   await expect.poll(() => page.locator(".company-role-canvas .role-flowchart-line").count()).toBeGreaterThan(0);
   expect(await page.locator(".company-role-canvas .role-flowchart-line").evaluateAll(lines => lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
