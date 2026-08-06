@@ -9,6 +9,7 @@ import { QueryDocumentsDto } from './dto/query-documents.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { DocumentsService } from './documents.service';
 import { UploadDocumentDto } from './dto/upload-document.dto';
+import { documentUploadOptions } from './document-upload';
 
 @ApiTags('Documents')
 @ApiBearerAuth()
@@ -19,17 +20,7 @@ export class DocumentsController {
   @ApiConsumes('multipart/form-data')
   @AnyPermission('document.self.manage', 'document.hr.manage')
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file', {
-    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-    fileFilter: (_request, file, callback) => {
-      const allowed = new Set([
-        'application/pdf', 'image/jpeg', 'image/png', 'image/webp',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      ]);
-      callback(allowed.has(file.mimetype) ? null : new Error('Unsupported document type'), allowed.has(file.mimetype));
-    },
-  }))
+  @UseInterceptors(FileInterceptor('file', documentUploadOptions))
   upload(@Body() dto: UploadDocumentDto, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: RequestUser) {
     return this.documentsService.upload(dto, file, user);
   }

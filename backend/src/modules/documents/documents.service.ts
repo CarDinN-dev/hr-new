@@ -21,6 +21,7 @@ const documentInclude = {
 const documentSelect = {
   id: true,
   employeeId: true,
+  leaveRequestId: true,
   documentType: true,
   fileName: true,
   fileUrl: true,
@@ -227,6 +228,11 @@ export class DocumentsService {
         scopes.push({ employeeId: { notIn: rule.excludeIds } });
       }
       else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
+    }
+    for (const permission of ['leave.hr.read', 'leave.read_all'] as const) {
+      const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
+      if (rule.unrestricted) scopes.push({ leaveRequestId: { not: null }, employeeId: rule.excludeIds.length ? { notIn: rule.excludeIds } : undefined });
+      else if (rule.includeIds.length) scopes.push({ leaveRequestId: { not: null }, employeeId: { in: rule.includeIds } });
     }
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'document.self.read', AccessScopeType.SELF, user.employeeId)) {
       scopes.push({ visibility: DocumentVisibility.PUBLIC });

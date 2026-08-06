@@ -758,10 +758,26 @@ export class PayrollService {
     const days = new Map<string, Prisma.Decimal>();
     const attendance = await client.attendance.findMany({ where: { employeeId, deletedAt: null, attendanceDate: { gte: monthStart, lte: monthEnd }, status: { in: [AttendanceStatus.ABSENT, AttendanceStatus.HALF_DAY] } }, select: { attendanceDate: true, status: true } });
     for (const record of attendance) days.set(this.dateKey(record.attendanceDate), new Prisma.Decimal(record.status === AttendanceStatus.ABSENT ? '1' : '0.5'));
-    const unpaidLeaves = await client.leaveRequest.findMany({ where: { employeeId, deletedAt: null, status: LeaveRequestStatus.APPROVED, startDate: { lte: monthEnd }, endDate: { gte: monthStart }, leaveType: { isPaid: false } }, select: { startDate: true, endDate: true, totalDays: true } });
-    for (const leave of unpaidLeaves) {
+    const leaves = await client.leaveRequest.findMany({
+      where: { employeeId, deletedAt: null, status: LeaveRequestStatus.APPROVED, startDate: { lte: monthEnd }, endDate: { gte: monthStart } },
+      select: { startDate: true, endDate: true, totalDays: true, paidDays: true, leaveType: { select: { code: true, name: true } } },
+    });
+    for (const leave of leaves) {
+      const unpaidDays = leave.totalDays.minus(leave.paidDays);
+      if (unpaidDays.lte(0)) continue;
       const leaveStart = leave.startDate > monthStart ? leave.startDate : monthStart; const leaveEnd = leave.endDate < monthEnd ? leave.endDate : monthEnd;
-      const perDay = Prisma.Decimal.min(1, leave.totalDays.div(this.inclusiveDays(leave.startDate, leave.endDate)));
+      const compassionate = leave.leaveType.code === 'COMPASSIONATE' || leave.leaveType.name.trim().toLowerCase() === 'compassionate leave';
+      if (compassionate) {
+        let workingDay = 0;
+        for (const date of this.eachDay(leave.startDate, leave.endDate)) {
+          if (date.getUTCDay() > 4) continue;
+          workingDay += 1;
+          if (workingDay <= leave.paidDays.toNumber() || date < leaveStart || date > leaveEnd) continue;
+          const dateKey = this.dateKey(date); days.set(dateKey, Prisma.Decimal.max(days.get(dateKey) ?? ZERO_MONEY, 1));
+        }
+        continue;
+      }
+      const perDay = Prisma.Decimal.min(1, unpaidDays.div(this.inclusiveDays(leave.startDate, leave.endDate)));
       for (const date of this.eachDay(leaveStart, leaveEnd)) { const dateKey = this.dateKey(date); days.set(dateKey, Prisma.Decimal.max(days.get(dateKey) ?? ZERO_MONEY, perDay)); }
     }
     return days;

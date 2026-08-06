@@ -16,7 +16,7 @@ const managerSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
 } satisfies Prisma.EmployeeSelect;
 
-const employeeSummarySelect = (now: Date) => ({
+const employeeSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
   phone: true, hireDate: true, employmentStatus: true, departmentId: true, positionId: true,
   managerId: true, lineManagerId: true, profilePhoto: true, version: true, createdAt: true, updatedAt: true,
@@ -28,15 +28,7 @@ const employeeSummarySelect = (now: Date) => ({
   lineManager: {
     select: managerSummarySelect,
   },
-  user: {
-    select: {
-      roles: {
-        where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }], role: { isActive: true } },
-        select: { role: { select: { code: true } } },
-      },
-    },
-  },
-}) satisfies Prisma.EmployeeSelect;
+} satisfies Prisma.EmployeeSelect;
 
 @Injectable()
 export class EmployeesService {
@@ -482,7 +474,7 @@ export class EmployeesService {
   }
 
   private projection(user: RequestUser, self: boolean, employeeId?: string): Prisma.EmployeeSelect {
-    const select: Prisma.EmployeeSelect = { ...employeeSummarySelect(new Date()) };
+    const select: Prisma.EmployeeSelect = { ...employeeSummarySelect };
     if (self && user.permissions.includes('employee.self.read')) {
       Object.assign(select, {
         dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,
@@ -494,6 +486,14 @@ export class EmployeesService {
         dateOfBirth: true, gender: true, address: true, emergencyContactName: true, emergencyContactPhone: true,
         profile: true, benefits: true,
         credentials: { where: { deletedAt: null } }, education: { where: { deletedAt: null } },
+        user: {
+          select: {
+            roles: {
+              where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }], role: { isActive: true } },
+              select: { role: { select: { code: true } } },
+            },
+          },
+        },
       });
     }
     const compensationRule = this.authorization.scopeRule(user, 'payroll.read_compensation', AccessScopeType.ALL_EMPLOYEES);

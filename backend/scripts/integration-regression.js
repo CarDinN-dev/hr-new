@@ -218,10 +218,11 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     assert.equal((await api('/payroll/runs', {}, sessions[role])).status, 200);
     assert.equal((await mutate('/payroll/runs', sessions[role], { year: 2098, month: 6 })).status, 403);
   }
-  for (const role of ['EMPLOYEE', 'ADMIN', 'SUPER_ADMIN']) {
+  for (const role of ['EMPLOYEE', 'ADMIN']) {
     assert.equal((await api('/payroll/runs', {}, sessions[role])).status, 403);
     assert.equal((await mutate('/payroll/runs', sessions[role], { year: 2098, month: 6 })).status, 403);
   }
+  assert.equal((await api('/payroll/runs', {}, sessions.SUPER_ADMIN)).status, 200);
 
   const managerEmployees = await api('/employees?limit=100', {}, sessions.LINE_MANAGER);
   assert.equal(managerEmployees.status, 200);
@@ -395,7 +396,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(balanceAfterApproval.status, 200, JSON.stringify(balanceAfterApproval.payload));
   const balanceRecord = balanceAfterApproval.data.find((record) => record.leaveTypeId === annualLeave.id);
   assert.ok(balanceRecord, `Approved balance missing from API response: ${JSON.stringify(balanceAfterApproval.payload)}`);
-  assert.equal(String(balanceRecord.usedDays), '2');
+  assert.equal(String(balanceRecord.usedDays), '3');
   assert.equal(String(balanceRecord.pendingDays), '0');
 
   const cpoLeave = await mutate('/leave/submit', sessions.CPO, {
@@ -581,6 +582,17 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   }, systemAdmin)).status, 409);
   for (const [kind, localLoginEnabled] of [['microsoft-only', false], ['dual-login', true]]) {
     const email = `system.${kind}.${Date.now()}@example.invalid`;
+    await prisma.employee.create({
+      data: {
+        employeeCode: `MS-${kind}-${Date.now()}`,
+        firstName: 'Microsoft',
+        lastName: 'Provisioning',
+        email,
+        hireDate: new Date('2026-01-01T00:00:00.000Z'),
+        salary: '10000.00',
+        departmentId: testDepartment.id,
+      },
+    });
     const result = await api('/system/users', {
       method: 'POST', body: {
         email, password: localLoginEnabled ? localUserPassword : undefined, localLoginEnabled, microsoftLoginEnabled: true,

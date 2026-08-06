@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { CandidateStage, EosStatus, ExpenseStatus, RecruitmentJobStatus, TripStatus } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDate, IsDecimal, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { IsBoolean, IsDate, IsDecimal, IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Length, Max, Min, ValidateNested } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 const asDecimal = ({ value }: { value: unknown }) => String(value);
@@ -63,7 +63,51 @@ export class CreateCandidateDto {
   @ApiProperty() @Type(() => Date) @IsDate() appliedOn: Date;
 }
 
-export class UpdateCandidateDto extends PartialType(CreateCandidateDto) {}
+export class InterviewAssessmentDto {
+  @IsOptional() @IsString() @Length(1, 200) candidateName?: string;
+  @IsOptional() @IsString() @Length(1, 200) position?: string;
+  @IsOptional() @IsString() @Length(1, 200) department?: string;
+  @IsOptional() @Type(() => Date) @IsDate() date?: Date;
+  @IsOptional() @IsString() @Length(1, 40) time?: string;
+  @IsOptional() @IsString() @Length(1, 200) venue?: string;
+  @IsOptional() @IsString() @Length(1, 200) hiringName?: string;
+  @IsOptional() @IsString() @Length(1, 200) hiringDepartment?: string;
+  @IsOptional() @IsString() @Length(1, 200) hiringPosition?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) greetingRating?: number;
+  @IsOptional() @IsString() @Length(1, 2000) greetingRemarks?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) backgroundRating?: number;
+  @IsOptional() @IsString() @Length(1, 2000) backgroundRemarks?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) technicalRating?: number;
+  @IsOptional() @IsString() @Length(1, 2000) technicalRemarks?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) leadershipRating?: number;
+  @IsOptional() @IsString() @Length(1, 2000) leadershipRemarks?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) overallRating?: number;
+  @IsOptional() @IsString() @Length(1, 500) visaStatus?: string;
+  @IsOptional() @IsString() @Length(1, 500) drivingLicense?: string;
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) currentSalary?: number;
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) expectedSalary?: number;
+  @IsOptional() @Type(() => Date) @IsDate() expectedJoiningDate?: Date;
+  @IsOptional() @IsString() @Length(1, 2000) interviewerComments?: string;
+  @IsOptional() @IsString() @Length(1, 2000) managerComments?: string;
+}
+
+export class OfferDetailsDto {
+  @IsOptional() @IsString() @Length(1, 200) candidateName?: string;
+  @IsOptional() @IsString() @Length(1, 200) designation?: string;
+  @IsOptional() @IsString() @Length(1, 200) lineOfBusiness?: string;
+  @IsOptional() @Type(() => Date) @IsDate() issueDate?: Date;
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) basic?: number;
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) hra?: number;
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) conveyance?: number;
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) otherAllowance?: number;
+}
+
+export class UpdateCandidateDto extends PartialType(CreateCandidateDto) {
+  @ApiPropertyOptional({ type: InterviewAssessmentDto })
+  @IsOptional() @ValidateNested() @Type(() => InterviewAssessmentDto) interviewAssessment?: InterviewAssessmentDto;
+  @ApiPropertyOptional({ type: OfferDetailsDto })
+  @IsOptional() @ValidateNested() @Type(() => OfferDetailsDto) offerDetails?: OfferDetailsDto;
+}
 
 export class TransitionCandidateDto {
   @ApiProperty({ enum: CandidateStage }) @IsEnum(CandidateStage) stage: CandidateStage;

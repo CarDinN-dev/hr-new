@@ -14,6 +14,7 @@ import {
   EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
   TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
+import { interviewAssessmentPdf, ndaPdf, offerLetterPdf } from './recruitment-pdf';
 
 const employeeSummary = { id: true, employeeCode: true, firstName: true, lastName: true, departmentId: true, managerId: true, lineManagerId: true };
 
@@ -171,20 +172,41 @@ export class OperationsService {
   async updateCandidate(id: string, dto: UpdateCandidateDto, user: RequestUser) {
     this.assertSystemScope(user, 'recruitment.manage', id);
     return this.transaction(async (tx) => {
-      const existing = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
+      const existing = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
       if (!existing) throw new NotFoundException('Candidate not found');
+      let job = existing.job;
       if (dto.jobId) {
-        const job = await tx.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null } });
-        if (!job) throw new NotFoundException('Open recruitment job not found');
+        const nextJob = await tx.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null }, include: { department: true } });
+        if (!nextJob) throw new NotFoundException('Open recruitment job not found');
+        job = nextJob;
       }
+      const { interviewAssessment, offerDetails, ...candidateDetails } = dto;
+      const candidateName = dto.name ?? existing.name;
+      const assessmentSnapshot = this.jsonObject(existing.interviewAssessment);
+      const offerSnapshot = this.jsonObject(existing.offerDetails);
       const updated = await tx.recruitmentCandidate.update({
         where: { id },
         data: {
-          ...dto,
+          ...candidateDetails,
           email: dto.email?.trim().toLowerCase(),
-          rating: dto.rating === undefined ? undefined : nonNegativeMoney(dto.rating, 'rating'),
+          rating: dto.rating === undefined
+            ? (interviewAssessment?.overallRating === undefined ? undefined : new Prisma.Decimal(interviewAssessment.overallRating))
+            : nonNegativeMoney(dto.rating, 'rating'),
+          interviewAssessment: interviewAssessment ? {
+            ...assessmentSnapshot, ...this.interviewJson(interviewAssessment),
+            candidateName: typeof assessmentSnapshot.candidateName === 'string' ? assessmentSnapshot.candidateName : candidateName,
+            position: typeof assessmentSnapshot.position === 'string' ? assessmentSnapshot.position : job.title,
+            department: typeof assessmentSnapshot.department === 'string' ? assessmentSnapshot.department : job.department?.name ?? '',
+          } : undefined,
+          offerDetails: offerDetails ? {
+            ...offerSnapshot, ...this.offerJson(offerDetails),
+            candidateName: typeof offerSnapshot.candidateName === 'string' ? offerSnapshot.candidateName : candidateName,
+            designation: typeof offerSnapshot.designation === 'string' ? offerSnapshot.designation : job.title,
+            lineOfBusiness: typeof offerSnapshot.lineOfBusiness === 'string' ? offerSnapshot.lineOfBusiness : job.department?.name ?? '',
+          } : undefined,
           version: { increment: 1 },
         },
+        include: { job: { include: { department: true } }, employee: { select: employeeSummary } },
       });
       await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentCandidate', id, 'Candidate details updated');
       return updated;
@@ -194,7 +216,7 @@ export class OperationsService {
   async transitionCandidate(id: string, dto: TransitionCandidateDto, user: RequestUser) {
     this.assertSystemScope(user, 'recruitment.manage', id);
     return this.transaction(async (tx) => {
-      const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null } });
+      const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
       if (!candidate) throw new NotFoundException('Candidate not found');
       this.assertExpectedVersion(candidate.version, dto.expectedVersion, 'Candidate');
       const order: CandidateStage[] = [CandidateStage.APPLIED, CandidateStage.SCREENING, CandidateStage.INTERVIEW, CandidateStage.OFFER, CandidateStage.HIRED];
@@ -212,7 +234,20 @@ export class OperationsService {
         if (!employee) throw new NotFoundException('Employee not found');
       }
       const updated = await tx.recruitmentCandidate.update({
-        where: { id }, data: { stage: dto.stage, employeeId: dto.stage === CandidateStage.HIRED ? dto.employeeId : candidate.employeeId, version: { increment: 1 } },
+        where: { id }, data: {
+          stage: dto.stage,
+          employeeId: dto.stage === CandidateStage.HIRED ? dto.employeeId : candidate.employeeId,
+          interviewAssessment: dto.stage === CandidateStage.INTERVIEW && !candidate.interviewAssessment ? {
+            candidateName: candidate.name, position: candidate.job.title, department: candidate.job.department?.name ?? '',
+            date: this.day(new Date()).toISOString(), time: '', venue: '', hiringName: '', hiringDepartment: candidate.job.department?.name ?? '', hiringPosition: '',
+          } : undefined,
+          offerDetails: dto.stage === CandidateStage.OFFER && !candidate.offerDetails ? {
+            candidateName: candidate.name, designation: candidate.job.title, lineOfBusiness: candidate.job.department?.name ?? '',
+            issueDate: this.day(new Date()).toISOString(), basic: 0, hra: 0, conveyance: 0, otherAllowance: 0,
+          } : undefined,
+          version: { increment: 1 },
+        },
+        include: { job: { include: { department: true } }, employee: { select: employeeSummary } },
       });
       if (linkingHiredEmployee) {
         await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'RecruitmentCandidate', entityId: id, summary: 'Employee linked to hired candidate', changes: [{ field: 'employeeId', previousValue: candidate.employeeId, nextValue: dto.employeeId }] });
@@ -224,6 +259,30 @@ export class OperationsService {
   }
 
   removeCandidate(id: string, user: RequestUser) { this.assertSystemScope(user, 'recruitment.manage', id); return this.softRemove('recruitmentCandidate', 'RecruitmentCandidate', id, user); }
+
+  async interviewAssessmentDocument(id: string, user: RequestUser) {
+    const candidate = await this.documentCandidate(id, user);
+    if (!candidate.interviewAssessment) throw new BadRequestException('Interview assessment has not been initialized');
+    const buffer = interviewAssessmentPdf({ ...candidate, interviewAssessment: this.jsonObject(candidate.interviewAssessment), offerDetails: this.jsonObject(candidate.offerDetails) });
+    await this.audit.record(this.prisma, user, { action: AuditAction.DOWNLOAD, entityType: 'RecruitmentCandidate', entityId: id, summary: 'Interview assessment PDF downloaded' });
+    return { buffer, fileName: `interview-assessment-${this.fileName(candidate.name)}.pdf` };
+  }
+
+  async offerLetterDocument(id: string, user: RequestUser) {
+    const candidate = await this.documentCandidate(id, user);
+    if (!candidate.offerDetails) throw new BadRequestException('Offer details have not been initialized');
+    const buffer = offerLetterPdf({ ...candidate, interviewAssessment: this.jsonObject(candidate.interviewAssessment), offerDetails: this.jsonObject(candidate.offerDetails) });
+    await this.audit.record(this.prisma, user, { action: AuditAction.DOWNLOAD, entityType: 'RecruitmentCandidate', entityId: id, summary: 'Offer letter PDF downloaded' });
+    return { buffer, fileName: `offer-letter-${this.fileName(candidate.name)}.pdf` };
+  }
+
+  async ndaDocument(id: string, user: RequestUser) {
+    const candidate = await this.documentCandidate(id, user);
+    if (!candidate.offerDetails) throw new BadRequestException('Offer details have not been initialized');
+    const buffer = ndaPdf({ ...candidate, interviewAssessment: this.jsonObject(candidate.interviewAssessment), offerDetails: this.jsonObject(candidate.offerDetails) });
+    await this.audit.record(this.prisma, user, { action: AuditAction.DOWNLOAD, entityType: 'RecruitmentCandidate', entityId: id, summary: 'NDA PDF downloaded' });
+    return { buffer, fileName: `nda-${this.fileName(candidate.name)}.pdf` };
+  }
 
   async createEos(dto: CreateEosDto, user: RequestUser) {
     await this.authorization.assertEmployeeScope(user, dto.employeeId, { all: 'eos.manage' });
@@ -425,6 +484,33 @@ export class OperationsService {
   }
 
   private day(value: Date) { return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())); }
+
+  private interviewJson(value: NonNullable<UpdateCandidateDto['interviewAssessment']>): Prisma.InputJsonObject {
+    return {
+      ...value,
+      date: value.date?.toISOString(),
+      expectedJoiningDate: value.expectedJoiningDate?.toISOString(),
+    } as Prisma.InputJsonObject;
+  }
+
+  private offerJson(value: NonNullable<UpdateCandidateDto['offerDetails']>): Prisma.InputJsonObject {
+    return { ...value, issueDate: value.issueDate?.toISOString() } as Prisma.InputJsonObject;
+  }
+
+  private jsonObject(value: Prisma.JsonValue | null | undefined) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, Prisma.JsonValue> : {};
+  }
+
+  private async documentCandidate(id: string, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.read', id);
+    const candidate = await this.prisma.recruitmentCandidate.findFirst({
+      where: { id, deletedAt: null }, include: { job: { include: { department: true } } },
+    });
+    if (!candidate) throw new NotFoundException('Candidate not found');
+    return candidate;
+  }
+
+  private fileName(value: string) { return value.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'candidate'; }
 
   private paginated(delegate: any, query: EmployeeScopedQueryDto | QueryRecruitmentDto, where: object, include: object) {
     const page = query.page ?? 1; const limit = query.limit ?? 20;

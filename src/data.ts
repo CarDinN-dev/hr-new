@@ -159,7 +159,20 @@ export type RecruitmentCandidate = {
   notes: string;
   appliedOn: string;
   employeeId?: string;
+  interviewAssessment?: InterviewAssessment;
+  offerDetails?: OfferDetails;
 };
+
+export type InterviewAssessment = {
+  candidateName?: string; position?: string; department?: string;
+  date?: string; time?: string; venue?: string; hiringName?: string; hiringDepartment?: string; hiringPosition?: string;
+  greetingRating?: number; greetingRemarks?: string; backgroundRating?: number; backgroundRemarks?: string;
+  technicalRating?: number; technicalRemarks?: string; leadershipRating?: number; leadershipRemarks?: string; overallRating?: number;
+  visaStatus?: string; drivingLicense?: string; currentSalary?: number; expectedSalary?: number; expectedJoiningDate?: string;
+  interviewerComments?: string; managerComments?: string;
+};
+
+export type OfferDetails = { candidateName?: string; designation?: string; lineOfBusiness?: string; issueDate?: string; basic?: number; hra?: number; conveyance?: number; otherAllowance?: number };
 
 export type EosRecord = {
   id: string;
@@ -210,7 +223,7 @@ export type HrSettings = {
     accountPhoto?: string;
   };
   departments: string[];
-  leaveTypes: Array<{ id: string; name: string; days: number }>;
+  leaveTypes: Array<{ id: string; name: string; code: string; days: number; isPaid: boolean; requiresAttachment: boolean }>;
   documentSeq: number;
   workdayHours: number;
   halfDayHours: number;
@@ -286,8 +299,6 @@ export const navItems = [
   "Employees",
   "Attendance",
   "Leave",
-  "Business Trips",
-  "Expenses",
   "Loans",
   "Payroll",
   "Recruitment",
@@ -395,10 +406,10 @@ export function defaultState(): HrState {
       },
       departments: ["Sales", "Service", "Warehouse", "Finance", "Projects", "Procurement", "Human Resources", "Quality", "Management"],
       leaveTypes: [
-        { id: "lt-annual", name: "Annual leave", days: 30 },
-        { id: "lt-sick", name: "Sick leave", days: 14 },
-        { id: "lt-emergency", name: "Emergency leave", days: 3 },
-        { id: "lt-unpaid", name: "Unpaid leave", days: 0 }
+        { id: "lt-annual", name: "Annual leave", code: "ANNUAL", days: 30, isPaid: true, requiresAttachment: false },
+        { id: "lt-sick", name: "Sick leave", code: "SICK", days: 14, isPaid: true, requiresAttachment: true },
+        { id: "lt-emergency", name: "Emergency leave", code: "EMERGENCY", days: 3, isPaid: true, requiresAttachment: false },
+        { id: "lt-unpaid", name: "Unpaid leave", code: "UNPAID", days: 0, isPaid: false, requiresAttachment: false }
       ],
       documentSeq: 0,
       workdayHours: 8,

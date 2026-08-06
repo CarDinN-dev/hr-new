@@ -248,10 +248,10 @@ async function syncRecruitment(before: HrState, after: HrState, departmentIds: M
     const old = oldCandidates.get(candidate.id);
     let nextVersion = old?.version;
     const jobId = serverJobIds.get(candidate.jobId) ?? candidate.jobId;
-    const payload = { jobId, name: candidate.name, email: candidate.email, phone: candidate.phone || undefined, rating: String(candidate.rating), notes: candidate.notes || undefined, appliedOn: candidate.appliedOn };
+    const payload = { jobId, name: candidate.name, email: candidate.email, phone: candidate.phone || undefined, rating: String(candidate.rating), notes: candidate.notes || undefined, appliedOn: candidate.appliedOn, interviewAssessment: candidate.interviewAssessment, offerDetails: candidate.offerDetails };
     if (!old) await request("/recruitment/candidates", "POST", payload);
     else {
-      const oldPayload = { jobId: old.jobId, name: old.name, email: old.email, phone: old.phone || undefined, rating: String(old.rating), notes: old.notes || undefined, appliedOn: old.appliedOn };
+      const oldPayload = { jobId: old.jobId, name: old.name, email: old.email, phone: old.phone || undefined, rating: String(old.rating), notes: old.notes || undefined, appliedOn: old.appliedOn, interviewAssessment: old.interviewAssessment, offerDetails: old.offerDetails };
       if (!same(oldPayload, payload)) await request(`/recruitment/candidates/${candidate.id}`, "PATCH", payload);
     }
     if (old && old.stage !== candidate.stage) {
@@ -302,8 +302,8 @@ async function syncSettings(before: HrState, after: HrState, departments: Backen
     const backendTypes = new Map(leaveTypes.map(row => [String(row.id), row]));
     for (const type of after.settings.leaveTypes) {
       const old = backendTypes.get(type.id);
-      if (!old) await request("/leave/types", "POST", { name: type.name, code: uniqueCode(type.name, [...backendTypes.values()]), annualAllowanceDays: type.days, isPaid: !type.name.toLowerCase().includes("unpaid") });
-      else if (String(old.name) !== type.name || Number(old.annualAllowanceDays) !== type.days) await request(`/leave/types/${type.id}`, "PATCH", { name: type.name, annualAllowanceDays: type.days });
+      if (!old) await request("/leave/types", "POST", { name: type.name, code: type.code || uniqueCode(type.name, [...backendTypes.values()]), annualAllowanceDays: type.days, isPaid: type.isPaid, requiresAttachment: type.requiresAttachment });
+      else if (String(old.name) !== type.name || Number(old.annualAllowanceDays) !== type.days) await request(`/leave/types/${type.id}`, "PATCH", { name: type.name, annualAllowanceDays: type.days, isPaid: type.isPaid, requiresAttachment: type.requiresAttachment });
     }
     for (const [id] of backendTypes) if (!after.settings.leaveTypes.some(type => type.id === id)) await request(`/leave/types/${id}`, "DELETE");
   }

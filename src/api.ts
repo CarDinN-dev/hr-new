@@ -288,7 +288,9 @@ export async function loadBackendState(current: HrState, session: BackendSession
       candidates: candidates.map(item => ({
         id: String(item.id), version: Number(item.version ?? 1), jobId: String(item.jobId), name: String(item.name || ""), email: String(item.email || ""), phone: String(item.phone || ""),
         stage: titleCase(String(item.stage)) as HrState["candidates"][number]["stage"], rating: Number(item.rating || 0), notes: String(item.notes || ""),
-        appliedOn: dateOnly(String(item.appliedOn || "")), employeeId: item.employeeId ? String(item.employeeId) : undefined
+        appliedOn: dateOnly(String(item.appliedOn || "")), employeeId: item.employeeId ? String(item.employeeId) : undefined,
+        interviewAssessment: jsonObject(item.interviewAssessment) as HrState["candidates"][number]["interviewAssessment"],
+        offerDetails: jsonObject(item.offerDetails) as HrState["candidates"][number]["offerDetails"]
       })),
       eosRecords: eos.map(item => ({
         id: String(item.id), version: Number(item.version ?? 1), employeeId: String(item.employeeId), asOf: dateOnly(String(item.asOf || "")), reason: String(item.reason || ""),
@@ -306,7 +308,10 @@ export async function loadBackendState(current: HrState, session: BackendSession
         organizationVersion: Number(settings?.version ?? current.settings.organizationVersion),
         company,
         departments: departmentNames.length ? departmentNames : current.settings.departments,
-        leaveTypes: leaveTypes.map(item => ({ id: String(item.id), name: String(item.name), days: Number(item.annualAllowanceDays || 0) })),
+        leaveTypes: leaveTypes.map(item => ({
+          id: String(item.id), name: String(item.name), code: String(item.code || ""), days: Number(item.annualAllowanceDays || 0),
+          isPaid: Boolean(item.isPaid), requiresAttachment: Boolean(item.requiresAttachment)
+        })),
         workdayHours: Number(settings?.workdayHours || current.settings.workdayHours),
         halfDayHours: Number(settings?.halfDayHours || current.settings.halfDayHours),
         loanDeductionCap: { type: settings?.loanCapType === "PERCENT" ? "Percent" : "Amount", value: Number(settings?.loanCapValue || 0) },
@@ -324,6 +329,10 @@ export async function logoutBackend(session: BackendSession) {
     method: "POST",
     csrfToken: session.csrfToken
   });
+}
+
+function jsonObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 export async function apiList<T>(path: string) {
@@ -363,7 +372,8 @@ export async function apiDownload(path: string, init: RequestInit & { csrfToken?
     throw new ApiError(message, response.status);
   }
   const disposition = response.headers.get("content-disposition") || "";
-  const fileName = disposition.match(/filename="?([^";]+)"?/i)?.[1] || "download";
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const fileName = encodedName ? decodeURIComponent(encodedName) : disposition.match(/filename="?([^";]+)"?/i)?.[1] || "download";
   return { blob: await response.blob(), fileName };
 }
 
@@ -540,7 +550,7 @@ function mapEmployeeDetails(employee: BackendEmployee): Record<string, string> {
     Nationality: value(profile, "nationality"), "RP/ID Number": value(qid, "number"), "RP/ID Profession": value(profile, "residenceProfession"),
     "QID Expiry Date": dateOnly(value(qid, "expiryDate")), "Visa Type": value(profile, "visaType"), "Hire Type": value(profile, "hireType"),
     "Confirmation Date": dateOnly(value(profile, "confirmationDate")), "ESB Date": dateOnly(value(profile, "esbDate")), "Marital Status": value(profile, "maritalStatus"),
-    "Office Mobile No.": value(profile, "officeMobile"), "Personal Mobile No.": value(profile, "personalMobile"), "No. of Dependents": value(profile, "dependents"),
+    "Office Mobile No.": value(profile, "officeMobile"), "Personal Mobile No.": value(profile, "personalMobile") || employee.phone || "", "No. of Dependents": value(profile, "dependents"),
     "Blood Group": value(profile, "bloodGroup"), "Local Building/Villa #": value(profile, "localBuilding"), "Local Street #": value(profile, "localStreet"),
     "Local Zone #": value(profile, "localZone"), "International Apartment": value(profile, "internationalApartment"), "International Building": value(profile, "internationalBuilding"),
     "International Floor": value(profile, "internationalFloor"), "International Street": value(profile, "internationalStreet"), "International State": value(profile, "internationalState"),

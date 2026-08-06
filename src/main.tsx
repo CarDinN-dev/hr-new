@@ -55,7 +55,9 @@ import {
   type EmployeeExpense,
   type EmployeeLoan,
   type HrState,
+  type InterviewAssessment,
   type NavItem,
+  type OfferDetails,
   type PdfTemplate,
   type RecruitmentCandidate,
   type RecruitmentJob
@@ -96,6 +98,7 @@ import {
   backendSessionKey,
   authorizationExpiredEvent,
   ApiError,
+  apiDownload,
   apiList,
   apiRequest,
   hasAllPermissions,
@@ -175,8 +178,6 @@ const navIcon = {
   Employees: UsersRound,
   Attendance: CalendarCheck,
   Leave: BriefcaseBusiness,
-  "Business Trips": BriefcaseBusiness,
-  Expenses: WalletCards,
   Loans: HandCoins,
   Payroll: WalletCards,
   Recruitment: UserRoundPlus,
@@ -578,8 +579,6 @@ function App() {
           {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
-          {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
-          {nav === "Expenses" && <Expenses state={state} setState={setState} notify={notify} />}
           {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canOverrideLimit={canManageLoans} />}
           {nav === "Payroll" && <PayrollWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
@@ -691,29 +690,17 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 
 function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void>; onOpenLeave: () => void }) {
   const employee = state.employees.find(item => item.id === session.employeeId);
-  const [basic, setBasic] = useState({ firstName: "", lastName: "", phone: "", address: "", emergencyContactName: "", emergencyContactPhone: "" });
-
-  useEffect(() => {
-    if (!employee) return;
-    setBasic({
-      firstName: employee.fields["First Name"] || "", lastName: employee.fields["Last Name"] || "",
-      phone: employee.fields["Personal Mobile No."] || "", address: employee.fields["Local Building/Villa #"] || "",
-      emergencyContactName: employee.fields["Emergency Contact Name"] || "", emergencyContactPhone: employee.fields["Emergency Contact Mobile No."] || ""
-    });
-  }, [employee?.id]);
-
-  async function saveBasic() {
-    await apiRequest("/employees/me/basic", { method: "PATCH", csrfToken: session.csrfToken, body: JSON.stringify(basic) });
-    await refreshWorkspace();
-    notify("Your profile was updated.");
-  }
 
   return <div className="dashboard-grid">
     <ProfilePhotoPanel employee={employee} session={session} notify={notify} refreshWorkspace={refreshWorkspace} />
-    <section className="panel span-2"><div className="panel-head"><div><h3>Personal details</h3><span>Only the fields you can maintain yourself are editable.</span></div></div>
+    <section className="panel span-2"><div className="panel-head"><div><h3>Personal information</h3><span>HR maintains these details in Employees.</span></div></div>
       {!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
-        {(["firstName", "lastName", "phone", "address", "emergencyContactName", "emergencyContactPhone"] as const).map(key => <label key={key}>{({ firstName: "First name", lastName: "Last name", phone: "Phone", address: "Address", emergencyContactName: "Emergency contact", emergencyContactPhone: "Emergency phone" } as const)[key]}<input value={basic[key]} onChange={event => setBasic(value => ({ ...value, [key]: event.target.value }))} /></label>)}
-        {hasPermission(session, "employee.self.update_basic") && <div className="form-actions"><button className="primary" type="button" onClick={() => void saveBasic().catch(error => notify(errorMessage(error)))}>Save personal details</button></div>}
+        {[
+          ["Name", employeeName(employee)], ["Employee ID", employee.fields["Employee Code"]], ["Designation", employee.fields.Designation],
+          ["Reporting manager", employee.fields["Reporting Manager Employee Code/Name"] || employee.fields["Line Manager Employee Code/Name"]],
+          ["Department", employee.fields.Department], ["Phone number", employee.fields["Personal Mobile No."] || employee.fields["Office Mobile No."]],
+          ["Email address", employee.fields["E-Mail ID (Work)"]]
+        ].map(([label, value]) => <label key={label}>{label}<input value={value || "-"} readOnly aria-readonly="true" /></label>)}
       </div>}
     </section>
     <MyLeaveStatusPanel session={session} onOpenLeave={onOpenLeave} />
@@ -884,8 +871,6 @@ function pageDescription(nav: NavItem) {
     Employees: "Employee records.",
     Attendance: "Daily attendance and monthly totals.",
     Leave: "Leave requests and balances.",
-    "Business Trips": "Trip requests, costs and advances.",
-    Expenses: "Employee expenses and reimbursements.",
     Loans: "Employee loans and payroll deductions.",
     Payroll: "Payslips and payroll exports.",
     Recruitment: "Job openings and candidates.",
@@ -978,6 +963,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
                   <div className="employee-card-details">
                     <span><b>Department</b>{employee.fields.Department || "-"}</span>
                     <span><b>Manager</b>{employee.fields["Reporting Manager Employee Code/Name"] || "-"}</span>
+                    <span><b>Phone</b>{employee.fields["Personal Mobile No."] || employee.fields["Office Mobile No."] || "-"}</span>
                     <span><b>Login email</b>{employee.fields["E-Mail ID (Work)"] || "-"}</span>
                     <span><b>Joined</b>{formatDate(employee.fields["Joining Date"])}</span>
                     {canViewSalary && <span><b>Total pay</b>{formatMoney(salary.total, state.settings.company.currency)}</span>}
@@ -1775,6 +1761,11 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [candidateStage, setCandidateStage] = useState<RecruitmentCandidate["stage"]>("Applied");
   const [candidateRating, setCandidateRating] = useState("0");
   const [candidateNotes, setCandidateNotes] = useState("");
+  const [assessmentCandidateId, setAssessmentCandidateId] = useState("");
+  const [assessmentDraft, setAssessmentDraft] = useState<InterviewAssessment>({});
+  const [offerCandidateId, setOfferCandidateId] = useState("");
+  const [offerDraft, setOfferDraft] = useState<OfferDetails>({});
+  const [savingStageDocument, setSavingStageDocument] = useState(false);
   const pipeline = candidatePipeline(state.candidates);
   const openJobs = state.jobs.filter(job => job.status === "Open");
   const openPositions = openJobs.reduce((sum, job) => sum + job.openings, 0);
@@ -1862,6 +1853,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   function saveCandidate() {
     if (!state.jobs.length) return notify("Add a job opening first.");
     if (!candidateName.trim()) return notify("Candidate name is required.");
+    const existingCandidate = state.candidates.find(candidate => candidate.id === editingCandidateId);
     const record: RecruitmentCandidate = {
       id: editingCandidateId || newId(),
       version: editingCandidateId ? state.candidates.find(candidate => candidate.id === editingCandidateId)?.version ?? 1 : 1,
@@ -1872,8 +1864,10 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       stage: candidateStage,
       rating: Math.min(5, Math.max(0, Number(candidateRating) || 0)),
       notes: candidateNotes.trim(),
-      appliedOn: editingCandidateId ? state.candidates.find(candidate => candidate.id === editingCandidateId)?.appliedOn || todayISO() : todayISO(),
-      employeeId: state.candidates.find(candidate => candidate.id === editingCandidateId)?.employeeId
+      appliedOn: editingCandidateId ? existingCandidate?.appliedOn || todayISO() : todayISO(),
+      employeeId: existingCandidate?.employeeId,
+      interviewAssessment: existingCandidate?.interviewAssessment,
+      offerDetails: existingCandidate?.offerDetails
     };
 
     setState(prev => ({
@@ -1898,6 +1892,48 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     setState(prev => hireCandidateAsEmployee(prev, candidate.id));
     notify(`${candidate.name} added as an employee. Set salary details in Employees.`);
     setNav("Employees");
+  }
+
+  function openAssessment(candidate: RecruitmentCandidate) {
+    const job = state.jobs.find(item => item.id === candidate.jobId);
+    setAssessmentCandidateId(candidate.id);
+    setAssessmentDraft(candidate.interviewAssessment ?? { date: todayISO(), hiringDepartment: job?.dept || "" });
+  }
+
+  function openOffer(candidate: RecruitmentCandidate) {
+    const job = state.jobs.find(item => item.id === candidate.jobId);
+    setOfferCandidateId(candidate.id);
+    setOfferDraft(candidate.offerDetails ?? { issueDate: todayISO(), basic: 0, hra: 0, conveyance: 0, otherAllowance: 0, lineOfBusiness: job?.dept || "" });
+  }
+
+  async function saveAssessment() {
+    if (!assessmentCandidateId) return;
+    setSavingStageDocument(true);
+    try {
+      await apiRequest(`/recruitment/candidates/${assessmentCandidateId}`, { method: "PATCH", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ interviewAssessment: assessmentDraft }) });
+      setState(previous => ({ ...previous, candidates: previous.candidates.map(candidate => candidate.id === assessmentCandidateId ? { ...candidate, rating: assessmentDraft.overallRating ?? candidate.rating, interviewAssessment: assessmentDraft } : candidate) }));
+      notify("Interview assessment saved.");
+    } catch (error) { notify(errorMessage(error)); }
+    finally { setSavingStageDocument(false); }
+  }
+
+  async function saveOffer() {
+    if (!offerCandidateId) return;
+    setSavingStageDocument(true);
+    try {
+      await apiRequest(`/recruitment/candidates/${offerCandidateId}`, { method: "PATCH", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ offerDetails: offerDraft }) });
+      setState(previous => ({ ...previous, candidates: previous.candidates.map(candidate => candidate.id === offerCandidateId ? { ...candidate, offerDetails: offerDraft } : candidate) }));
+      notify("Offer details saved.");
+    } catch (error) { notify(errorMessage(error)); }
+    finally { setSavingStageDocument(false); }
+  }
+
+  async function downloadRecruitment(candidate: RecruitmentCandidate, document: "interview-assessment" | "offer-letter" | "nda") {
+    try {
+      const file = await apiDownload(`/recruitment/candidates/${candidate.id}/${document}.pdf`);
+      downloadBlob(file.blob, file.fileName);
+      notify(`${file.fileName} downloaded.`);
+    } catch (error) { notify(errorMessage(error)); }
   }
 
   return <section className="stack recruitment-workspace">
@@ -1971,18 +2007,55 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
                 {candidate.rating > 0 && <em>Rating: {candidate.rating}/5</em>}
                 {canManage ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
                 {candidate.notes && <small>{candidate.notes}</small>}
-                {canManage && <div className="row-actions">
-                  {candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : canHire ? <button className="primary" onClick={() => addAsEmployee(candidate)}>Add as employee</button> : null)}
-                  <button onClick={() => editCandidate(candidate)}>Edit</button>
-                  <button onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete</button>
-                </div>}
+                <div className="row-actions">
+                  {candidate.stage === "Interview" && candidate.interviewAssessment && (canManage ? <button className="primary" onClick={() => openAssessment(candidate)}>Assessment</button> : <button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button>)}
+                  {candidate.stage === "Interview" && !candidate.interviewAssessment && <small>Preparing assessment…</small>}
+                  {candidate.stage === "Offer" && candidate.offerDetails && (canManage ? <button className="primary" onClick={() => openOffer(candidate)}>Offer documents</button> : <><button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button><button onClick={() => void downloadRecruitment(candidate, "offer-letter")}>Offer PDF</button><button onClick={() => void downloadRecruitment(candidate, "nda")}>NDA PDF</button></>)}
+                  {candidate.stage === "Offer" && !candidate.offerDetails && <small>Preparing offer…</small>}
+                  {canManage && <>{candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : canHire ? <button className="primary" onClick={() => addAsEmployee(candidate)}>Add as employee</button> : null)}<button onClick={() => editCandidate(candidate)}>Edit</button><button onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete</button></>}
+                </div>
               </article>;
             }) : <div className="empty compact">No {stage.toLowerCase()} candidates.</div>}
           </div>;
         })}
       </div>
     </div>
+    {assessmentCandidateId && (() => { const candidate = state.candidates.find(item => item.id === assessmentCandidateId); const job = candidate && state.jobs.find(item => item.id === candidate.jobId); return candidate ? <InterviewAssessmentDialog candidate={candidate} job={job} value={assessmentDraft} saving={savingStageDocument} onChange={setAssessmentDraft} onSave={() => void saveAssessment()} onDownload={() => void downloadRecruitment(candidate, "interview-assessment")} onClose={() => setAssessmentCandidateId("")} /> : null; })()}
+    {offerCandidateId && (() => { const candidate = state.candidates.find(item => item.id === offerCandidateId); const job = candidate && state.jobs.find(item => item.id === candidate.jobId); return candidate ? <OfferDocumentsDialog candidate={candidate} job={job} value={offerDraft} saving={savingStageDocument} onChange={setOfferDraft} onSave={() => void saveOffer()} onDownload={document => void downloadRecruitment(candidate, document)} onClose={() => setOfferCandidateId("")} /> : null; })()}
   </section>;
+}
+
+function InterviewAssessmentDialog({ candidate, job, value, saving, onChange, onSave, onDownload, onClose }: { candidate: RecruitmentCandidate; job?: RecruitmentJob; value: InterviewAssessment; saving: boolean; onChange: React.Dispatch<React.SetStateAction<InterviewAssessment>>; onSave: () => void; onDownload: () => void; onClose: () => void }) {
+  const ratings: Array<[keyof InterviewAssessment, keyof InterviewAssessment, string]> = [
+    ["greetingRating", "greetingRemarks", "Greeting, presentation and communication"], ["backgroundRating", "backgroundRemarks", "Background and experience"],
+    ["technicalRating", "technicalRemarks", "Technical knowledge"], ["leadershipRating", "leadershipRemarks", "Leadership and competencies"]
+  ];
+  const set = (key: keyof InterviewAssessment, next: string | number | undefined) => onChange(previous => ({ ...previous, [key]: next }));
+  return <Dialog wide title="Interview assessment" onClose={onClose}>
+    <div className="form-grid compact">
+      <label>Candidate name<input value={value.candidateName || candidate.name} readOnly /></label><label>Vacancy title<input value={value.position || job?.title || "-"} readOnly /></label><label>Department<input value={value.department || job?.dept || "-"} readOnly /></label><label>Interview date<input type="date" value={(value.date || todayISO()).slice(0, 10)} readOnly /></label>
+      <label>Interview time<input value={value.time || ""} onChange={event => set("time", event.target.value || undefined)} /></label><label>Venue<input value={value.venue || ""} onChange={event => set("venue", event.target.value || undefined)} /></label>
+      <label>Hiring name<input value={value.hiringName || ""} onChange={event => set("hiringName", event.target.value || undefined)} /></label><label>Hiring department<input value={value.hiringDepartment || job?.dept || ""} onChange={event => set("hiringDepartment", event.target.value || undefined)} /></label><label>Hiring position<input value={value.hiringPosition || ""} onChange={event => set("hiringPosition", event.target.value || undefined)} /></label>
+      {ratings.map(([ratingKey, remarksKey, label]) => <React.Fragment key={String(ratingKey)}><label>{label} rating<select value={String(value[ratingKey] || "")} onChange={event => set(ratingKey, event.target.value ? Number(event.target.value) : undefined)}><option value="">Select 1–5</option>{[1, 2, 3, 4, 5].map(score => <option key={score}>{score}</option>)}</select></label><label className="wide">{label} remarks<textarea maxLength={2000} value={String(value[remarksKey] || "")} onChange={event => set(remarksKey, event.target.value || undefined)} /></label></React.Fragment>)}
+      <label>Overall rating<select value={String(value.overallRating || "")} onChange={event => set("overallRating", event.target.value ? Number(event.target.value) : undefined)}><option value="">Select 1–5</option>{[1, 2, 3, 4, 5].map(score => <option key={score}>{score}</option>)}</select></label>
+      <label>Visa status<input maxLength={500} value={value.visaStatus || ""} onChange={event => set("visaStatus", event.target.value || undefined)} /></label><label>Driving licence<input maxLength={500} value={value.drivingLicense || ""} onChange={event => set("drivingLicense", event.target.value || undefined)} /></label>
+      <label>Current salary<input type="number" min="0" step="0.01" value={value.currentSalary ?? ""} onChange={event => set("currentSalary", event.target.value === "" ? undefined : Number(event.target.value))} /></label><label>Expected salary<input type="number" min="0" step="0.01" value={value.expectedSalary ?? ""} onChange={event => set("expectedSalary", event.target.value === "" ? undefined : Number(event.target.value))} /></label><label>Expected joining date<input type="date" value={(value.expectedJoiningDate || "").slice(0, 10)} onChange={event => set("expectedJoiningDate", event.target.value || undefined)} /></label>
+      <label className="wide">Interviewer comments<textarea maxLength={2000} value={value.interviewerComments || ""} onChange={event => set("interviewerComments", event.target.value || undefined)} /></label><label className="wide">Manager comments<textarea maxLength={2000} value={value.managerComments || ""} onChange={event => set("managerComments", event.target.value || undefined)} /></label>
+    </div>
+    <div className="modal-actions"><button onClick={onClose}>Close</button><button onClick={onDownload}>Download PDF</button><button className="primary" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save assessment"}</button></div>
+  </Dialog>;
+}
+
+function OfferDocumentsDialog({ candidate, job, value, saving, onChange, onSave, onDownload, onClose }: { candidate: RecruitmentCandidate; job?: RecruitmentJob; value: OfferDetails; saving: boolean; onChange: React.Dispatch<React.SetStateAction<OfferDetails>>; onSave: () => void; onDownload: (document: "interview-assessment" | "offer-letter" | "nda") => void; onClose: () => void }) {
+  const set = (key: keyof OfferDetails, next: string | number | undefined) => onChange(previous => ({ ...previous, [key]: next }));
+  const total = Number(value.basic || 0) + Number(value.hra || 0) + Number(value.conveyance || 0) + Number(value.otherAllowance || 0);
+  return <Dialog wide title="Offer stage documents" onClose={onClose}>
+    <div className="form-grid compact">
+      <label>Candidate name<input value={value.candidateName || candidate.name} readOnly /></label><label>Designation<input value={value.designation || job?.title || "-"} readOnly /></label><label>Line of Business<input value={value.lineOfBusiness || job?.dept || "-"} readOnly /></label><label>Issue date<input type="date" value={(value.issueDate || todayISO()).slice(0, 10)} onChange={event => set("issueDate", event.target.value || undefined)} /></label>
+      <label>Basic<input type="number" min="0" step="0.01" value={value.basic ?? 0} onChange={event => set("basic", Math.max(0, Number(event.target.value) || 0))} /></label><label>HRA<input type="number" min="0" step="0.01" value={value.hra ?? 0} onChange={event => set("hra", Math.max(0, Number(event.target.value) || 0))} /></label><label>Conveyance<input type="number" min="0" step="0.01" value={value.conveyance ?? 0} onChange={event => set("conveyance", Math.max(0, Number(event.target.value) || 0))} /></label><label>Other allowance<input type="number" min="0" step="0.01" value={value.otherAllowance ?? 0} onChange={event => set("otherAllowance", Math.max(0, Number(event.target.value) || 0))} /></label><label>Contractual monthly pay<input value={formatMoney(total, "QAR")} readOnly /></label>
+    </div>
+    <div className="modal-actions"><button onClick={onClose}>Close</button>{candidate.interviewAssessment && <button onClick={() => onDownload("interview-assessment")}>Assessment PDF</button>}<button onClick={() => onDownload("offer-letter")}>Offer Letter PDF</button><button onClick={() => onDownload("nda")}>NDA PDF</button><button className="primary" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save offer details"}</button></div>
+  </Dialog>;
 }
 
 function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
@@ -2187,10 +2260,11 @@ function SettingsPage({
 
   function saveSettings() {
     const nextDepartments = departments.split("\n").map(item => item.trim()).filter(Boolean);
-    const nextLeaveTypes = leaveTypes.split("\n").map(line => {
+    const nextLeaveTypes = leaveTypes.split("\n").map((line, index) => {
       const [name, days] = line.split(":");
       const normalizedName = name.trim();
-      return { id: state.settings.leaveTypes.find(item => item.name.toLowerCase() === normalizedName.toLowerCase())?.id || newId(), name: normalizedName, days: Number(days) || 0 };
+      const existing = state.settings.leaveTypes.find(item => item.name.toLowerCase() === normalizedName.toLowerCase()) ?? state.settings.leaveTypes[index];
+      return { id: existing?.id || newId(), name: normalizedName, code: existing?.code || "", days: Number(days) || 0, isPaid: existing?.isPaid ?? true, requiresAttachment: existing?.requiresAttachment ?? false };
     }).filter(item => item.name);
     setState(prev => ({ ...prev, settings: {
       ...prev.settings,

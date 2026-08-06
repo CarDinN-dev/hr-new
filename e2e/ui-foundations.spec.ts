@@ -35,13 +35,17 @@ test("every application route renders with a specific document title", async ({ 
   page.on("pageerror", error => errors.push(error.message));
 
   for (const [name, path] of Object.entries(navPaths)) {
-    await page.goto(path);
-    await expect(page).toHaveTitle(`${name} | MedTech HR ERP`);
-    await expect(page.locator(".content")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Access not available" })).toHaveCount(0);
+    await test.step(name, async () => {
+      await page.goto(path);
+      await expect(page).toHaveTitle(`${name} | MedTech HR ERP`);
+      await expect(page.locator(".content")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Access not available" })).toHaveCount(0);
+    });
   }
 
   expect(errors).toEqual([]);
+  await expect(page.getByRole("link", { name: "Business Trips" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(0);
 });
 
 test("mobile dashboard, wide tables and shared dialog retain usable geometry", async ({ page }) => {
@@ -90,11 +94,12 @@ test("employee profile uses the wide dialog without leaving the viewport", async
   await page.setViewportSize({ width: 1440, height: 900 });
   await installUiApi(page, [{
     id: "employee-1", employeeCode: "MTC005", firstName: "Dima Osama Ahmad", lastName: "Alhawi",
-    email: "mtc005@example.invalid", hireDate: "2017-04-05", employmentStatus: "ACTIVE",
+    email: "mtc005@example.invalid", phone: "+974 5000 1234", hireDate: "2017-04-05", employmentStatus: "ACTIVE",
     department: { id: "department-1", name: "Diagnostics & POCT", code: "DPOCT" },
     position: { title: "Application Manager", code: "APP-MGR" }
   }], ["employee.hr.update", "payroll.read_compensation", "report.export"]);
   await page.goto("/employees");
+  await expect(page.locator("article").filter({ hasText: "Dima Osama Ahmad Alhawi" })).toContainText("+974 5000 1234");
   await page.getByRole("button", { name: /Dima Osama Ahmad Alhawi/ }).click();
 
   const panel = page.locator(".modal:has(> .employee-profile)");

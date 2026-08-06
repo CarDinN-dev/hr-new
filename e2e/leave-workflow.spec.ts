@@ -3,9 +3,19 @@ import { expect, test, type Page } from "@playwright/test";
 const employee = { id: "employee-2", employeeCode: "EMP-002", firstName: "Amina", lastName: "Saleh" };
 const leave = {
   id: "leave-1", version: 1, requesterUserId: "other-user", employeeId: employee.id, status: "PENDING_LINE_MANAGER", currentStage: "LINE_MANAGER", routeType: "STANDARD",
-  startDate: "2099-04-20T00:00:00.000Z", endDate: "2099-04-20T00:00:00.000Z", totalDays: "1", isHalfDay: false,
-  employee, leaveType: { id: "annual", name: "Annual leave" }, steps: [], decisions: [],
+  startDate: "2099-04-20T00:00:00.000Z", endDate: "2099-04-20T00:00:00.000Z", totalDays: "1", paidDays: "1", unpaidDays: "0", isHalfDay: false,
+  employee, leaveType: { id: "annual", name: "Annual leave", code: "ANNUAL", requiresAttachment: false }, attachments: [], steps: [], decisions: [],
 };
+
+const leaveTypes = [
+  { id: "annual", name: "Annual leave", code: "ANNUAL", annualAllowanceDays: "30", isPaid: true, requiresAttachment: false },
+  { id: "sick", name: "Sick leave", code: "SICK", annualAllowanceDays: "14", isPaid: true, requiresAttachment: true },
+  { id: "compassionate", name: "Compassionate leave", code: "COMPASSIONATE", annualAllowanceDays: "3", isPaid: true, requiresAttachment: false },
+];
+
+function balances(employeeId: string) {
+  return leaveTypes.map(type => ({ id: `balance-${type.id}`, employeeId, leaveTypeId: type.id, year: 2099, totalDays: type.annualAllowanceDays, usedDays: "2", pendingDays: "1", availableDays: String(Number(type.annualAllowanceDays) - 3), noBalanceRequired: false, eligible: true, leaveType: type }));
+}
 
 function envelope(data: unknown) {
   return { success: true, data };
@@ -16,15 +26,18 @@ async function installLeaveApi(page: Page) {
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
-    const body = request.postDataJSON?.() as Record<string, unknown> | undefined;
+    let body: Record<string, unknown> | undefined;
+    try { body = request.postDataJSON() as Record<string, unknown>; } catch { body = undefined; }
     const json = (data: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(envelope(data)) });
     if (path === "/auth/me") return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false, message: "Not signed in" }) });
     if (path === "/auth/login") return json({ csrfToken: "csrf-token", user: hr }, 201);
     if (path === "/leave/requests") return json([leave]);
     if (path === "/leave/inbox") return json([]);
-    if (path === "/leave/types") return json([{ id: "annual", name: "Annual leave", annualAllowanceDays: "30" }]);
+    if (path === "/leave/types") return json(leaveTypes);
     if (path === "/employees") return json([employee]);
-    if (path === "/leave/submit" && request.method() === "POST") return json({ ...leave, id: "submitted-leave", requesterUserId: hr.id, employeeId: body?.employeeId }, 201);
+    if (path === "/leave/balances") return json(balances(String(new URL(request.url()).searchParams.get("employeeId"))));
+    if (path === "/leave/preview") return json({ totalDays: "1", paidDays: body?.leaveTypeId === "compassionate" ? "1" : "1", unpaidDays: "0", eligible: true, requiresAttachment: body?.leaveTypeId === "sick", availableDays: "27", noBalanceRequired: false });
+    if (path === "/leave/submit" && request.method() === "POST") return json({ ...leave, id: "submitted-leave", requesterUserId: hr.id }, 201);
     if (path === "/leave/leave-1/override" && request.method() === "POST") return json({ ...leave, status: "APPROVED", currentStage: null }, 201);
     return json([]);
   });
@@ -39,10 +52,16 @@ test("HR submits for an employee and immediately approves without a password", a
   await page.getByRole("link", { name: "Leave" }).click();
 
   await page.getByLabel("Employee").selectOption(employee.id);
+  await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
+  await page.getByLabel("Leave type").selectOption("sick");
+  await expect(page.getByLabel("Attachment (required)")).toBeVisible();
+  await page.getByLabel("Leave type").selectOption("compassionate");
+  await expect(page.getByLabel("Duration")).toBeDisabled();
+  await page.getByLabel("Leave type").selectOption("annual");
   await page.getByLabel("Reason").first().fill("HR submitted leave for employee");
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
   await page.getByRole("button", { name: "Submit request" }).click();
-  expect(JSON.parse((await submitted).postData() || "{}")).toMatchObject({ employeeId: employee.id });
+  expect((await submitted).postData()).toContain(employee.id);
 
   await page.getByRole("button", { name: "Override & approve" }).click();
   const dialog = page.getByRole("dialog");
@@ -62,14 +81,17 @@ test("employee submits their own leave and uses My HR and Settings safely", asyn
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
-    const body = request.postDataJSON?.() as Record<string, unknown> | undefined;
+    let body: Record<string, unknown> | undefined;
+    try { body = request.postDataJSON() as Record<string, unknown>; } catch { body = undefined; }
     const json = (data: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(envelope(data)) });
     if (path === "/auth/me") return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false, message: "Not signed in" }) });
     if (path === "/auth/login") return json({ csrfToken: "csrf-token", user: employeeUser }, 201);
-    if (path === "/employees") return json([self]);
+    if (path === "/employees/me") return json({ ...self, phone: "+974 5555 0101", hireDate: "2022-01-01", employmentStatus: "ACTIVE", department: { id: "department-1", name: "Service", code: "SERVICE" }, position: { title: "Service Engineer", code: "SERVICE_ENGINEER" }, manager: { employeeCode: "MGR-1", firstName: "Maha", lastName: "Lead" } });
     if (path === "/leave/mine") return json([ownLeave]);
-    if (path === "/leave/types") return json([{ id: "annual", name: "Annual leave", annualAllowanceDays: "30" }]);
-    if (path === "/leave/submit" && request.method() === "POST") return json({ ...ownLeave, id: "submitted-own-leave", reason: body?.reason }, 201);
+    if (path === "/leave/types") return json(leaveTypes);
+    if (path === "/leave/balances") return json(balances(self.id));
+    if (path === "/leave/preview") return json({ totalDays: "1", paidDays: "1", unpaidDays: "0", eligible: true, requiresAttachment: false, availableDays: "27", noBalanceRequired: false });
+    if (path === "/leave/submit" && request.method() === "POST") return json({ ...ownLeave, id: "submitted-own-leave" }, 201);
     if (path === "/auth/sessions") return json([{ id: employeeUser.sessionId, provider: "local", userAgent: "Test browser", current: true }]);
     return json([]);
   });
@@ -84,7 +106,7 @@ test("employee submits their own leave and uses My HR and Settings safely", asyn
   await page.getByLabel("Reason").first().fill("Annual leave request");
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
   await page.getByRole("button", { name: "Submit request" }).click();
-  expect(JSON.parse((await submitted).postData() || "{}")).not.toHaveProperty("employeeId");
+  expect((await submitted).postData()).not.toContain('name="employeeId"');
   await expect(page.getByText("Pending Line Manager", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "My HR", exact: true }).click();
@@ -92,6 +114,12 @@ test("employee submits their own leave and uses My HR and Settings safely", asyn
   await expect(page.getByText("Pending Line Manager", { exact: true })).toBeVisible();
   await expect(page.getByText("Bank details", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Signed-in devices", { exact: true })).toHaveCount(0);
+  const personalInformation = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Personal information" }) });
+  await expect(personalInformation.getByLabel("Name")).toHaveValue("Noor Ahmed");
+  await expect(personalInformation.getByLabel("Employee ID")).toHaveAttribute("readonly", "");
+  await expect(personalInformation.getByLabel("Phone number")).toHaveValue("+974 5555 0101");
+  await expect(personalInformation.getByLabel("Address", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save personal details" })).toHaveCount(0);
 
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByText("Signed-in devices", { exact: true })).toBeVisible();

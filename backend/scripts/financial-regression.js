@@ -42,6 +42,16 @@ async function main() {
   assert.equal(lopDays.toFixed(2), '1.50');
   assert.equal(money(new Prisma.Decimal('111600').div(30).times(lopDays)).toFixed(2), '5580.00');
 
+  const compassionateLop = await payroll.payrollLopDayValues('employee-1', new Date('2026-08-01T00:00:00Z'), new Date('2026-08-31T23:59:59Z'), {
+    attendance: { findMany: async () => [] },
+    leaveRequest: { findMany: async () => [{
+      startDate: new Date('2026-08-06T00:00:00Z'), endDate: new Date('2026-08-12T00:00:00Z'),
+      totalDays: new Prisma.Decimal(5), paidDays: new Prisma.Decimal(3), leaveType: { code: 'COMPASSIONATE', name: 'Compassionate Leave' },
+    }] },
+  });
+  assert.deepEqual([...compassionateLop.keys()], ['2026-08-11', '2026-08-12']);
+  assert.equal([...compassionateLop.values()].reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)).toFixed(2), '2.00');
+
   const componentEmployee = {
     id: 'employee-2', employeeCode: 'MTC082', firstName: 'Component', lastName: 'Test', hireDate: new Date('2026-07-01T00:00:00Z'), salary: new Prisma.Decimal('5000.00'),
     bankAccount: { bankCode: 'BANK', iban: 'QA000000000000000000000001', accountNumber: null }, profile: null, credentials: [{ type: 'QID', number: '12345678901' }],

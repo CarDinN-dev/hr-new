@@ -151,11 +151,12 @@ test("Super Admin can create a local account without Entra provisioning", async 
   await page.getByRole("checkbox", { name: "HR", exact: true }).click();
   await page.getByRole("checkbox", { name: "Super Administrator (super_admin)", exact: true }).click();
   await page.getByLabel("Reason").first().fill("System UI local-account regression");
-  const created = page.waitForRequest(request => request.url().endsWith("/api/v1/system/users") && request.method() === "POST");
+  const created = page.waitForResponse(response => response.url().endsWith("/api/v1/system/users") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Create user" }).click();
-  const payload = JSON.parse((await created).postData() || "{}");
+  const createdResponse = await created;
+  expect(createdResponse.status()).toBe(201);
+  const payload = JSON.parse(createdResponse.request().postData() || "{}");
   expect(payload).toMatchObject({ localLoginEnabled: true, microsoftLoginEnabled: false, email: "local.user@example.invalid" });
-  await expect(page.getByText("Login user created.")).toBeVisible();
   await expect(page.getByText("local.user@example.invalid")).toBeVisible();
 
   await page.getByRole("checkbox", { name: "Local", exact: true }).click();
@@ -356,6 +357,8 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await page.getByLabel("Starts").fill("2030-01-01T09:00");
   await page.getByLabel("Ends").fill("2030-01-01T17:00");
   await page.getByLabel("Reason").last().fill("System UI delegation regression");
+  const createdDelegation = page.waitForResponse(response => response.url().endsWith("/api/v1/system/delegations") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Create delegation" }).click();
-  await expect(page.getByText("Workflow delegation created.")).toBeVisible();
+  expect((await createdDelegation).status()).toBe(201);
+  await expect(page.getByText("target@example.invalid → super.admin@example.invalid")).toBeVisible();
 });

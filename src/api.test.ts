@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { apiList, apiPage, apiRequest } from "./api";
+import { apiDownload, apiList, apiPage, apiRequest } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -39,4 +39,14 @@ it("loads an unpaginated catalogue once without pagination parameters", async ()
   await expect(apiRequest<{ id: string }[]>("/system/permissions")).resolves.toEqual([{ id: "permission-1" }]);
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/system/permissions");
+});
+
+it("uses UTF-8 download filenames returned by protected PDF endpoints", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-disposition": "attachment; filename*=UTF-8''offer-letter-Alex%20Smith.pdf" }),
+    blob: async () => new Blob(["pdf"])
+  }));
+  await expect(apiDownload("/recruitment/candidates/id/offer-letter.pdf")).resolves.toMatchObject({ fileName: "offer-letter-Alex Smith.pdf" });
 });

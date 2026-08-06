@@ -7,8 +7,6 @@ export const navPaths = {
   Employees: "/employees",
   Attendance: "/attendance",
   Leave: "/leave",
-  "Business Trips": "/business-trips",
-  Expenses: "/expenses",
   Loans: "/loans",
   Payroll: "/payroll",
   Recruitment: "/recruitment",

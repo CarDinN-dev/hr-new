@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AccessScopeType, ApproverMode, AuditAction, LeaveApprovalStage, LeaveDecisionType,
-  LeaveRequestStatus, LeaveRouteType, LeaveStepStatus, PayrollRunStatus, Prisma, WorkflowType,
+  DocumentScanStatus, DocumentVisibility, Gender, LeaveRequestStatus, LeaveRouteType,
+  LeaveStepStatus, PayrollRunStatus, Prisma, WorkflowType,
 } from '@prisma/client';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { hasActiveSuperAdminRole } from '../../common/authorization';
 import { listArgs, listRecords, paginationMeta } from '../../common/utils/crud.util';
@@ -20,6 +21,16 @@ import { QueryLeaveTypesDto } from './dto/query-leave-types.dto';
 import { UpdateLeaveBalanceDto } from './dto/update-leave-balance.dto';
 import { UpdateLeaveRequestDto } from './dto/update-leave-request.dto';
 import { UpdateLeaveTypeDto } from './dto/update-leave-type.dto';
+import { DocumentStorageService } from '../documents/document-storage.service';
+import { DocumentMalwareScannerService } from '../documents/document-malware-scanner.service';
+
+const leavePolicyCodes = {
+  SICK: 'SICK',
+  UNPAID: 'UNPAID',
+  UMRAH_HAJJ: 'UMRAH_HAJJ',
+  COMPASSIONATE: 'COMPASSIONATE',
+  MATERNITY: 'MATERNITY',
+} as const;
 
 const stagePermission: Record<LeaveApprovalStage, string> = {
   LINE_MANAGER: 'leave.team.approve_line_manager',
@@ -73,6 +84,10 @@ type WorkflowStepPlan = {
   selfApprovalAllowed: boolean;
 };
 type LeaveRequestView = Prisma.LeaveRequestGetPayload<{ include: typeof leaveRequestInclude }>;
+type LeaveTypePolicy = {
+  id: string; name: string; code: string; annualAllowanceDays: Prisma.Decimal;
+  isPaid: boolean; requiresAttachment: boolean;
+};
 
 @Injectable()
 export class LeaveService {
@@ -80,6 +95,8 @@ export class LeaveService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly authorization: AuthorizationService,
+    private readonly storage: DocumentStorageService,
+    private readonly scanner: DocumentMalwareScannerService,
   ) {}
 
   createType(dto: CreateLeaveTypeDto, user: RequestUser) {
@@ -136,6 +153,26 @@ export class LeaveService {
   }
 
   async listBalances(query: QueryLeaveBalancesDto, user: RequestUser) {
+    if (query.employeeId && query.year) {
+      await this.assertBalanceEmployeeAccess(query.employeeId, user);
+      const employee = await this.ensureEmployee(query.employeeId);
+      const types = await this.prisma.leaveType.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } });
+      const data = await this.prisma.$transaction(async (tx) => Promise.all(types.map(async (leaveType) => {
+        const policyCode = this.policyCode(leaveType);
+        const eligible = policyCode !== leavePolicyCodes.MATERNITY || this.maternityEligible(employee, new Date());
+        if (!leaveType.isPaid || !eligible) return {
+          id: `unavailable-${query.employeeId}-${leaveType.id}-${query.year}`,
+          employeeId: query.employeeId,
+          leaveTypeId: leaveType.id,
+          year: query.year!,
+          totalDays: new Prisma.Decimal(0), usedDays: new Prisma.Decimal(0), pendingDays: new Prisma.Decimal(0), availableDays: new Prisma.Decimal(0),
+          noBalanceRequired: !leaveType.isPaid, eligible, leaveType,
+        };
+        const balance = await this.ensureBalance(tx, query.employeeId!, leaveType, query.year!);
+        return { ...balance, availableDays: balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays), noBalanceRequired: false, eligible: true };
+      })));
+      return { data, meta: paginationMeta(data.length, 1, data.length || 1) };
+    }
     const filters: Prisma.LeaveBalanceWhereInput[] = [await this.balanceAccessWhere(user)];
     if (query.employeeId) filters.push({ employeeId: query.employeeId });
     if (query.leaveTypeId) filters.push({ leaveTypeId: query.leaveTypeId });
@@ -146,6 +183,39 @@ export class LeaveService {
     });
     const [data, total] = await Promise.all([this.prisma.leaveBalance.findMany(args), this.prisma.leaveBalance.count({ where: args.where })]);
     return { data, meta: paginationMeta(total, page, limit) };
+  }
+
+  async preview(dto: CreateLeaveRequestDto, user: RequestUser) {
+    const employeeId = await this.resolveRequestEmployee(dto.employeeId, user);
+    const [employee, leaveType] = await Promise.all([
+      this.ensureEmployee(employeeId),
+      this.findTypeById(dto.leaveTypeId),
+    ]);
+    try {
+      const policy = this.leavePolicy(employee, leaveType, this.leaveDate(dto.startDate), this.leaveDate(dto.endDate), dto.isHalfDay ?? false);
+      const balance = policy.paidDays.gt(0)
+        ? await this.prisma.$transaction((tx) => this.ensureBalance(tx, employeeId, leaveType, policy.balanceYear))
+        : null;
+      const available = balance ? balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays) : null;
+      const eligible = !available || available.gte(policy.paidDays);
+      return {
+        totalDays: policy.totalDays,
+        paidDays: policy.paidDays,
+        unpaidDays: policy.totalDays.minus(policy.paidDays),
+        eligible,
+        message: eligible ? null : 'Insufficient leave balance',
+        requiresAttachment: policy.requiresAttachment,
+        availableDays: available,
+        noBalanceRequired: !balance,
+      };
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      return {
+        totalDays: null, paidDays: null, unpaidDays: null, eligible: false,
+        message: error.message, requiresAttachment: leaveType.requiresAttachment,
+        availableDays: null, noBalanceRequired: !leaveType.isPaid,
+      };
+    }
   }
 
   async findBalanceById(id: string, user: RequestUser) {
@@ -181,60 +251,84 @@ export class LeaveService {
     });
   }
 
-  async createRequest(dto: CreateLeaveRequestDto, key: string | undefined, user: RequestUser) {
+  async createRequest(dto: CreateLeaveRequestDto, key: string | undefined, user: RequestUser, file?: Express.Multer.File) {
     const employeeId = await this.resolveRequestEmployee(dto.employeeId, user);
     const startDate = this.leaveDate(dto.startDate);
     const endDate = this.leaveDate(dto.endDate);
-    const totalDays = this.leaveDuration(startDate, endDate, dto.isHalfDay ?? false);
-    return this.leaveTransaction(async (tx) => {
-      const duplicate = await this.idempotentResult(tx, user, 'leave.submit', key, dto);
-      if (duplicate) return duplicate;
-      const [employee, leaveType] = await Promise.all([
-        tx.employee.findFirst({ where: { id: employeeId, deletedAt: null }, include: { user: { select: { id: true, isActive: true } } } }),
-        tx.leaveType.findFirst({ where: { id: dto.leaveTypeId, deletedAt: null } }),
-      ]);
-      if (!employee?.userId || !employee.user?.isActive) throw new BadRequestException('Employee requires an active linked user account');
-      if (!leaveType) throw new NotFoundException('Leave type not found');
-      await this.assertLeavePeriodAvailable(employeeId, startDate, endDate, undefined, tx);
-      if (leaveType.isPaid) await this.reserveBalance(tx, employeeId, dto.leaveTypeId, startDate.getUTCFullYear(), totalDays);
-      const workflowVersion = 1;
-      const workflow = await this.workflowPlan(tx, employee, employee.userId, workflowVersion);
-      const request = await tx.leaveRequest.create({
-        data: {
-          requesterUserId: user.id, employeeId, leaveTypeId: dto.leaveTypeId, startDate, endDate, totalDays,
-          isHalfDay: dto.isHalfDay ?? false, reason: dto.reason,
-          status: workflow.blocked ? LeaveRequestStatus.BLOCKED_APPROVER_MISSING : stageStatus[workflow.steps[0].stage],
-          currentStage: workflow.blocked?.stage ?? workflow.steps[0].stage,
-          routeType: workflow.routeType, workflowVersion,
-          requesterRoleCodesSnapshot: workflow.roleCodes,
-          managerChainSnapshot: workflow.managerChain,
-          departmentIdSnapshot: employee.departmentId,
-        },
+    const [previewEmployee, previewType] = await Promise.all([this.ensureEmployee(employeeId), this.findTypeById(dto.leaveTypeId)]);
+    const preview = this.leavePolicy(previewEmployee, previewType, startDate, endDate, dto.isHalfDay ?? false);
+    if (preview.requiresAttachment && !file?.buffer?.length) throw new BadRequestException('An attachment is required for this leave type');
+    if (file?.buffer?.length && !user.employeeId) throw new BadRequestException('The uploader must have an employee profile');
+    const stored = file?.buffer?.length ? await this.storage.upload(employeeId, file) : null;
+    const attachmentId = stored ? randomUUID() : null;
+    let linked = false;
+    let committed = false;
+    try {
+      const result = await this.leaveTransaction(async (tx) => {
+        const duplicate = await this.idempotentResult(tx, user, 'leave.submit', key, dto);
+        if (duplicate) return duplicate;
+        const [employee, leaveType] = await Promise.all([
+          tx.employee.findFirst({ where: { id: employeeId, deletedAt: null }, include: { user: { select: { id: true, isActive: true } } } }),
+          tx.leaveType.findFirst({ where: { id: dto.leaveTypeId, deletedAt: null } }),
+        ]);
+        if (!employee?.userId || !employee.user?.isActive) throw new BadRequestException('Employee requires an active linked user account');
+        if (!leaveType) throw new NotFoundException('Leave type not found');
+        const policy = this.leavePolicy(employee, leaveType, startDate, endDate, dto.isHalfDay ?? false);
+        if (policy.requiresAttachment && !stored) throw new BadRequestException('An attachment is required for this leave type');
+        await this.assertLeavePeriodAvailable(employeeId, startDate, endDate, undefined, tx);
+        if (policy.paidDays.gt(0)) await this.reserveBalance(tx, employeeId, leaveType, policy.balanceYear, policy.paidDays);
+        const workflowVersion = 1;
+        const workflow = await this.workflowPlan(tx, employee, employee.userId, workflowVersion);
+        const request = await tx.leaveRequest.create({
+          data: {
+            requesterUserId: user.id, employeeId, leaveTypeId: dto.leaveTypeId, startDate, endDate,
+            totalDays: policy.totalDays, paidDays: policy.paidDays,
+            isHalfDay: dto.isHalfDay ?? false, reason: dto.reason,
+            status: workflow.blocked ? LeaveRequestStatus.BLOCKED_APPROVER_MISSING : stageStatus[workflow.steps[0].stage],
+            currentStage: workflow.blocked?.stage ?? workflow.steps[0].stage,
+            routeType: workflow.routeType, workflowVersion,
+            requesterRoleCodesSnapshot: workflow.roleCodes,
+            managerChainSnapshot: workflow.managerChain,
+            departmentIdSnapshot: employee.departmentId,
+          },
+        });
+        if (stored && file && attachmentId && user.employeeId) {
+          await this.createLeaveAttachment(tx, request.id, employeeId, leaveType.name, attachmentId, stored, file, user);
+          linked = true;
+        }
+        await this.createWorkflowSteps(tx, request.id, workflowVersion, workflow.steps);
+        await this.notifyWorkflow(tx, request.id, workflow.blocked, workflow.steps);
+        if (employee.userId !== user.id) await tx.notification.create({ data: { userId: employee.userId, type: 'LEAVE_SUBMITTED_ON_BEHALF', title: 'Leave submitted on your behalf', message: 'HR submitted a leave request on your behalf.', resourceType: 'LeaveRequest', resourceId: request.id } });
+        await this.audit.record(tx, user, {
+          action: AuditAction.CREATE, resourceType: 'LeaveRequest', resourceId: request.id, workflowId: request.id,
+          workflowStage: request.currentStage ?? undefined, workflowStatus: request.status,
+          summary: workflow.blocked ? 'Leave request submitted with missing approver' : 'Leave request submitted',
+          subjectEmployeeId: employeeId, after: request,
+        });
+        await this.saveIdempotency(tx, user, 'leave.submit', key, dto, request.id);
+        return tx.leaveRequest.findUniqueOrThrow({ where: { id: request.id }, include: leaveRequestInclude });
       });
-      await this.createWorkflowSteps(tx, request.id, workflowVersion, workflow.steps);
-      await this.notifyWorkflow(tx, request.id, workflow.blocked, workflow.steps);
-      if (employee.userId !== user.id) await tx.notification.create({ data: { userId: employee.userId, type: 'LEAVE_SUBMITTED_ON_BEHALF', title: 'Leave submitted on your behalf', message: 'HR submitted a leave request on your behalf.', resourceType: 'LeaveRequest', resourceId: request.id } });
-      await this.audit.record(tx, user, {
-        action: AuditAction.CREATE, resourceType: 'LeaveRequest', resourceId: request.id, workflowId: request.id,
-        workflowStage: request.currentStage ?? undefined, workflowStatus: request.status,
-        summary: workflow.blocked ? 'Leave request submitted with missing approver' : 'Leave request submitted',
-        subjectEmployeeId: employeeId, after: request,
-      });
-      await this.saveIdempotency(tx, user, 'leave.submit', key, dto, request.id);
-      return tx.leaveRequest.findUniqueOrThrow({ where: { id: request.id }, include: leaveRequestInclude });
-    });
+      committed = true;
+      if (stored && !linked) await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
+      if (linked) this.scanner.wake();
+      return this.presentRequest(result, user);
+    } catch (error) {
+      if (stored && !committed) await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
+      throw error;
+    }
   }
 
   async listRequests(query: QueryLeaveRequestsDto, user: RequestUser) {
     const result = await this.listWithWhere(query, await this.requestAccessWhere(user));
     const visible = (await Promise.all((result.data as LeaveRequestView[]).map(async (request) => await this.canAccessRequest(user, request) ? request : null))).filter((request): request is LeaveRequestView => request !== null);
-    return { ...result, data: visible };
+    return { ...result, data: await Promise.all(visible.map((request) => this.presentRequest(request, user))) };
   }
 
   async listMine(query: QueryLeaveRequestsDto, user: RequestUser) {
     if (!user.employeeId) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
     if (!this.authorization.permissionAllowedForScope(user, 'leave.self.read', AccessScopeType.SELF, user.employeeId)) return { data: [], meta: paginationMeta(0, query.page ?? 1, query.limit ?? 20) };
-    return this.listWithWhere(query, { employeeId: user.employeeId });
+    const result = await this.listWithWhere(query, { employeeId: user.employeeId });
+    return { ...result, data: await Promise.all((result.data as LeaveRequestView[]).map((request) => this.presentRequest(request, user))) };
   }
 
   async inbox(query: QueryLeaveRequestsDto, user: RequestUser) {
@@ -245,13 +339,14 @@ export class LeaveService {
       status: { in: [...activePendingStatuses.filter((status) => status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION)] },
     });
     const data = result.data as LeaveRequestView[];
-    return { ...result, data: data.filter((request) => request.steps.some((step) => step.workflowVersion === request.workflowVersion && step.stage === request.currentStage && step.assignees.some((assignee) => assignee.userId === user.id && assignee.isActive && !assignee.revokedAt) && this.authorization.permissionAllowedForScope(user, stagePermission[step.stage], AccessScopeType.ASSIGNED_APPROVALS, request.id))) };
+    const visible = data.filter((request) => request.steps.some((step) => step.workflowVersion === request.workflowVersion && step.stage === request.currentStage && step.assignees.some((assignee) => assignee.userId === user.id && assignee.isActive && !assignee.revokedAt) && this.authorization.permissionAllowedForScope(user, stagePermission[step.stage], AccessScopeType.ASSIGNED_APPROVALS, request.id)));
+    return { ...result, data: await Promise.all(visible.map((request) => this.presentRequest(request, user))) };
   }
 
   async findRequestById(id: string, user: RequestUser) {
     const request = await this.prisma.leaveRequest.findFirst({ where: { id, deletedAt: null }, include: leaveRequestInclude });
     if (!request || !await this.canAccessRequest(user, request)) throw new NotFoundException('Leave request not found');
-    return request;
+    return this.presentRequest(request, user);
   }
 
   timeline(id: string, user: RequestUser) {
@@ -265,30 +360,94 @@ export class LeaveService {
     return this.listWithWhere({ ...query, employeeId }, await this.requestAccessWhere(user));
   }
 
-  updateRequest(id: string, dto: UpdateLeaveRequestDto, key: string | undefined, user: RequestUser) {
-    return this.leaveTransaction(async (tx) => {
-      const duplicate = await this.idempotentResult(tx, user, 'leave.correction', key, { id, dto });
-      if (duplicate) return duplicate;
-      const request = await this.ensureRequest(id, tx);
-      if (request.requesterUserId !== user.id || request.employeeId !== user.employeeId) throw new NotFoundException('Leave request not found');
-      if (request.status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION) throw new BadRequestException('Only returned leave requests can be corrected');
-      this.assertExpectedVersion(request.version, dto.expectedVersion);
-      const nextTypeId = dto.leaveTypeId ?? request.leaveTypeId;
-      const nextStart = this.leaveDate(dto.startDate ?? request.startDate);
-      const nextEnd = this.leaveDate(dto.endDate ?? request.endDate);
-      const nextHalf = dto.isHalfDay ?? request.isHalfDay;
-      const nextDays = this.leaveDuration(nextStart, nextEnd, nextHalf);
-      await this.assertLeavePeriodAvailable(request.employeeId, nextStart, nextEnd, id, tx);
-      await this.adjustReservedBalance(tx, request, nextTypeId, nextStart.getUTCFullYear(), nextDays);
-      const updated = await tx.leaveRequest.update({
-        where: { id },
-        data: { leaveTypeId: nextTypeId, startDate: nextStart, endDate: nextEnd, totalDays: nextDays, isHalfDay: nextHalf, reason: dto.reason ?? request.reason, version: { increment: 1 } },
-        include: leaveRequestInclude,
-      });
-      await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStatus: updated.status, summary: 'Returned leave request corrected', subjectEmployeeId: request.employeeId, before: request, after: updated });
-      await this.saveIdempotency(tx, user, 'leave.correction', key, { id, dto }, id);
-      return updated;
+  async updateRequest(id: string, dto: UpdateLeaveRequestDto, key: string | undefined, user: RequestUser, file?: Express.Multer.File) {
+    const current = await this.ensureRequest(id);
+    if (current.requesterUserId !== user.id || current.employeeId !== user.employeeId) throw new NotFoundException('Leave request not found');
+    if (current.status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION) throw new BadRequestException('Only returned leave requests can be corrected');
+    const nextTypeId = dto.leaveTypeId ?? current.leaveTypeId;
+    const nextStart = this.leaveDate(dto.startDate ?? current.startDate);
+    const nextEnd = this.leaveDate(dto.endDate ?? current.endDate);
+    const nextHalf = dto.isHalfDay ?? current.isHalfDay;
+    const [employee, nextType] = await Promise.all([this.ensureEmployee(current.employeeId), this.findTypeById(nextTypeId)]);
+    const preview = this.leavePolicy(employee, nextType, nextStart, nextEnd, nextHalf);
+    const validAttachment = await this.prisma.employeeDocument.findFirst({
+      where: { leaveRequestId: id, deletedAt: null, scanStatus: { notIn: [DocumentScanStatus.REJECTED, DocumentScanStatus.FAILED] } }, select: { id: true },
     });
+    if (preview.requiresAttachment && !file?.buffer?.length && !validAttachment) throw new BadRequestException('An attachment is required for this leave type');
+    const stored = file?.buffer?.length ? await this.storage.upload(current.employeeId, file) : null;
+    const attachmentId = stored ? randomUUID() : null;
+    let linked = false;
+    let committed = false;
+    try {
+      const result = await this.leaveTransaction(async (tx) => {
+        const duplicate = await this.idempotentResult(tx, user, 'leave.correction', key, { id, dto });
+        if (duplicate) return duplicate;
+        const request = await this.ensureRequest(id, tx);
+        if (request.requesterUserId !== user.id || request.employeeId !== user.employeeId) throw new NotFoundException('Leave request not found');
+        if (request.status !== LeaveRequestStatus.RETURNED_FOR_CORRECTION) throw new BadRequestException('Only returned leave requests can be corrected');
+        this.assertExpectedVersion(request.version, dto.expectedVersion);
+        const [freshEmployee, leaveType] = await Promise.all([
+          tx.employee.findFirst({ where: { id: request.employeeId, deletedAt: null } }),
+          tx.leaveType.findFirst({ where: { id: nextTypeId, deletedAt: null } }),
+        ]);
+        if (!freshEmployee || !leaveType) throw new NotFoundException('Employee or leave type not found');
+        const policy = this.leavePolicy(freshEmployee, leaveType, nextStart, nextEnd, nextHalf);
+        const existingAttachment = await tx.employeeDocument.findFirst({ where: { leaveRequestId: id, deletedAt: null, scanStatus: { notIn: [DocumentScanStatus.REJECTED, DocumentScanStatus.FAILED] } }, select: { id: true } });
+        if (policy.requiresAttachment && !stored && !existingAttachment) throw new BadRequestException('An attachment is required for this leave type');
+        await this.assertLeavePeriodAvailable(request.employeeId, nextStart, nextEnd, id, tx);
+        await this.adjustReservedBalance(tx, request, leaveType, policy.balanceYear, policy.paidDays);
+        if (stored && file && attachmentId && user.employeeId) {
+          await tx.employeeDocument.updateMany({ where: { leaveRequestId: id, deletedAt: null }, data: { deletedAt: new Date(), version: { increment: 1 } } });
+          await this.createLeaveAttachment(tx, id, request.employeeId, leaveType.name, attachmentId, stored, file, user);
+          linked = true;
+        }
+        const updated = await tx.leaveRequest.update({
+          where: { id },
+          data: { leaveTypeId: nextTypeId, startDate: nextStart, endDate: nextEnd, totalDays: policy.totalDays, paidDays: policy.paidDays, isHalfDay: nextHalf, reason: dto.reason ?? request.reason, version: { increment: 1 } },
+          include: leaveRequestInclude,
+        });
+        await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStatus: updated.status, summary: 'Returned leave request corrected', subjectEmployeeId: request.employeeId, before: request, after: updated });
+        await this.saveIdempotency(tx, user, 'leave.correction', key, { id, dto }, id);
+        return updated;
+      });
+      committed = true;
+      if (stored && !linked) await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
+      if (linked) this.scanner.wake();
+      return this.presentRequest(result, user);
+    } catch (error) {
+      if (stored && !committed) await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async replaceAttachment(id: string, file: Express.Multer.File | undefined, user: RequestUser) {
+    if (!file?.buffer?.length) throw new BadRequestException('An attachment file is required');
+    if (!user.employeeId) throw new BadRequestException('The uploader must have an employee profile');
+    const request = await this.ensureRequest(id);
+    const own = request.employeeId === user.employeeId;
+    const hr = this.authorization.permissionAllowedForScope(user, 'leave.hr.manage', AccessScopeType.ALL_EMPLOYEES, request.employeeId);
+    if (!own && !hr) throw new NotFoundException('Leave request not found');
+    if (([LeaveRequestStatus.APPROVED, LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED] as LeaveRequestStatus[]).includes(request.status)) throw new BadRequestException('A final leave request attachment cannot be replaced');
+    const leaveType = await this.findTypeById(request.leaveTypeId);
+    const stored = await this.storage.upload(request.employeeId, file);
+    const attachmentId = randomUUID();
+    let committed = false;
+    try {
+      const result = await this.leaveTransaction(async (tx) => {
+        const fresh = await this.ensureRequest(id, tx);
+        if (([LeaveRequestStatus.APPROVED, LeaveRequestStatus.REJECTED, LeaveRequestStatus.CANCELLED] as LeaveRequestStatus[]).includes(fresh.status)) throw new BadRequestException('A final leave request attachment cannot be replaced');
+        await tx.employeeDocument.updateMany({ where: { leaveRequestId: id, deletedAt: null }, data: { deletedAt: new Date(), version: { increment: 1 } } });
+        await this.createLeaveAttachment(tx, id, fresh.employeeId, leaveType.name, attachmentId, stored, file, user);
+        await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'LeaveRequest', resourceId: id, summary: 'Leave attachment replaced', subjectEmployeeId: fresh.employeeId });
+        return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
+      });
+      committed = true;
+      this.scanner.wake();
+      return this.presentRequest(result, user);
+    } catch (error) {
+      if (!committed) await this.storage.remove(stored.objectName, stored.generation).catch(() => undefined);
+      throw error;
+    }
   }
 
   approve(id: string, dto: LeaveDecisionDto, key: string | undefined, user: RequestUser) {
@@ -449,7 +608,10 @@ export class LeaveService {
       if (!superOverride && request.employeeId === user.employeeId) throw new ForbiddenException('HR cannot override its own leave');
       this.assertExpectedVersion(request.version, dto.expectedVersion);
       if (!([...activePendingStatuses, LeaveRequestStatus.APPROVED] as LeaveRequestStatus[]).includes(request.status)) throw new BadRequestException('Terminal leave requests cannot be overridden');
-      if (dto.targetStatus === LeaveRequestStatus.APPROVED) await this.finalizeBalance(tx, request);
+      if (dto.targetStatus === LeaveRequestStatus.APPROVED) {
+        await this.assertRequiredAttachmentClean(tx, request);
+        await this.finalizeBalance(tx, request);
+      }
       else await this.releaseBalance(tx, request, request.status === LeaveRequestStatus.APPROVED);
       const step = request.currentStage ? await tx.leaveApprovalStep.findFirst({ where: { requestId: id, workflowVersion: request.workflowVersion, stage: request.currentStage }, include: { assignees: { where: { isActive: true, revokedAt: null }, select: { userId: true } } } }) : null;
       const pendingSteps = await tx.leaveApprovalStep.findMany({ where: { requestId: id, workflowVersion: request.workflowVersion, status: LeaveStepStatus.PENDING }, include: { assignees: { where: { isActive: true, revokedAt: null }, select: { userId: true } } }, orderBy: { sequence: 'asc' } });
@@ -504,7 +666,10 @@ export class LeaveService {
     selfApproval = false,
   ) {
     if (([LeaveDecisionType.REJECT, LeaveDecisionType.RETURN] as LeaveDecisionType[]).includes(type) && (!reason || reason.trim().length < 3)) throw new BadRequestException('A decision reason is required');
-    if (nextStatus === LeaveRequestStatus.APPROVED) await this.finalizeBalance(tx, request);
+    if (nextStatus === LeaveRequestStatus.APPROVED) {
+      await this.assertRequiredAttachmentClean(tx, request);
+      await this.finalizeBalance(tx, request);
+    }
     if (nextStatus === LeaveRequestStatus.REJECTED) await this.releaseBalance(tx, request, false);
     const stepStatus = type === LeaveDecisionType.RETURN ? LeaveStepStatus.RETURNED : type === LeaveDecisionType.REJECT ? LeaveStepStatus.REJECTED : LeaveStepStatus.APPROVED;
     const stepUpdate = await tx.leaveApprovalStep.updateMany({
@@ -770,49 +935,47 @@ export class LeaveService {
     return target;
   }
 
-  private async reserveBalance(tx: Prisma.TransactionClient, employeeId: string, leaveTypeId: string, year: number, days: Prisma.Decimal) {
-    const balance = await this.findBalance(employeeId, leaveTypeId, year, tx);
+  private async reserveBalance(tx: Prisma.TransactionClient, employeeId: string, leaveType: LeaveTypePolicy, year: number, days: Prisma.Decimal) {
+    const balance = await this.ensureBalance(tx, employeeId, leaveType, year);
     const available = balance.totalDays.minus(balance.usedDays).minus(balance.pendingDays);
     if (available.lt(days)) throw new BadRequestException('Insufficient leave balance');
     await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { increment: days } } });
   }
 
-  private async finalizeBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; totalDays: Prisma.Decimal; status: LeaveRequestStatus }) {
+  private async finalizeBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; paidDays: Prisma.Decimal; status: LeaveRequestStatus }) {
+    if (request.paidDays.lte(0) || request.status === LeaveRequestStatus.APPROVED) return;
     const type = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
     if (!type) throw new NotFoundException('Leave type not found');
-    if (!type.isPaid || request.status === LeaveRequestStatus.APPROVED) return;
-    const balance = await this.findBalance(request.employeeId, request.leaveTypeId, request.startDate.getUTCFullYear(), tx);
-    if (balance.pendingDays.lt(request.totalDays)) throw new ConflictException('Leave balance is inconsistent');
-    await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { decrement: request.totalDays }, usedDays: { increment: request.totalDays } } });
+    const balance = await this.ensureBalance(tx, request.employeeId, type, request.startDate.getUTCFullYear());
+    if (balance.pendingDays.lt(request.paidDays)) throw new ConflictException('Leave balance is inconsistent');
+    await tx.leaveBalance.update({ where: { id: balance.id }, data: { pendingDays: { decrement: request.paidDays }, usedDays: { increment: request.paidDays } } });
   }
 
-  private async releaseBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; totalDays: Prisma.Decimal; status: LeaveRequestStatus }, fromUsed: boolean) {
+  private async releaseBalance(tx: Prisma.TransactionClient, request: { employeeId: string; leaveTypeId: string; startDate: Date; paidDays: Prisma.Decimal; status: LeaveRequestStatus }, fromUsed: boolean) {
+    if (request.paidDays.lte(0)) return;
     const type = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
-    if (!type?.isPaid) return;
-    const balance = await this.findBalance(request.employeeId, request.leaveTypeId, request.startDate.getUTCFullYear(), tx);
+    if (!type) throw new NotFoundException('Leave type not found');
+    const balance = await this.ensureBalance(tx, request.employeeId, type, request.startDate.getUTCFullYear());
     const current = fromUsed ? balance.usedDays : balance.pendingDays;
-    if (current.lt(request.totalDays)) throw new ConflictException('Leave balance is inconsistent');
-    await tx.leaveBalance.update({ where: { id: balance.id }, data: fromUsed ? { usedDays: { decrement: request.totalDays } } : { pendingDays: { decrement: request.totalDays } } });
+    if (current.lt(request.paidDays)) throw new ConflictException('Leave balance is inconsistent');
+    await tx.leaveBalance.update({ where: { id: balance.id }, data: fromUsed ? { usedDays: { decrement: request.paidDays } } : { pendingDays: { decrement: request.paidDays } } });
   }
 
-  private async adjustReservedBalance(tx: Prisma.TransactionClient, request: Awaited<ReturnType<LeaveService['ensureRequest']>>, nextTypeId: string, nextYear: number, nextDays: Prisma.Decimal) {
-    const [previousType, nextType] = await Promise.all([
-      tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } }),
-      tx.leaveType.findFirst({ where: { id: nextTypeId, deletedAt: null } }),
-    ]);
-    if (!previousType || !nextType) throw new NotFoundException('Leave type not found');
-    const previousBalance = previousType.isPaid ? await this.findBalance(request.employeeId, request.leaveTypeId, request.startDate.getUTCFullYear(), tx) : null;
-    const nextBalance = nextType.isPaid ? await this.findBalance(request.employeeId, nextTypeId, nextYear, tx) : null;
-    if (previousBalance?.pendingDays.lt(request.totalDays)) throw new ConflictException('Leave balance is inconsistent');
+  private async adjustReservedBalance(tx: Prisma.TransactionClient, request: Awaited<ReturnType<LeaveService['ensureRequest']>>, nextType: LeaveTypePolicy, nextYear: number, nextPaidDays: Prisma.Decimal) {
+    const previousType = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
+    if (!previousType) throw new NotFoundException('Leave type not found');
+    const previousBalance = request.paidDays.gt(0) ? await this.ensureBalance(tx, request.employeeId, previousType, request.startDate.getUTCFullYear()) : null;
+    const nextBalance = nextPaidDays.gt(0) ? await this.ensureBalance(tx, request.employeeId, nextType, nextYear) : null;
+    if (previousBalance?.pendingDays.lt(request.paidDays)) throw new ConflictException('Leave balance is inconsistent');
     if (previousBalance && nextBalance && previousBalance.id === nextBalance.id) {
-      const available = nextBalance.totalDays.minus(nextBalance.usedDays).minus(nextBalance.pendingDays).plus(request.totalDays);
-      if (available.lt(nextDays)) throw new BadRequestException('Insufficient leave balance');
-      await tx.leaveBalance.update({ where: { id: nextBalance.id }, data: { pendingDays: { increment: nextDays.minus(request.totalDays) } } });
+      const available = nextBalance.totalDays.minus(nextBalance.usedDays).minus(nextBalance.pendingDays).plus(request.paidDays);
+      if (available.lt(nextPaidDays)) throw new BadRequestException('Insufficient leave balance');
+      await tx.leaveBalance.update({ where: { id: nextBalance.id }, data: { pendingDays: { increment: nextPaidDays.minus(request.paidDays) } } });
       return;
     }
-    if (nextBalance && nextBalance.totalDays.minus(nextBalance.usedDays).minus(nextBalance.pendingDays).lt(nextDays)) throw new BadRequestException('Insufficient leave balance');
-    if (previousBalance) await tx.leaveBalance.update({ where: { id: previousBalance.id }, data: { pendingDays: { decrement: request.totalDays } } });
-    if (nextBalance) await tx.leaveBalance.update({ where: { id: nextBalance.id }, data: { pendingDays: { increment: nextDays } } });
+    if (nextBalance && nextBalance.totalDays.minus(nextBalance.usedDays).minus(nextBalance.pendingDays).lt(nextPaidDays)) throw new BadRequestException('Insufficient leave balance');
+    if (previousBalance) await tx.leaveBalance.update({ where: { id: previousBalance.id }, data: { pendingDays: { decrement: request.paidDays } } });
+    if (nextBalance) await tx.leaveBalance.update({ where: { id: nextBalance.id }, data: { pendingDays: { increment: nextPaidDays } } });
   }
 
   private async ensureEmployee(employeeId: string) {
@@ -827,10 +990,20 @@ export class LeaveService {
     return request;
   }
 
-  private async findBalance(employeeId: string, leaveTypeId: string, year: number, client: Prisma.TransactionClient | PrismaService = this.prisma) {
-    const balance = await client.leaveBalance.findFirst({ where: { employeeId, leaveTypeId, year, deletedAt: null } });
-    if (!balance) throw new BadRequestException('Leave balance does not exist for this leave type and year');
-    return balance;
+  private async ensureBalance(tx: Prisma.TransactionClient, employeeId: string, leaveType: LeaveTypePolicy, year: number) {
+    if (!leaveType.isPaid) throw new BadRequestException('This leave type does not use a balance');
+    const existing = await tx.leaveBalance.findFirst({ where: { employeeId, leaveTypeId: leaveType.id, year } });
+    if (!existing) return tx.leaveBalance.create({
+      data: { employeeId, leaveTypeId: leaveType.id, year, totalDays: leaveType.annualAllowanceDays },
+      include: leaveBalanceInclude,
+    });
+    const minimumTotal = Prisma.Decimal.max(existing.totalDays, leaveType.annualAllowanceDays, existing.usedDays.plus(existing.pendingDays));
+    if (existing.deletedAt || !minimumTotal.eq(existing.totalDays)) return tx.leaveBalance.update({
+      where: { id: existing.id },
+      data: { deletedAt: null, totalDays: minimumTotal },
+      include: leaveBalanceInclude,
+    });
+    return tx.leaveBalance.findUniqueOrThrow({ where: { id: existing.id }, include: leaveBalanceInclude });
   }
 
   private leaveDate(value: Date) {
@@ -839,9 +1012,120 @@ export class LeaveService {
 
   private leaveDuration(startDate: Date, endDate: Date, isHalfDay: boolean) {
     if (endDate < startDate) throw new BadRequestException('endDate must be on or after startDate');
-    if (startDate.getUTCFullYear() !== endDate.getUTCFullYear()) throw new BadRequestException('Leave cannot span calendar years');
     if (isHalfDay && endDate.getTime() !== startDate.getTime()) throw new BadRequestException('Half-day leave must use one date');
     return new Prisma.Decimal(isHalfDay ? '0.5' : String(Math.floor((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1));
+  }
+
+  private leavePolicy(
+    employee: { gender: Gender | null; hireDate: Date },
+    leaveType: LeaveTypePolicy,
+    startDate: Date,
+    endDate: Date,
+    isHalfDay: boolean,
+  ) {
+    const code = this.policyCode(leaveType);
+    if (endDate < startDate) throw new BadRequestException('endDate must be on or after startDate');
+    if (startDate.getUTCFullYear() !== endDate.getUTCFullYear() && code !== leavePolicyCodes.MATERNITY) throw new BadRequestException('Only maternity leave may span calendar years');
+    if (isHalfDay && [leavePolicyCodes.UMRAH_HAJJ, leavePolicyCodes.COMPASSIONATE, leavePolicyCodes.MATERNITY].includes(code as never)) {
+      throw new BadRequestException('Half-day selection is not available for this leave type');
+    }
+    if (code === leavePolicyCodes.MATERNITY && !this.maternityEligible(employee, startDate)) {
+      throw new BadRequestException('Maternity leave requires a Female employee with one completed service year');
+    }
+    const totalDays = code === leavePolicyCodes.COMPASSIONATE
+      ? new Prisma.Decimal(this.workingDays(startDate, endDate))
+      : this.leaveDuration(startDate, endDate, isHalfDay);
+    if (totalDays.lte(0)) throw new BadRequestException('The selected dates contain no working days');
+    if (code === leavePolicyCodes.MATERNITY && !totalDays.eq(50)) throw new BadRequestException('Maternity leave must be exactly 50 calendar days');
+    const paidDays = code === leavePolicyCodes.COMPASSIONATE
+      ? Prisma.Decimal.min(totalDays, new Prisma.Decimal(3))
+      : (!leaveType.isPaid || code === leavePolicyCodes.UNPAID || code === leavePolicyCodes.UMRAH_HAJJ ? new Prisma.Decimal(0) : totalDays);
+    return {
+      totalDays,
+      paidDays,
+      balanceYear: startDate.getUTCFullYear(),
+      requiresAttachment: leaveType.requiresAttachment || code === leavePolicyCodes.SICK || code === leavePolicyCodes.MATERNITY,
+    };
+  }
+
+  private policyCode(leaveType: Pick<LeaveTypePolicy, 'code' | 'name'>) {
+    const code = leaveType.code.trim().toUpperCase();
+    if ((Object.values(leavePolicyCodes) as string[]).includes(code)) return code;
+    const name = leaveType.name.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (name === 'sick' || name === 'sick leave') return leavePolicyCodes.SICK;
+    if (name === 'unpaid' || name === 'unpaid leave') return leavePolicyCodes.UNPAID;
+    if (name === 'umrah/hajj' || name === 'umrah hajj') return leavePolicyCodes.UMRAH_HAJJ;
+    if (name === 'compassionate' || name === 'compassionate leave') return leavePolicyCodes.COMPASSIONATE;
+    if (name === 'maternity' || name === 'maternity leave') return leavePolicyCodes.MATERNITY;
+    return code;
+  }
+
+  private workingDays(startDate: Date, endDate: Date) {
+    let days = 0;
+    for (const date = new Date(startDate); date <= endDate; date.setUTCDate(date.getUTCDate() + 1)) {
+      if (date.getUTCDay() <= 4) days += 1;
+    }
+    return days;
+  }
+
+  private maternityEligible(employee: { gender: Gender | null; hireDate: Date }, onDate: Date) {
+    const anniversary = new Date(Date.UTC(employee.hireDate.getUTCFullYear() + 1, employee.hireDate.getUTCMonth(), employee.hireDate.getUTCDate()));
+    return employee.gender === Gender.FEMALE && anniversary <= onDate;
+  }
+
+  private async assertBalanceEmployeeAccess(employeeId: string, user: RequestUser) {
+    await this.authorization.assertEmployeeScope(user, employeeId, {
+      self: 'leave.self.read', team: 'leave.team.read', tree: 'leave.management.read',
+      all: this.authorization.has(user, 'leave.read_all') ? 'leave.read_all' : (this.authorization.has(user, 'leave.hr.read') ? 'leave.hr.read' : undefined),
+    });
+  }
+
+  private async assertRequiredAttachmentClean(tx: Prisma.TransactionClient, request: { id: string; leaveTypeId: string }) {
+    const leaveType = await tx.leaveType.findFirst({ where: { id: request.leaveTypeId, deletedAt: null } });
+    if (!leaveType) throw new NotFoundException('Leave type not found');
+    const required = leaveType.requiresAttachment || [leavePolicyCodes.SICK, leavePolicyCodes.MATERNITY].includes(this.policyCode(leaveType) as never);
+    if (!required) return;
+    const clean = await tx.employeeDocument.findFirst({ where: { leaveRequestId: request.id, deletedAt: null, scanStatus: DocumentScanStatus.CLEAN }, select: { id: true } });
+    if (!clean) throw new BadRequestException('The required attachment must pass malware scanning before final approval');
+  }
+
+  private async createLeaveAttachment(
+    tx: Prisma.TransactionClient,
+    requestId: string,
+    employeeId: string,
+    leaveTypeName: string,
+    id: string,
+    stored: Awaited<ReturnType<DocumentStorageService['upload']>>,
+    file: Express.Multer.File,
+    user: RequestUser,
+  ) {
+    if (!user.employeeId) throw new BadRequestException('The uploader must have an employee profile');
+    const sequence = await tx.documentSequence.upsert({
+      where: { key: 'employee_document' }, create: { key: 'employee_document', value: 1 }, update: { value: { increment: 1 } },
+    });
+    const document = await tx.employeeDocument.create({
+      data: {
+        id, employeeId, leaveRequestId: requestId, documentType: `${leaveTypeName} attachment`, fileName: file.originalname,
+        fileUrl: `/api/v1/documents/${id}/content`, documentNumber: `DOC-${String(sequence.value).padStart(6, '0')}`,
+        objectName: stored.objectName, objectGeneration: stored.generation, contentType: file.mimetype,
+        sizeBytes: stored.sizeBytes, sha256: stored.sha256, uploadedById: user.employeeId,
+        visibility: DocumentVisibility.EMPLOYEE_ONLY, scanStatus: this.scanner.initialStatus(),
+      },
+    });
+    await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'EmployeeDocument', entityId: id, summary: 'Leave attachment uploaded to private object storage', subjectEmployeeId: employeeId, metadata: { leaveRequestId: requestId } });
+    return document;
+  }
+
+  private async presentRequest(request: LeaveRequestView, user: RequestUser) {
+    const canViewAttachments = request.employeeId === user.employeeId
+      || this.authorization.permissionAllowedForScope(user, 'leave.hr.read', AccessScopeType.ALL_EMPLOYEES, request.employeeId)
+      || this.authorization.permissionAllowedForScope(user, 'leave.read_all', AccessScopeType.ALL_EMPLOYEES, request.employeeId);
+    const attachments = canViewAttachments ? await this.prisma.employeeDocument.findMany({
+      where: { leaveRequestId: request.id, deletedAt: null },
+      select: { id: true, fileName: true, fileUrl: true, contentType: true, sizeBytes: true, scanStatus: true, scannedAt: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    }) : [];
+    return { ...request, unpaidDays: request.totalDays.minus(request.paidDays), attachments };
   }
 
   private assertBalanceValues(totalValue: number | Prisma.Decimal, usedValue: number | Prisma.Decimal, pendingValue: number | Prisma.Decimal) {

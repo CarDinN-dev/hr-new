@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
@@ -52,6 +53,12 @@ export class OperationsController {
   @Patch('recruitment/candidates/:id/stage') candidateStage(@Param('id') id: string, @Body() dto: TransitionCandidateDto, @CurrentUser() user: RequestUser) { return this.operations.transitionCandidate(id, dto, user); }
   @Permissions('recruitment.manage')
   @Delete('recruitment/candidates/:id') removeCandidate(@Param('id') id: string, @CurrentUser() user: RequestUser) { return this.operations.removeCandidate(id, user); }
+  @Permissions('recruitment.read')
+  @Get('recruitment/candidates/:id/interview-assessment.pdf') async interviewAssessment(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) { return this.pdfResponse(await this.operations.interviewAssessmentDocument(id, user), response); }
+  @Permissions('recruitment.read')
+  @Get('recruitment/candidates/:id/offer-letter.pdf') async offerLetter(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) { return this.pdfResponse(await this.operations.offerLetterDocument(id, user), response); }
+  @Permissions('recruitment.read')
+  @Get('recruitment/candidates/:id/nda.pdf') async nda(@Param('id') id: string, @CurrentUser() user: RequestUser, @Res({ passthrough: true }) response: Response) { return this.pdfResponse(await this.operations.ndaDocument(id, user), response); }
 
   @Permissions('eos.manage')
   @Post('eos') createEos(@Body() dto: CreateEosDto, @CurrentUser() user: RequestUser) { return this.operations.createEos(dto, user); }
@@ -66,4 +73,12 @@ export class OperationsController {
   @Get('organization-settings') settings(@CurrentUser() user: RequestUser) { return this.operations.getSettings(user); }
   @Permissions('system.configure')
   @Patch('organization-settings') updateSettings(@Body() dto: UpdateOrganizationSettingsDto, @CurrentUser() user: RequestUser) { return this.operations.updateSettings(dto, user); }
+
+  private pdfResponse(document: { buffer: Buffer; fileName: string }, response: Response) {
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(document.fileName)}`);
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.setHeader('Pragma', 'no-cache');
+    return document.buffer;
+  }
 }

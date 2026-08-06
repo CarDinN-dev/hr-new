@@ -669,7 +669,7 @@ model Attendance {
 
 model LeaveType {
   id                  String    @id @default(uuid())
-  name                String    @unique
+  name                String
   code                String    @unique
   description         String?
   annualAllowanceDays Decimal   @default(0) @db.Decimal(5, 2)
@@ -714,6 +714,7 @@ model LeaveRequest {
   startDate                  DateTime
   endDate                    DateTime
   totalDays                  Decimal             @db.Decimal(5, 2)
+  paidDays                   Decimal             @default(0) @db.Decimal(5, 2)
   isHalfDay                  Boolean             @default(false)
   reason                     String?
   status                     LeaveRequestStatus
@@ -735,6 +736,7 @@ model LeaveRequest {
   leaveType LeaveType           @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
   steps     LeaveApprovalStep[]
   decisions LeaveDecision[]
+  attachments EmployeeDocument[]
 
   @@index([requesterUserId])
   @@index([employeeId, createdAt])
@@ -1047,6 +1049,7 @@ model EmployeeDocument {
   sizeBytes           Int?
   sha256              String?
   uploadedById        String
+  leaveRequestId      String?
   expiryDate          DateTime?
   visibility          DocumentVisibility @default(MANAGER_AND_HR)
   scanStatus          DocumentScanStatus @default(PENDING)
@@ -1060,9 +1063,11 @@ model EmployeeDocument {
 
   employee   Employee @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
   uploadedBy Employee @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  leaveRequest LeaveRequest? @relation(fields: [leaveRequestId], references: [id], onDelete: SetNull)
 
   @@index([employeeId])
   @@index([uploadedById])
+  @@index([leaveRequestId])
   @@index([documentType])
   @@index([expiryDate])
   @@index([scanStatus, createdAt])
@@ -1533,6 +1538,8 @@ model RecruitmentCandidate {
   stage      CandidateStage @default(APPLIED)
   rating     Decimal        @default(0) @db.Decimal(3, 2)
   notes      String?
+  interviewAssessment Json?
+  offerDetails        Json?
   appliedOn  DateTime
   version    Int            @default(1)
   createdAt  DateTime       @default(now())

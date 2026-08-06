@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsDate, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateLeaveRequestDto {
@@ -24,6 +24,7 @@ export class CreateLeaveRequestDto {
 
   @ApiPropertyOptional({ default: false, description: 'Allowed only when startDate and endDate are the same day' })
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   isHalfDay?: boolean;
 

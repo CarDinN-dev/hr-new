@@ -4,8 +4,10 @@ import { LeaveRequestsController } from './leave-requests.controller';
 import { LeaveTypesController } from './leave-types.controller';
 import { LeaveService } from './leave.service';
 import { LeaveWorkflowController } from './leave-workflow.controller';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
+  imports: [DocumentsModule],
   controllers: [LeaveTypesController, LeaveBalancesController, LeaveRequestsController, LeaveWorkflowController],
   providers: [LeaveService],
 })
