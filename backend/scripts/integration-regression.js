@@ -489,10 +489,12 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     },
   }, sessions.HR);
   assert.equal(recruitmentCandidate.status, 201, JSON.stringify(recruitmentCandidate.payload));
-  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
-    method: 'PATCH', body: { stage: 'INTERVIEW', expectedVersion: recruitmentCandidate.data.version },
-  }, sessions.HR);
-  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  for (const stage of ['SCREENING', 'INTERVIEW']) {
+    recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+      method: 'PATCH', body: { stage, expectedVersion: recruitmentCandidate.data.version },
+    }, sessions.HR);
+    assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  }
   const interviewPdf = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment.pdf`, {}, sessions.HR);
   assert.equal(interviewPdf.status, 200);
   assert.equal(interviewPdf.contentType.includes('application/pdf'), true);
