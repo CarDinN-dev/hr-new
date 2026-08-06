@@ -11,6 +11,8 @@ type CandidateDocumentData = {
 
 const assetDirectory = resolve(process.cwd(), 'assets', 'recruitment-templates');
 const imageCache = new Map<string, string>();
+const pageLayouts = new WeakMap<jsPDF, { x: number; y: number; scale: number }>();
+const templateMargin = 20;
 
 function pageMaster(name: string) {
   let image = imageCache.get(name);
@@ -35,36 +37,53 @@ function money(value: unknown) {
   return Number.isFinite(amount) ? amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 }
 
+function addPageMaster(doc: jsPDF, name: string, sourceWidth: number, sourceHeight: number) {
+  const width = doc.internal.pageSize.getWidth();
+  const height = doc.internal.pageSize.getHeight();
+  const scale = Math.min((width - templateMargin * 2) / sourceWidth, (height - templateMargin * 2) / sourceHeight);
+  const layout = { x: templateMargin, y: templateMargin, scale };
+  pageLayouts.set(doc, layout);
+  doc.addImage(pageMaster(name), 'PNG', layout.x, layout.y, sourceWidth * scale, sourceHeight * scale, undefined, 'FAST');
+}
+
+function pageLayout(doc: jsPDF) {
+  return pageLayouts.get(doc) ?? { x: 0, y: 0, scale: 1 };
+}
+
 function fitted(doc: jsPDF, value: unknown, x: number, y: number, maxWidth: number, options: { bold?: boolean; align?: 'left' | 'center' | 'right'; size?: number; minSize?: number } = {}) {
   const content = text(value, 300);
   if (!content) return;
+  const layout = pageLayout(doc);
+  const width = maxWidth * layout.scale;
   doc.setFont('helvetica', options.bold ? 'bold' : 'normal');
-  let size = options.size ?? 11;
+  let size = (options.size ?? 11) * layout.scale;
   doc.setFontSize(size);
-  while (size > (options.minSize ?? 7) && doc.getTextWidth(content) > maxWidth) { size -= 0.5; doc.setFontSize(size); }
+  while (size > (options.minSize ?? 7) * layout.scale && doc.getTextWidth(content) > width) { size -= 0.5 * layout.scale; doc.setFontSize(size); }
   doc.setFontSize(size);
-  const output = doc.getTextWidth(content) <= maxWidth ? content : `${content.slice(0, Math.max(1, Math.floor(content.length * maxWidth / doc.getTextWidth(content)) - 3))}...`;
-  doc.text(output, x, y, { align: options.align ?? 'left' });
+  const output = doc.getTextWidth(content) <= width ? content : `${content.slice(0, Math.max(1, Math.floor(content.length * width / doc.getTextWidth(content)) - 3))}...`;
+  doc.text(output, layout.x + x * layout.scale, layout.y + y * layout.scale, { align: options.align ?? 'left' });
 }
 
 function wrapped(doc: jsPDF, value: unknown, x: number, y: number, maxWidth: number, maxLines: number, size = 8) {
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(size);
-  const lines = doc.splitTextToSize(text(value, 2_000), maxWidth).slice(0, maxLines) as string[];
+  const layout = pageLayout(doc);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(size * layout.scale);
+  const lines = doc.splitTextToSize(text(value, 2_000), maxWidth * layout.scale).slice(0, maxLines) as string[];
   if (lines.length === maxLines && text(value, 2_000).length > lines.join(' ').length) lines[maxLines - 1] = `${lines[maxLines - 1].replace(/\.{0,3}$/, '')}...`;
-  if (lines.length) doc.text(lines, x, y, { lineHeightFactor: 1.1 });
+  if (lines.length) doc.text(lines, layout.x + x * layout.scale, layout.y + y * layout.scale, { lineHeightFactor: 1.1 });
 }
 
 function rating(doc: jsPDF, value: unknown, y: number) {
   const score = Number(value);
   const x = ({ 5: 127, 4: 150.5, 3: 172, 2: 194.5, 1: 218.5 } as Record<number, number>)[score];
   if (!x) return;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.text('X', x, y, { align: 'center' });
+  const layout = pageLayout(doc);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(7 * layout.scale); doc.text('X', layout.x + x * layout.scale, layout.y + y * layout.scale, { align: 'center' });
 }
 
 export function interviewAssessmentPdf(candidate: CandidateDocumentData) {
   const assessment = candidate.interviewAssessment ?? {};
-  const doc = new jsPDF({ unit: 'pt', format: 'letter', compress: true });
-  doc.addImage(pageMaster('interview.png'), 'PNG', 0, 0, 612, 792, undefined, 'FAST');
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+  addPageMaster(doc, 'interview.png', 612, 792);
   const small = { size: 5.5, minSize: 4 };
   fitted(doc, assessment.candidateName ?? candidate.name, 64, 61.5, 97, small);
   fitted(doc, date(assessment.date), 178, 61.5, 53, small);
@@ -96,7 +115,7 @@ export function offerLetterPdf(candidate: CandidateDocumentData) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
   for (let page = 1; page <= 4; page += 1) {
     if (page > 1) doc.addPage('a4', 'portrait');
-    doc.addImage(pageMaster(`offer-${page}.png`), 'PNG', 0, 0, 595.28, 841.89, undefined, 'FAST');
+    addPageMaster(doc, `offer-${page}.png`, 595.28, 841.89);
   }
   doc.setPage(1);
   fitted(doc, date(offer.issueDate), 36, 14, 80, { bold: true });
@@ -117,7 +136,7 @@ export function ndaPdf(candidate: CandidateDocumentData) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
   for (let page = 1; page <= 4; page += 1) {
     if (page > 1) doc.addPage('a4', 'portrait');
-    doc.addImage(pageMaster(`nda-${page}.png`), 'PNG', 0, 0, 595.28, 841.89, undefined, 'FAST');
+    addPageMaster(doc, `nda-${page}.png`, 595.28, 841.89);
   }
   doc.setPage(1);
   fitted(doc, offer.candidateName ?? candidate.name, 334, 94, 112);

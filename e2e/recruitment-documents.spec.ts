@@ -58,6 +58,9 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   const assessmentSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview") && request.method() === "PATCH");
   await assessment.getByRole("button", { name: "Save assessment" }).click();
   expect((await assessmentSave).postDataJSON()).toMatchObject({ interviewAssessment: { overallRating: 4, interviewerComments: "Recommended for offer review." } });
+  const assessmentDownload = page.waitForEvent("download");
+  await assessment.getByRole("button", { name: "Download PDF" }).click();
+  await expect((await assessmentDownload).suggestedFilename()).toBe("interview-assessment.pdf");
   await assessment.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.getByRole("button", { name: "Offer documents" }).click();
@@ -72,7 +75,9 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
 
   for (const [button, endpoint] of [["Assessment PDF", "interview-assessment"], ["Offer Letter PDF", "offer-letter"], ["NDA PDF", "nda"]] as const) {
     const requested = page.waitForRequest(request => request.url().endsWith(`/api/v1/recruitment/candidates/candidate-offer/${endpoint}.pdf`));
+    const download = page.waitForEvent("download");
     await offer.getByRole("button", { name: button }).click();
     await requested;
+    await expect((await download).suggestedFilename()).toBe(`${endpoint}.pdf`);
   }
 });

@@ -66,6 +66,15 @@ async function api(pathname, options = {}, session) {
   };
 }
 
+function assertA4(buffer, expectedPages) {
+  const mediaBoxes = [...buffer.toString('latin1').matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/g)];
+  assert.equal(mediaBoxes.length, expectedPages);
+  for (const [, width, height] of mediaBoxes) {
+    assert.ok(Math.abs(Number(width) - 595.28) < 0.1);
+    assert.ok(Math.abs(Number(height) - 841.89) < 0.1);
+  }
+}
+
 async function login(email, loginPassword = password) {
   const result = await api('/auth/login', { method: 'POST', body: { email, password: loginPassword } });
   assert.equal(result.status, 201, `Login failed for ${email}: ${JSON.stringify(result.payload)}`);
@@ -499,6 +508,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(interviewPdf.status, 200);
   assert.equal(interviewPdf.contentType.includes('application/pdf'), true);
   assert.equal(interviewPdf.buffer.subarray(0, 4).toString(), '%PDF');
+  assertA4(interviewPdf.buffer, 1);
   recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
     method: 'PATCH', body: { stage: 'OFFER', expectedVersion: recruitmentCandidate.data.version },
   }, sessions.HR);
@@ -508,6 +518,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     assert.equal(pdf.status, 200);
     assert.equal(pdf.contentType.includes('application/pdf'), true);
     assert.equal(pdf.buffer.subarray(0, 4).toString(), '%PDF');
+    assertA4(pdf.buffer, 4);
   }
 
   const absent = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-02', status: 'ABSENT' } }, sessions.HR);
