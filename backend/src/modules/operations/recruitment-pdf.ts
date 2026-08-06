@@ -12,7 +12,7 @@ type CandidateDocumentData = {
 const assetDirectory = resolve(process.cwd(), 'assets', 'recruitment-templates');
 const imageCache = new Map<string, string>();
 const pageLayouts = new WeakMap<jsPDF, { x: number; y: number; scale: number }>();
-const templateMargin = 20;
+const templateMargin = 26;
 
 function pageMaster(name: string) {
   let image = imageCache.get(name);
@@ -37,13 +37,26 @@ function money(value: unknown) {
   return Number.isFinite(amount) ? amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 }
 
+function addBrandMark(doc: jsPDF, x: number, y: number, width: number, height: number) {
+  doc.addImage(pageMaster('brand-mark.png'), 'PNG', x, y, width, height, undefined, 'FAST');
+}
+
 function addPageMaster(doc: jsPDF, name: string, sourceWidth: number, sourceHeight: number) {
   const width = doc.internal.pageSize.getWidth();
   const height = doc.internal.pageSize.getHeight();
   const scale = Math.min((width - templateMargin * 2) / sourceWidth, (height - templateMargin * 2) / sourceHeight);
-  const layout = { x: templateMargin, y: templateMargin, scale };
+  const layout = { x: (width - sourceWidth * scale) / 2, y: (height - sourceHeight * scale) / 2, scale };
   pageLayouts.set(doc, layout);
   doc.addImage(pageMaster(name), 'PNG', layout.x, layout.y, sourceWidth * scale, sourceHeight * scale, undefined, 'FAST');
+  if (name === 'interview.png') {
+    const xScale = sourceWidth * scale / 1275;
+    const yScale = sourceHeight * scale / 1650;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(layout.x + 48 * xScale, layout.y + 24 * yScale, 95 * xScale, 64 * yScale, 'F');
+    addBrandMark(doc, layout.x + 55 * xScale, layout.y + 25 * yScale, 80 * xScale, 64 * yScale);
+  } else {
+    addBrandMark(doc, width - templateMargin - 25, (layout.y - 20) / 2, 25, 20);
+  }
 }
 
 function pageLayout(doc: jsPDF) {
