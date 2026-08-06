@@ -37,8 +37,8 @@ describe("hierarchy page", () => {
       employee("coo", "EX-001", {}, ["COO"]),
       employee("manager", "MGR-001", { "Full Name": "Amy Manager", Department: "Engineering", "Manager Employee Code/Name": "EX-001 - coo" }),
       employee("line", "LINE-001", { "Full Name": "Leo Lead", Department: "Engineering", "Manager Employee Code/Name": "MGR-001 - Amy Manager" }),
-      employee("engineer", "EN-001", { "Full Name": "Ben Engineer", Department: "Engineering", "Manager Employee Code/Name": "MGR-001 - Amy Manager", "Line Manager Employee Code/Name": "LINE-001 - Leo Lead" }),
-      employee("manager-direct", "EN-002", { "Full Name": "Cara Engineer", Department: "Engineering", "Manager Employee Code/Name": "MGR-001 - Amy Manager" }),
+      employee("engineer", "EN-001", { "Full Name": "Ben Engineer", Department: "Engineering", "Line Manager Employee Code/Name": "LINE-001 - Leo Lead" }),
+      employee("manager-direct", "EN-002", { "Full Name": "Cara Engineer", Department: "Engineering", "Manager Employee Code/Name": "MGR-001 - Amy Manager", "Line Manager Employee Code/Name": "LINE-001 - Leo Lead" }),
     ]);
 
     const manager = department(hierarchy, "COO", "Engineering").branches[0];
@@ -63,8 +63,8 @@ describe("hierarchy page", () => {
 
     const operations = hierarchy.unassignedDepartments[0];
     const manager = operations.branches.find(branch => branch.member.id === "manager")!;
-    expect(manager.children.map(branch => branch.member.id)).toEqual(["line", "manager-only"]);
-    expect(manager.children.find(branch => branch.member.id === "line")!.children.map(branch => branch.member.id)).toEqual(["both", "legacy", "line-only"]);
+    expect(manager.children.map(branch => branch.member.id)).toEqual(["both", "line", "manager-only"]);
+    expect(manager.children.find(branch => branch.member.id === "line")!.children.map(branch => branch.member.id)).toEqual(["legacy", "line-only"]);
     expect(operations.branches.find(branch => branch.member.id === "missing")).toMatchObject({ code: "EMPLOYEE" });
     expect(flatten(operations.branches).map(branch => branch.member.id).sort()).toEqual(["both", "legacy", "line", "line-only", "manager", "manager-only", "missing"].sort());
   });

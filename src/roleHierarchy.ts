@@ -128,7 +128,7 @@ export function buildCompanyRoleHierarchy(employees: EmployeeRecord[]): CompanyR
   const reportingParent = (record: EmployeeRecord) => {
     const manager = managerFor(record);
     const lineManager = lineManagerFor(record);
-    return lineManager && lineManager.id !== manager?.id ? lineManager : manager;
+    return manager ?? lineManager;
   };
 
   activeRecords.forEach(record => {
