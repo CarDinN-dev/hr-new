@@ -42,6 +42,9 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
     { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager", email: "manager@example.invalid", hireDate: "2021-06-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Operations Manager", code: "OPS_MANAGER" }, user: { roles: [{ role: { code: "MANAGER" } }] }, manager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" }, lineManager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" } },
     { id: "coo-direct", employeeCode: "OPS-002", firstName: "Corey", lastName: "Direct", email: "coo.direct@example.invalid", hireDate: "2022-01-01", employmentStatus: "ACTIVE", department: { id: "department-executive", name: "Executive Office", code: "EXEC" }, position: { title: "Executive Analyst", code: "EXEC_ANALYST" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" }, lineManager: { id: "coo-employee", employeeCode: "EXE-001", firstName: "Omar", lastName: "Operations" } },
     { id: "operations-report", employeeCode: "OPS-003", firstName: "Riley", lastName: "Report", email: "operations.report@example.invalid", hireDate: "2022-06-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Operations Specialist", code: "OPS_SPECIALIST" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager" }, lineManager: null },
+    { id: "operations-line-lead", employeeCode: "OPS-004", firstName: "Avery", lastName: "Lead", email: "operations.lead@example.invalid", hireDate: "2022-07-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Service Lead", code: "SERVICE_LEAD" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager" }, lineManager: null },
+    { id: "operations-report-3", employeeCode: "OPS-005", firstName: "Jordan", lastName: "Field", email: "operations.field@example.invalid", hireDate: "2022-08-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Field Coordinator", code: "FIELD_COORDINATOR" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: { id: "operations-manager", employeeCode: "OPS-001", firstName: "Morgan", lastName: "Manager" }, lineManager: null },
+    { id: "operations-grandchild", employeeCode: "OPS-006", firstName: "Casey", lastName: "Nested", email: "operations.nested@example.invalid", hireDate: "2023-01-01", employmentStatus: "ACTIVE", department: { id: "department-operations", name: "Operations", code: "OPS" }, position: { title: "Service Coordinator", code: "SERVICE_COORDINATOR" }, user: { roles: [{ role: { code: "EMPLOYEE" } }] }, manager: null, lineManager: { id: "operations-line-lead", employeeCode: "OPS-004", firstName: "Avery", lastName: "Lead" } },
   ];
   const policies = [
     { id: "policy-hr", workflowType: "LEAVE", stage: "HR", mode: "ANY_ONE", version: 1, members: [] },
@@ -223,13 +226,44 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect(executiveOffice.getByText("Corey Direct")).toBeVisible();
   await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="company-coo"][data-target-id="coo-department-0"]')).toHaveCount(1);
 
-  const operations = cooChildren.locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Operations.*2 people.*1 direct report/ }) });
+  const operations = cooChildren.locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Operations.*5 people.*1 direct report/ }) });
+  await expect(operations.locator(".company-role-cards")).toHaveCSS("display", "flex");
   const operationsManager = operations.getByRole("button", { name: /Morgan Manager.*Manager.*OPS-001/ });
   await expect(operationsManager).toHaveAttribute("aria-expanded", "false");
-  await operationsManager.click();
-  const operationsReport = operations.getByRole("listitem").filter({ hasText: "Riley Report" });
+  await operationsManager.scrollIntoViewIfNeeded();
+  await operationsManager.evaluate(element => element.focus({ preventScroll: true }));
+  const managerBeforeExpansion = await operationsManager.evaluate(element => {
+    const viewport = element.closest(".company-role-viewport")!.getBoundingClientRect();
+    const node = element.getBoundingClientRect();
+    return { x: node.left - viewport.left, y: node.top - viewport.top };
+  });
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => operationsManager.evaluate((element, before) => {
+    const viewport = element.closest(".company-role-viewport")!.getBoundingClientRect();
+    return Math.abs(element.getBoundingClientRect().left - viewport.left - before.x);
+  }, managerBeforeExpansion)).toBeLessThan(64);
+  await expect.poll(async () => operationsManager.evaluate((element, before) => {
+    const viewport = element.closest(".company-role-viewport")!.getBoundingClientRect();
+    return Math.abs(element.getBoundingClientRect().top - viewport.top - before.y);
+  }, managerBeforeExpansion)).toBeLessThan(64);
+  const operationsReport = operations.getByRole("button", { name: /Riley Report.*Employee.*OPS-003/ });
+  const operationsLineLead = operations.getByRole("button", { name: /Avery Lead.*Line Manager.*OPS-004/ });
+  const operationsFieldReport = operations.getByRole("button", { name: /Jordan Field.*Employee.*OPS-005/ });
   await expect(operationsReport).toContainText("Reports toMorgan Manager");
-  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-operations-manager"][data-target-id="reporting-operations-report"]')).toHaveCount(1);
+  const directReportBoxes = await Promise.all([operationsLineLead, operationsFieldReport, operationsReport].map(locator => locator.boundingBox()));
+  expect(directReportBoxes.every(Boolean)).toBe(true);
+  expect(Math.max(...directReportBoxes.map(box => box!.y)) - Math.min(...directReportBoxes.map(box => box!.y))).toBeLessThan(3);
+  const reportsByX = directReportBoxes.map(box => box!).sort((left, right) => left.x - right.x);
+  expect(reportsByX[0].x + reportsByX[0].width).toBeLessThanOrEqual(reportsByX[1].x);
+  expect(reportsByX[1].x + reportsByX[1].width).toBeLessThanOrEqual(reportsByX[2].x);
+  const managerBox = (await operationsManager.boundingBox())!;
+  const reportsCenter = (reportsByX[0].x + reportsByX[0].width / 2 + reportsByX[2].x + reportsByX[2].width / 2) / 2;
+  expect(Math.abs(managerBox.x + managerBox.width / 2 - reportsCenter)).toBeLessThan(4);
+  for (const reportId of ["operations-line-lead", "operations-report-3", "operations-report"]) await expect(page.locator(`.company-role-canvas .role-flowchart-line[data-source-id="reporting-operations-manager"][data-target-id="reporting-${reportId}"]`)).toHaveCount(1);
+  await operationsLineLead.click();
+  const nestedReport = operations.getByRole("button", { name: /Casey Nested.*Employee.*OPS-006/ });
+  await expect(nestedReport).toBeVisible();
+  expect((await nestedReport.boundingBox())!.y).toBeGreaterThan((await operationsLineLead.boundingBox())!.y);
 
   const humanResources = page.locator(".company-role-executive-subtree").locator(".company-role-department-branch").filter({ has: page.getByRole("button", { name: /Human Resources.*3 people.*1 direct report/ }) });
   const humanResourcesButton = humanResources.getByRole("button", { name: /Human Resources.*3 people.*1 direct report/ });
@@ -244,38 +278,49 @@ test("Admin can explore and export the department role hierarchy without changin
   const lineManagerBranch = humanResources.getByRole("button", { name: /Lina Lead.*Line Manager.*HR-LM/ });
   await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-manager"][data-target-id="reporting-hr-line-manager"]')).toHaveCount(1);
   await lineManagerBranch.click();
-  const target = humanResources.getByRole("listitem").filter({ hasText: "Taylor Target" });
+  const target = humanResources.getByRole("button", { name: /Taylor Target.*Employee.*EMP-001/ });
   await expect(target).toBeVisible();
   await expect(target.getByText(/EMP-001.*HR Specialist/)).toBeVisible();
   await expect(target).toContainText("Reports toLina Lead");
   await expect(target.getByText("On leave")).toBeVisible();
   await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-line-manager"][data-target-id="reporting-target-employee"]')).toHaveCount(1);
   await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-line-manager"][data-target-id="reporting-target-employee"]')).toHaveClass(/direct-active/);
+  await target.click();
+  await expect(target).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("Taylor Target");
+  await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-line-manager"][data-target-id="reporting-target-employee"]')).toHaveClass(/path-active/);
   expect(await target.evaluate(element => parseFloat(getComputedStyle(element.closest(".company-role-card-shell")!).animationDuration))).toBeLessThan(0.001);
 
   const search = page.getByPlaceholder("Find department, manager, or employee");
   await search.fill("Riley Report");
   await expect(operations.getByText("Riley Report")).toBeVisible();
-  await expect(page.getByText("1 matching person")).toBeVisible();
+  await expect(page.getByText("1 result", { exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("Operations");
   await expect(page.getByRole("button", { name: "Previous role hierarchy result" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next role hierarchy result" })).toBeVisible();
   await search.fill("");
 
   await search.fill("Manager");
-  await expect(page.getByText("3 matching people")).toBeVisible();
-  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("1 of 3");
+  await expect(page.getByText("4 results", { exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("1 of 4");
   await page.getByRole("button", { name: "Next role hierarchy result" }).click();
-  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("2 of 3");
+  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("2 of 4");
   await search.fill("");
 
-  await page.getByRole("button", { name: "Focus Human Resources department" }).click();
+  await search.fill("CPO");
+  await expect(page.getByText("1 result", { exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("CPO");
+  await search.fill("Human Resources");
+  await expect(page.getByText("1 result", { exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("Human Resources");
+  await search.fill("");
+
+  await page.getByLabel("View department").selectOption({ label: "Human Resources" });
   await expect(page.locator(".company-role-hierarchy")).toHaveClass(/company-role-hierarchy-focused/);
-  await expect(page.getByLabel("Jump to department")).toHaveValue(/cpo-department-/);
+  await expect(page.getByLabel("View department")).toHaveValue(/cpo-department-/);
   await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("COO");
   await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("CPO");
-  await expect(page.getByRole("button", { name: "Overview" })).toBeVisible();
-  await page.getByRole("button", { name: "Overview" }).click();
+  await page.getByLabel("View department").selectOption("");
   await expect(page.locator(".company-role-hierarchy")).not.toHaveClass(/company-role-hierarchy-focused/);
 
   await page.getByRole("button", { name: "Expand all" }).click();
@@ -298,9 +343,16 @@ test("Admin can explore and export the department role hierarchy without changin
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(flowViewport).toBeVisible();
   await expect.poll(() => flowViewport.evaluate(element => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+  await expect(flowViewport).toHaveCSS("overflow-y", "visible");
+  await expect(page.locator(".company-role-canvas")).toHaveCSS("position", "relative");
+  await expect(canvasControls).toBeHidden();
   await expect(page.locator(".company-role-departments").first()).toHaveCSS("display", "grid");
-  await expect.poll(() => page.locator(".company-role-canvas .role-flowchart-line").count()).toBeGreaterThan(0);
-  expect(await page.locator(".company-role-canvas .role-flowchart-line").evaluateAll(lines => lines.every(line => !line.getAttribute("d")?.includes("NaN")))).toBe(true);
+  await expect(operations.locator(".company-role-cards")).toHaveCSS("display", "grid");
+  await expect(page.locator(".company-role-canvas .role-flowchart-connectors")).toBeHidden();
+  const mobileDirectReportBoxes = await Promise.all([operationsLineLead, operationsFieldReport, operationsReport].map(locator => locator.boundingBox()));
+  expect(Math.max(...mobileDirectReportBoxes.map(box => box!.x)) - Math.min(...mobileDirectReportBoxes.map(box => box!.x))).toBeLessThan(3);
+  expect(new Set(mobileDirectReportBoxes.map(box => Math.round(box!.y))).size).toBe(3);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
   await page.getByLabel("Switch to dark mode").click();
   await expect(target.getByText("Taylor Target")).toBeVisible();
   await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(21, 34, 56)");
