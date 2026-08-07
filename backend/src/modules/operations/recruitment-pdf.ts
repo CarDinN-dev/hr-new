@@ -15,6 +15,7 @@ const pageWidth = 595.28;
 const pageHeight = 841.89;
 const margin = 38;
 const letterheadTop = 110;
+const footerY = pageHeight - 28;
 
 function logo() {
   brandMark ??= `data:image/png;base64,${readFileSync(resolve(assetDirectory, 'brand-mark.png')).toString('base64')}`;
@@ -231,8 +232,10 @@ export function interviewAssessmentPdf(candidate: CandidateDocumentData) {
   cell(doc, x, y, w, 14, grey); cellText(doc, 'Documents Availability:', x, y, w, 14, 6.5, true); y += 14; cell(doc, x, y, descriptionWidth, 28); cell(doc, x + descriptionWidth, y, w - descriptionWidth, 28); cellText(doc, `• Visa Status\n• Driving license`, x, y, descriptionWidth, 28, 5.8); cellText(doc, `${assessment.visaStatus ?? ''}\n${assessment.drivingLicense ?? ''}`, x + descriptionWidth, y, w - descriptionWidth, 28, 5.8); y += 28;
   cell(doc, x, y, descriptionWidth, 37); cell(doc, x + descriptionWidth, y, w - descriptionWidth, 37); cellText(doc, '• Current Salary\n• Expected Salary\n• Expected Date of Joining', x, y, descriptionWidth, 37, 5.8); cellText(doc, `${assessment.currentSalary ?? ''}\n${assessment.expectedSalary ?? ''}\n${date(assessment.expectedJoiningDate)}`, x + descriptionWidth, y, w - descriptionWidth, 37, 5.8); y += 37;
   for (const [label, value, height] of [['Interviewer Comments', assessment.interviewerComments, 30], ['Supervisor/Department Head/Manager Comment(s)', assessment.managerComments, 37]] as const) { cell(doc, x, y, w, 13, blue); cellText(doc, label, x, y, w, 13, 6.2, true); y += 13; cell(doc, x, y, w, height); cellText(doc, value, x, y, w, height, 5.8); y += height + 5; }
-  doc.setDrawColor(90, 90, 90); doc.line(x + 45, y + 12, x + 190, y + 12); doc.line(x + 320, y + 12, x + 475, y + 12); cellText(doc, 'Zahira Hassan\nInterviewed by: CPO', x + 35, y + 12, 165, 28, 6, false, 'center'); cellText(doc, 'Hafiz Hassan Kunhi\nApproved by : COO', x + 308, y + 12, 180, 28, 6, false, 'center');
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.text('The printed copies of the document are not controlled. Document users are responsible for ensuring printed copies are valid prior to use. Documents are restricted for editing by Unauthorized Staff.', pageWidth / 2, pageHeight - 20, { align: 'center' });
+  // ponytail: reserve writing room without moving the fixed assessment sections.
+  const signatureY = Math.min(y + 52, footerY - 50);
+  doc.setDrawColor(90, 90, 90); doc.line(x + 45, signatureY, x + 190, signatureY); doc.line(x + 320, signatureY, x + 475, signatureY); cellText(doc, 'Zahira Hassan\nInterviewed by: CPO', x + 35, signatureY, 165, 28, 6, false, 'center'); cellText(doc, 'Hafiz Hassan Kunhi\nApproved by : COO', x + 308, signatureY, 180, 28, 6, false, 'center');
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.text('The printed copies of the document are not controlled. Document users are responsible for ensuring printed copies are valid prior to use. Documents are restricted for editing by Unauthorized Staff.', pageWidth / 2, footerY, { align: 'center' });
   return Buffer.from(doc.output('arraybuffer'));
 }
 
