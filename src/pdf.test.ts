@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { jsPDF } from "jspdf";
 import { testState } from "./testState";
 import { saveEmployeeProfilePdf, savePayslipPdf, saveRoleHierarchyPdf } from "./pdf";
 import { createPayroll } from "./domain";
@@ -30,13 +31,15 @@ describe("professional PDF output", () => {
     expect(() => dataUrlBlob(`data:application/pdf;base64,${btoa("not a pdf")}`)).toThrow("Saved PDF data is invalid.");
   });
 
-  it("exports the complete company role hierarchy as a landscape PDF", () => {
+  it("exports the complete company role hierarchy as a landscape PDF", async () => {
     const state = testState();
-    const file = saveRoleHierarchyPdf(state.employees, state.settings);
+    const addSvgAsImage = vi.spyOn(jsPDF.API as unknown as { addSvgAsImage: (...args: unknown[]) => Promise<unknown> }, "addSvgAsImage").mockResolvedValue(undefined);
+    const file = await saveRoleHierarchyPdf(state.employees, state.settings);
 
     expect(file.filename).toBe("Company-Role-Hierarchy.pdf");
     expect(file.dataUrl).toMatch(/^data:application\/pdf/);
     expect(dataUrlBlob(file.dataUrl).size).toBeGreaterThan(5_000);
     expect(file.sizeBytes).toBeGreaterThan(5_000);
+    expect(addSvgAsImage).toHaveBeenCalledWith(expect.stringContaining('viewBox="810 420 300 240"'), 14, 3, 20, 16);
   });
 });
