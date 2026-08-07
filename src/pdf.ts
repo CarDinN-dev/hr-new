@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { RowInput } from "jspdf-autotable";
-import brandMark from "./brand-mark.svg?raw";
+import brandMark from "./brand-mark.png?inline";
 import type { EmployeeRecord, EosRecord, HrSettings, HrState, PdfTemplate, PayrollSlip } from "./data";
 import { months, pdfTemplates, reportTemplates } from "./data";
 import { attendanceStats, employeeName, employeeSalary, eosSummary, formatDate, formatMoney, moneyValue } from "./domain";
@@ -148,7 +148,7 @@ export function saveEosPdf(record: EosRecord, employee: EmployeeRecord, settings
   return finish(doc, settings, `EOS-${safe(employee.fields["Employee Code"])}-${record.asOf}.pdf`);
 }
 
-export async function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSettings): Promise<GeneratedPdf> {
+export function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings: HrSettings) {
   const hierarchy = buildCompanyRoleHierarchy(employees);
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
   doc.setProperties({ title: "Company Role Hierarchy", subject: "Executive-owned departments and named reporting relationships", author: settings.company.legalName, creator: "MedTech HR ERP" });
@@ -209,7 +209,7 @@ export async function saveRoleHierarchyPdf(employees: EmployeeRecord[], settings
   const pages = doc.getNumberOfPages();
   for (let current = 1; current <= pages; current += 1) {
     doc.setPage(current);
-    await drawRoleHierarchyChrome(doc, settings, current, pages);
+    drawRoleHierarchyChrome(doc, settings, current, pages);
   }
   const filename = "Company-Role-Hierarchy.pdf";
   const dataUrl = doc.output("datauristring");
@@ -297,10 +297,10 @@ function roleHierarchyEmpty(doc: jsPDF, message: string) {
   doc.text(message, 148.5, 118, { align: "center" });
 }
 
-async function drawRoleHierarchyChrome(doc: jsPDF, settings: HrSettings, current: number, pages: number) {
+function drawRoleHierarchyChrome(doc: jsPDF, settings: HrSettings, current: number, pages: number) {
   doc.setFillColor(250, 250, 251);
   doc.rect(0, 0, 297, 22, "F");
-  await doc.addSvgAsImage(brandMark.replace('viewBox="0 0 1920 1080"', 'viewBox="810 420 300 240"'), 14, 3, 20, 16);
+  doc.addImage(brandMark, "PNG", 14, 3, 20, 16);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.2);
   doc.setTextColor(...brand.muted);

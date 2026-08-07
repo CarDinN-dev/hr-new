@@ -602,8 +602,8 @@ function App() {
             await apiRequest(`/employees/${employeeId}`, { method: "PATCH", csrfToken: backendSession.csrfToken, body: JSON.stringify(reporting) });
             await refreshWorkspace();
             notify("Reporting lines updated in Employees and Hierarchy.");
-          }} onExportRoleHierarchy={() => void withPdf(async pdf => {
-            const file = await pdf.saveRoleHierarchyPdf(state.employees, state.settings);
+          }} onExportRoleHierarchy={() => void withPdf(pdf => {
+            const file = pdf.saveRoleHierarchyPdf(state.employees, state.settings);
             notify(`${file.filename} downloaded.`);
           })} />}
           {nav === "System" && <SystemAccessPage session={backendSession} notify={notify} />}
