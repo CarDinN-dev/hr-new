@@ -207,8 +207,12 @@ export async function loadBackendState(current: HrState, session: BackendSession
   const listWhen = <T>(allowed: boolean, path: string) => allowed ? apiList<T>(path) : Promise.resolve([] as T[]);
   const getWhen = <T>(allowed: boolean, path: string) => allowed ? apiRequest<T>(path) : Promise.resolve(null as T);
   const broadEmployeeRead = hasAnyPermission(session, "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
-  const employeesRequest = broadEmployeeRead
-    ? apiList<BackendEmployee>("/employees")
+  const departmentEmployeeRead = hasPermission(session, "employee.department.read") && !broadEmployeeRead;
+  const employeesRequest = departmentEmployeeRead
+    ? Promise.all([apiList<BackendEmployee>("/employees"), apiRequest<BackendEmployee>("/employees/me")])
+      .then(([department, self]) => [...department.filter(employee => employee.id !== self.id), self])
+    : broadEmployeeRead
+      ? apiList<BackendEmployee>("/employees")
     : hasPermission(session, "employee.self.read")
       ? apiRequest<BackendEmployee>("/employees/me").then(employee => employee ? [employee] : [])
       : Promise.resolve([] as BackendEmployee[]);

@@ -369,8 +369,8 @@ export class OperationsService {
     this.assertSystemScope(user, 'system.configure', 'default');
     return this.transaction(async (tx) => {
       const previous = await tx.organizationSettings.findUnique({ where: { id: 'default' } });
-      if (previous && dto.expectedVersion !== previous.version) throw new ConflictException('Organization settings changed; refresh and retry');
-      const { expectedVersion: _expectedVersion, ...input } = dto;
+      const { expectedVersion, ...input } = dto;
+      if (previous && expectedVersion !== previous.version) throw new ConflictException('Organization settings changed; refresh and retry');
       const data = {
         ...input,
         workdayHours: input.workdayHours === undefined ? undefined : nonNegativeMoney(input.workdayHours, 'workdayHours'),

@@ -32,13 +32,13 @@ async function main() {
   const netPay = grossPay.minus(sumMoney(['100', '25']));
   assert.equal(grossPay.toFixed(2), '3250.00');
   assert.equal(netPay.toFixed(2), '3125.00');
-  const lopDays = await payroll.payrollLopDays('employee-1', new Date('2026-07-01T00:00:00Z'), new Date('2026-07-31T23:59:59Z'), {
+  const lopDays = sumMoney([...(await payroll.payrollLopDayValues('employee-1', new Date('2026-07-01T00:00:00Z'), new Date('2026-07-31T23:59:59Z'), {
     attendance: { findMany: async () => [
       { attendanceDate: new Date('2026-07-02T00:00:00Z'), status: AttendanceStatus.ABSENT },
       { attendanceDate: new Date('2026-07-03T00:00:00Z'), status: AttendanceStatus.HALF_DAY },
     ] },
     leaveRequest: { findMany: async () => [] },
-  });
+  })).values()]);
   assert.equal(lopDays.toFixed(2), '1.50');
   assert.equal(money(new Prisma.Decimal('111600').div(30).times(lopDays)).toFixed(2), '5580.00');
 

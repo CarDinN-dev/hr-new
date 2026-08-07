@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BackendSession } from "./api";
-import { canAccessRoute } from "./authorization";
+import { canAccessRoute, workforceDashboardRole } from "./authorization";
 
 function session(roles: string[], permissions: string[]): BackendSession {
   return {
@@ -44,5 +44,19 @@ describe("System route authorization", () => {
 
   it("allows employee Settings for signed-in device management", () => {
     expect(canAccessRoute(session(["EMPLOYEE"], ["session.self.read"]), "Settings")).toBe(true);
+  });
+
+  it("gives workforce roles the department directory without Attendance", () => {
+    for (const role of ["EMPLOYEE", "LINE_MANAGER", "MANAGER"]) {
+      const workforce = session([role], ["session.self.read", "employee.self.read", "employee.department.read"]);
+      expect(canAccessRoute(workforce, "Employees")).toBe(true);
+      expect(canAccessRoute(workforce, "Attendance")).toBe(false);
+      expect(workforceDashboardRole(workforce)).toBe(role);
+    }
+  });
+
+  it("uses the company dashboard when a higher role is also active", () => {
+    expect(workforceDashboardRole(session(["MANAGER", "HR"], []))).toBeNull();
+    expect(workforceDashboardRole(session(["CPO"], []))).toBeNull();
   });
 });

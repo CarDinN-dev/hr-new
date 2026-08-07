@@ -21,6 +21,7 @@ export type RequestUser = {
   authorizationVersion: number;
   csrfToken?: string;
   employeeId?: string | null;
+  employeeDepartmentId?: string | null;
   departmentScopeIds: string[];
   reauthenticatedAt?: Date;
   requestId?: string;

@@ -565,10 +565,6 @@ function clearLeaveAttendance(attendance: HrState["attendance"], leave: LeaveReq
   return next;
 }
 
-function leaveDaysInYear(leave: LeaveRequest, year: number) {
-  return roundMoney([...leaveDayWeights([leave], String(year)).values()].reduce((sum, value) => sum + value, 0));
-}
-
 function leaveDayWeights(leaves: LeaveRequest[], prefix: string) {
   const dates = new Map<string, number>();
   for (const leave of leaves) {

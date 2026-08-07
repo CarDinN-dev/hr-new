@@ -17,7 +17,6 @@ import {
   CalendarCheck,
   ChevronDown,
   Download,
-  Eye,
   FileText,
   GitBranch,
   HandCoins,
@@ -48,11 +47,9 @@ import {
   splitEmployeeName,
   statusOptions,
   type AttendanceCode,
-  type BusinessTrip,
   candidateStages,
   type EmployeeRecord,
   type EosRecord,
-  type EmployeeExpense,
   type EmployeeLoan,
   type HrState,
   type InterviewAssessment,
@@ -74,11 +71,9 @@ import {
   employeeName,
   employeeSalary,
   eosSummary,
-  expenseTotals,
   formatDate,
   formatMoney,
   hireCandidateAsEmployee,
-  inclusiveDays,
   initials,
   loanBalance,
   loanEstimatedEndPeriod,
@@ -91,7 +86,6 @@ import {
   setAttendance,
   setLoanDeductionOverride,
   todayISO,
-  tripTotal,
   upsertEmployee
 } from "./domain";
 import {
@@ -112,14 +106,14 @@ import {
   startMicrosoftLogin,
   type BackendSession
 } from "./api";
-import { AuthorizationProvider, canAccessRoute, useAuthorization } from "./authorization";
+import { AuthorizationProvider, canAccessRoute, useAuthorization, workforceDashboardRole, type WorkforceDashboardRole } from "./authorization";
 import { persistNormalizedStateDelta } from "./normalizedSync";
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
-import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
+import { saveDownload } from "./features/workflow-utils";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
 import "./styles.css";
@@ -174,7 +168,6 @@ function backendSessionMarker(session: BackendSession) {
 const navIcon = {
   Dashboard: LayoutDashboard,
   "My HR": UserRoundPlus,
-  Team: UsersRound,
   Employees: UsersRound,
   Attendance: CalendarCheck,
   Leave: BriefcaseBusiness,
@@ -192,10 +185,6 @@ const navIcon = {
 
 async function withPdf<T>(action: (pdf: typeof import("./pdf")) => T) {
   return action(await import("./pdf"));
-}
-
-function templateName(id: PdfTemplate) {
-  return pdfTemplates.find(item => item.id === id)?.label ?? reportTemplates.find(item => item.id === id)?.label ?? id;
 }
 
 function confirmDelete(label: string) {
@@ -511,10 +500,11 @@ function App() {
   const visibleNavItems = navItems.filter(item => canAccessRoute(backendSession, item));
   if (!nav) return <NotFoundPage />;
   if (!canAccessRoute(backendSession, nav)) return <AccessDenied onBack={() => setNav("Dashboard")} />;
-  const canViewSalary = hasAnyPermission(backendSession, "employee.self.read_compensation", "payroll.read_compensation");
+  const canViewOwnSalary = hasPermission(backendSession, "employee.self.read_compensation");
+  const canViewAllSalary = hasPermission(backendSession, "payroll.read_compensation");
   const canManageAttendance = hasPermission(backendSession, "attendance.hr.manage");
   const canManageLoans = hasPermission(backendSession, "loan.hr.manage");
-  const pageHint = pageDescription(nav);
+  const pageHint = pageDescription(nav, backendSession);
 
   return (
     <AuthorizationProvider session={backendSession}><div className="app">
@@ -570,13 +560,12 @@ function App() {
         </header>
 
         <div className="content"><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
-          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
+          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} notify={notify} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={() => setNav("Leave")} />}
-          {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
-          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
+          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewOwnSalary={canViewOwnSalary} canViewAllSalary={canViewAllSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canOverrideLimit={canManageLoans} />}
@@ -690,9 +679,10 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 
 function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void>; onOpenLeave: () => void }) {
   const employee = state.employees.find(item => item.id === session.employeeId);
+  const canUpdatePhoto = hasPermission(session, "employee.self.update_basic");
 
   return <div className="dashboard-grid">
-    <ProfilePhotoPanel employee={employee} session={session} notify={notify} refreshWorkspace={refreshWorkspace} />
+    {canUpdatePhoto && <ProfilePhotoPanel employee={employee} session={session} notify={notify} refreshWorkspace={refreshWorkspace} />}
     <section className="panel span-2"><div className="panel-head"><div><h3>Personal information</h3><span>HR maintains these details in Employees.</span></div></div>
       {!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
         {[
@@ -707,23 +697,117 @@ function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { s
   </div>;
 }
 
-function TeamPage({ state, session, notify }: { state: HrState; session: BackendSession; notify: (message: string) => void }) {
-  return <div className="dashboard-grid">
-    <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
-    <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
-      <DataTable label="People in scope" columns={["Employee", "Department", "Status", "Joined"]} rows={state.employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
-    </section>
-    <ApprovalInboxPanel session={session} notify={notify} />
-  </div>;
-}
-
 type DashboardAttendanceReport = { summary: { totalRecords: number; byStatus: Record<string, number> } };
 type DashboardLeave = { id: string; status: string; startDate: string; endDate: string; totalDays: string; employee: { firstName: string; lastName: string }; leaveType: { name: string } };
 type DashboardPayrollRun = { id: string; year: number; month: number; status: string; _count?: { payrolls: number } };
 type DashboardPayslip = { id: string; netPay: string };
 type DashboardBirthday = { id: string; firstName: string; lastName: string; department: string | null; profilePhoto: string | null; date: string; daysUntil: number };
 
-function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
+type DashboardProps = {
+  state: HrState;
+  session: BackendSession;
+  setNav: (nav: NavItem) => void;
+  notify: (message: string) => void;
+  onAddEmployee: () => void;
+  canAddEmployee: boolean;
+  canRunPayroll: boolean;
+  canOpenPayroll: boolean;
+};
+
+function Dashboard(props: DashboardProps) {
+  const role = workforceDashboardRole(props.session);
+  return role ? <WorkforceDashboard state={props.state} session={props.session} setNav={props.setNav} notify={props.notify} role={role} /> : <CompanyDashboard {...props} />;
+}
+
+function WorkforceDashboard({ state, session, setNav, notify, role }: Pick<DashboardProps, "state" | "session" | "setNav" | "notify"> & { role: WorkforceDashboardRole }) {
+  const employee = state.employees.find(item => item.id === session.employeeId);
+  const department = employee?.fields.Department || state.employees.find(item => item.fields.Department)?.fields.Department || "Department not assigned";
+  const active = activeEmployees(state.employees);
+  const onLeave = state.employees.filter(item => item.status === "On Leave");
+  const firstName = session.displayName.trim().split(/\s+/, 1)[0] || "there";
+  const content = {
+    EMPLOYEE: {
+      label: "Employee workspace",
+      title: `Welcome, ${firstName}`,
+      description: `Your profile, leave and colleagues in ${department}.`,
+      focusTitle: "My profile",
+      focusHint: "Your current employment details.",
+    },
+    LINE_MANAGER: {
+      label: "Line Manager workspace",
+      title: `${department} line management`,
+      description: "Support your department and clear first-stage approvals assigned to you.",
+      focusTitle: "Line Manager focus",
+      focusHint: "First-stage approvals assigned to you appear below.",
+    },
+    MANAGER: {
+      label: "Manager workspace",
+      title: `${department} management`,
+      description: "Lead your department and clear manager-stage approvals assigned to you.",
+      focusTitle: "Manager focus",
+      focusHint: "Manager-stage approvals assigned to you appear below.",
+    },
+  }[role];
+
+  return <>
+    <section className="hero-panel">
+      <div className="hero-copy">
+        <p className="section-label">{content.label}</p>
+        <span className="hero-logo-crop"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
+        <h2>{content.title}</h2>
+        <p>{content.description}</p>
+      </div>
+      <div className="dashboard-snapshot">
+        <span>Your workspace</span>
+        <strong>{formatDate(todayISO())}</strong>
+        <dl>
+          <div><dt>Role</dt><dd>{role === "LINE_MANAGER" ? "Line Manager" : role === "MANAGER" ? "Manager" : "Employee"}</dd></div>
+          <div><dt>Department</dt><dd>{department}</dd></div>
+          <div><dt>Team</dt><dd>{state.employees.length} people</dd></div>
+        </dl>
+      </div>
+      <div className="hero-actions">
+        <button className="primary" onClick={() => setNav("Employees")}><UsersRound size={17} /> View department</button>
+        <button onClick={() => setNav("My HR")}><UserRoundPlus size={17} /> My HR</button>
+        {canAccessRoute(session, "Leave") && <button onClick={() => setNav("Leave")}><BriefcaseBusiness size={17} /> Leave</button>}
+      </div>
+    </section>
+
+    <section className="metric-grid">
+      <Metric label="Department team" value={state.employees.length} hint={department} />
+      <Metric label="Active colleagues" value={active.length} hint="active and probationary" tone="ok" />
+      <Metric label="On leave" value={onLeave.length} hint="currently away" tone={onLeave.length ? "warn" : "ok"} />
+    </section>
+
+    <section className="two-col">
+      <div className="panel">
+        <div className="panel-head"><div><h3>{department} team</h3><span>Current colleagues in your department.</span></div><button onClick={() => setNav("Employees")}>Open Employees</button></div>
+        <DataTable
+          label={`${department} team`}
+          empty="No department colleagues are available."
+          columns={["Employee", "Designation", "Status"]}
+          rows={state.employees.slice(0, 6).map(item => [<strong key="employee">{employeeName(item)}</strong>, item.fields.Designation || "-", <Badge key="status" value={item.status} />])}
+        />
+      </div>
+      <div className="panel">
+        <div className="panel-head"><div><h3>{content.focusTitle}</h3><span>{content.focusHint}</span></div></div>
+        <div className="profile-field-grid">
+          <div><span>Employee</span><strong>{employee ? employeeName(employee) : session.displayName}</strong></div>
+          <div><span>Designation</span><strong>{employee?.fields.Designation || "Not assigned"}</strong></div>
+          <div><span>Department</span><strong>{department}</strong></div>
+          <div><span>Reporting manager</span><strong>{employee?.fields["Reporting Manager Employee Code/Name"] || "Not assigned"}</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <div className="dashboard-grid">
+      <MyLeaveStatusPanel session={session} onOpenLeave={() => setNav("Leave")} />
+      {role !== "EMPLOYEE" && <ApprovalInboxPanel session={session} notify={notify} />}
+    </div>
+  </>;
+}
+
+function CompanyDashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: DashboardProps) {
   const active = activeEmployees(state.employees);
   const today = state.attendance[todayISO()] || {};
   const fallbackAttendance = attendanceDaySummary(state.employees, today);
@@ -861,11 +945,15 @@ function EmployeeAvatar({ employee, small = false }: { employee: EmployeeRecord;
   return <span className={`avatar${small ? " small" : ""}`}>{employee.photo ? <img src={employee.photo} alt="" /> : initials(employee)}</span>;
 }
 
-function pageDescription(nav: NavItem) {
+function pageDescription(nav: NavItem, session: BackendSession) {
+  const workforceRole = workforceDashboardRole(session);
+  if (nav === "Dashboard" && workforceRole === "EMPLOYEE") return "Your profile, leave and department colleagues.";
+  if (nav === "Dashboard" && workforceRole === "LINE_MANAGER") return "Your department and assigned line-manager approvals.";
+  if (nav === "Dashboard" && workforceRole === "MANAGER") return "Your department and assigned manager approvals.";
+  if (nav === "Employees" && workforceRole) return "Current colleagues in your department.";
   const descriptions: Record<NavItem, string> = {
     Dashboard: "Attendance, leave, payroll and employee totals.",
     "My HR": "Your personal details, leave application, certificates and payslips.",
-    Team: "Direct reports and managed department work.",
     Employees: "Employee records.",
     Attendance: "Daily attendance and monthly totals.",
     Leave: "Leave requests and balances.",
@@ -883,10 +971,14 @@ function pageDescription(nav: NavItem) {
   return descriptions[nav];
 }
 
-function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
+function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewOwnSalary, canViewAllSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewOwnSalary: boolean; canViewAllSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
   const [query, setQuery] = useState("");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
+  const departmentDirectory = Boolean(session && workforceDashboardRole(session));
+  const self = state.employees.find(employee => employee.id === session?.employeeId);
+  const departmentName = self?.fields.Department || state.employees.find(employee => employee.fields.Department)?.fields.Department || "Department not assigned";
+  const departmentOptions = departmentDirectory ? [] : state.settings.departments;
   const activeCount = state.employees.filter(employee => employee.status === "Active").length;
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
@@ -896,6 +988,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       (!department || employee.fields.Department === department) &&
       (!status || employee.status === status);
   }).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])), [state.employees, query, department, status]);
+  const canViewEmployeeSalary = (employee: EmployeeRecord) => canViewAllSalary || Boolean(canViewOwnSalary && employee.id === session?.employeeId);
 
   function edit(employee?: EmployeeRecord) {
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
@@ -922,8 +1015,8 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       <div className="employee-hero panel">
         <div>
           <p className="section-label">Employees</p>
-          <h3>Employee Directory</h3>
-          <span>{employees.length} shown / {state.employees.length} total records</span>
+          <h3>{departmentDirectory ? `${departmentName} Team` : "Employee Directory"}</h3>
+          <span>{departmentDirectory ? `${state.employees.length} current department member(s)` : `${employees.length} shown / ${state.employees.length} total records`}</span>
         </div>
         <div className="employee-hero-actions">
           {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("employee_directory", state, new Date().getFullYear(), new Date().getMonth() + 1), "employee_directory"))}><Download size={16} /> Directory PDF</button>}
@@ -936,18 +1029,19 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       <div className="employee-stats">
         <Metric label="Active" value={activeCount} hint="working employees" tone="ok" />
         <Metric label="On leave" value={onLeaveCount} hint="currently away" tone={onLeaveCount ? "warn" : undefined} />
-        <Metric label="Departments" value={departmentCount} hint="operational groups" />
+        <Metric label={departmentDirectory ? "Team members" : "Departments"} value={departmentDirectory ? state.employees.length : departmentCount} hint={departmentDirectory ? departmentName : "operational groups"} />
       </div>
       <div className="panel employee-directory-panel">
         <div className="filters employee-filters">
-          <label><Search size={16} /><input aria-label="Search employees" placeholder="Search employee, code, email, department..." value={query} onChange={event => setQuery(event.target.value)} /></label>
-          <select aria-label="Filter employees by department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
+          <label><Search size={16} /><input aria-label="Search employees" placeholder={departmentDirectory ? "Search your department team..." : "Search employee, code, email, department..."} value={query} onChange={event => setQuery(event.target.value)} /></label>
+          {!departmentDirectory && <select aria-label="Filter employees by department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{departmentOptions.map(item => <option key={item}>{item}</option>)}</select>}
           <select aria-label="Filter employees by status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map(item => <option key={item}>{item}</option>)}</select>
         </div>
         {employees.length ? (
           <div className="employee-card-grid">
             {employees.map(employee => {
               const salary = employeeSalary(employee);
+              const canViewSalary = canViewEmployeeSalary(employee);
               return (
                 <article className="employee-card" key={employee.id}>
                   <button className="employee-card-main" onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canUpdate ? () => edit(employee) : undefined} savePdf={savePdf} canExport={canExport} canViewSalary={canViewSalary} />)}>
@@ -1203,6 +1297,7 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
 
 function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, canViewSalary }: { employee: EmployeeRecord; state: HrState; edit?: () => void; close: () => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; canExport: boolean; canViewSalary: boolean }) {
   const salary = employeeSalary(employee);
+  const summaryFields = ["Employee Code", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", ...(canViewSalary ? ["Bank Code", "IBAN No."] : [])];
   return (
     <div className="employee-profile">
       <div className="profile-head">
@@ -1211,7 +1306,7 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
         <Badge value={employee.status} />
       </div>
       <section className="profile-grid">
-        {["Employee Code", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", "Bank Code", "IBAN No."].map(field => (
+        {summaryFields.map(field => (
           <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
         ))}
         {canViewSalary && <div><span>Monthly Total</span><strong>{formatMoney(salary.total, state.settings.company.currency)}</strong></div>}
@@ -1276,7 +1371,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
 
   async function downloadAttendanceTemplate() {
     const { attendanceTemplateHtml } = await import("./attendanceSheet");
-    downloadBlob(new Blob([attendanceTemplateHtml()], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Attendance-Import-Template-${todayISO()}.xls`);
+    saveDownload(new Blob([attendanceTemplateHtml()], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Attendance-Import-Template-${todayISO()}.xls`);
   }
 
   async function importAttendance(file?: File) {
@@ -1401,174 +1496,6 @@ function attendancePunch(employee: EmployeeRecord, code: AttendanceCode | undefi
 
 function AttendanceMetric({ label, value, tone }: { label: string; value: React.ReactNode; tone: "present" | "half" | "leave" | "absent" | "payroll" }) {
   return <div className={`attendance-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function BusinessTrips({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
-  const authorization = useAuthorization();
-  const canCreate = authorization.hasAnyPermission("trip.self.create", "trip.hr.manage");
-  const canReview = authorization.hasAnyPermission("trip.team.approve_manager", "trip.department.approve_manager", "trip.hr.manage");
-  const canClose = authorization.hasPermission("trip.hr.manage");
-  const employees = activeEmployees(state.employees);
-  const eligibleEmployees = authorization.hasPermission("trip.hr.manage")
-    ? employees
-    : employees.filter(employee => employee.id === authorization.scopes.employeeId);
-  const [employeeId, setEmployeeId] = useState(eligibleEmployees[0]?.id || "");
-  const [destination, setDestination] = useState("");
-  const [purpose, setPurpose] = useState("");
-  const [from, setFrom] = useState(todayISO());
-  const [to, setTo] = useState(todayISO());
-  const [perDiem, setPerDiem] = useState("250");
-  const [travelCost, setTravelCost] = useState("0");
-  const [advanceAmount, setAdvanceAmount] = useState("0");
-  const days = from && to && to >= from ? inclusiveDays(from, to) : 0;
-
-  useEffect(() => {
-    if (!eligibleEmployees.some(employee => employee.id === employeeId)) setEmployeeId(eligibleEmployees[0]?.id || "");
-  }, [eligibleEmployees, employeeId]);
-
-  function updateTrip(id: string, patch: Partial<BusinessTrip>) {
-    setState(prev => ({ ...prev, businessTrips: prev.businessTrips.map(item => item.id === id ? { ...item, ...patch } : item) }));
-  }
-
-  function submit() {
-    if (!employeeId || !destination.trim() || !purpose.trim() || !days) return notify("Employee, destination, purpose and valid dates are required.");
-    setState(prev => ({
-      ...prev,
-      businessTrips: [...prev.businessTrips, {
-        id: newId(),
-        version: 1,
-        employeeId,
-        destination,
-        purpose,
-        from,
-        to,
-        days,
-        perDiem: Number(perDiem) || 0,
-        travelCost: Number(travelCost) || 0,
-        advanceAmount: Number(advanceAmount) || 0,
-        status: "Pending",
-        createdOn: todayISO()
-      }]
-    }));
-    setDestination("");
-    setPurpose("");
-    notify("Business trip request added.");
-  }
-
-  return <section className="stack">
-    {canCreate && <div className="panel">
-      <div className="panel-head"><div><h3>Business Trips</h3><span>Requests, costs and advances.</span></div></div>
-      <div className="form-grid compact">
-        <label>Employee<select id="trip-employee" name="trip-employee" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{eligibleEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
-        <label>Destination<input id="trip-destination" name="trip-destination" value={destination} onChange={event => setDestination(event.target.value)} placeholder="Doha, Riyadh, Dubai..." /></label>
-        <label>From<input id="trip-from" name="trip-from" type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
-        <label>To<input id="trip-to" name="trip-to" type="date" value={to} onChange={event => setTo(event.target.value)} /></label>
-        <label>Per diem<input id="trip-per-diem" name="trip-per-diem" type="number" min="0" value={perDiem} onChange={event => setPerDiem(event.target.value)} /></label>
-        <label>Travel cost<input id="trip-travel-cost" name="trip-travel-cost" type="number" min="0" value={travelCost} onChange={event => setTravelCost(event.target.value)} /></label>
-        <label>Advance paid<input id="trip-advance" name="trip-advance" type="number" min="0" value={advanceAmount} onChange={event => setAdvanceAmount(event.target.value)} /></label>
-        <label className="wide" htmlFor="trip-purpose">Purpose<textarea id="trip-purpose" name="trip-purpose" value={purpose} onChange={event => setPurpose(event.target.value)} /></label>
-      </div>
-      <p className="muted">Duration: {days || "-"} day(s). Estimated trip cost: {formatMoney(tripTotal({ days, perDiem: Number(perDiem) || 0, travelCost: Number(travelCost) || 0 }), state.settings.company.currency)}.</p>
-      <div className="form-actions"><button className="primary" onClick={submit}>Add trip request</button></div>
-    </div>}
-    <div className="panel">
-      <div className="panel-head"><h3>Trip Register</h3><span>{state.businessTrips.length} records</span></div>
-      <DataTable label="Business trips" empty="No business trips yet." columns={["Employee", "Destination", "Dates", "Days", "Cost", "Advance", "Status", "Actions"]} rows={state.businessTrips.map(trip => {
-        const employee = state.employees.find(item => item.id === trip.employeeId);
-        return [
-          employeeName(employee),
-          trip.destination,
-          `${formatDate(trip.from)} - ${formatDate(trip.to)}`,
-          trip.days,
-          formatMoney(tripTotal(trip), state.settings.company.currency),
-          formatMoney(trip.advanceAmount, state.settings.company.currency),
-          <Badge key="status" value={trip.status} />,
-          <div className="row-actions" key="actions">
-            {canReview && trip.status === "Pending" && <><button onClick={() => updateTrip(trip.id, { status: "Approved" })}>Approve</button><button onClick={() => updateTrip(trip.id, { status: "Rejected" })}>Reject</button></>}
-            {canClose && trip.status === "Approved" && <button onClick={() => updateTrip(trip.id, { status: "Closed" })}>Close</button>}
-            {(authorization.hasPermission("trip.hr.manage") || (authorization.hasPermission("trip.self.create") && trip.employeeId === authorization.scopes.employeeId)) && trip.status === "Pending" && <button onClick={() => confirmDelete(`trip to ${trip.destination}`) && setState(prev => ({ ...prev, businessTrips: prev.businessTrips.filter(item => item.id !== trip.id) }))}>Delete</button>}
-          </div>
-        ];
-      })} />
-    </div>
-  </section>;
-}
-
-function Expenses({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
-  const authorization = useAuthorization();
-  const canCreate = authorization.hasPermission("expense.self.create");
-  const canReview = authorization.hasAnyPermission("expense.team.approve_manager", "expense.department.approve_manager", "expense.hr.approve");
-  const canPay = authorization.hasPermission("expense.hr.approve");
-  const employees = activeEmployees(state.employees);
-  const eligibleEmployees = employees.filter(employee => employee.id === authorization.scopes.employeeId);
-  const [employeeId, setEmployeeId] = useState(eligibleEmployees[0]?.id || "");
-  const [tripId, setTripId] = useState("");
-  const [category, setCategory] = useState("Travel");
-  const [date, setDate] = useState(todayISO());
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-  const totals = expenseTotals(state.expenses);
-  const employeeTrips = state.businessTrips.filter(item => item.employeeId === employeeId);
-
-  useEffect(() => {
-    if (!eligibleEmployees.some(employee => employee.id === employeeId)) setEmployeeId(eligibleEmployees[0]?.id || "");
-  }, [eligibleEmployees, employeeId]);
-
-  function updateExpense(id: string, patch: Partial<EmployeeExpense>) {
-    setState(prev => ({ ...prev, expenses: prev.expenses.map(item => item.id === id ? { ...item, ...patch } : item) }));
-  }
-
-  function submit() {
-    const value = Number(amount);
-    if (!employeeId || !category.trim() || !date || !Number.isFinite(value) || value <= 0) return notify("Employee, category, date and positive amount are required.");
-    setState(prev => ({
-      ...prev,
-      expenses: [...prev.expenses, { id: newId(), version: 1, employeeId, tripId: tripId || undefined, category, date, amount: value, description, status: "Submitted", createdOn: todayISO() }]
-    }));
-    setAmount("");
-    setDescription("");
-    notify("Expense submitted.");
-  }
-
-  return <section className="stack">
-    <div className="settlement-preview">
-      <div><span>Submitted</span><strong>{formatMoney(totals.submitted, state.settings.company.currency)}</strong></div>
-      <div><span>Approved unpaid</span><strong>{formatMoney(totals.approved, state.settings.company.currency)}</strong></div>
-      <div><span>Paid</span><strong>{formatMoney(totals.paid, state.settings.company.currency)}</strong></div>
-    </div>
-    {canCreate && <div className="panel">
-      <div className="panel-head"><div><h3>Employee Expenses</h3><span>Submit and process employee expenses.</span></div></div>
-      <div className="form-grid compact">
-        <label>Employee<select id="expense-employee" name="expense-employee" value={employeeId} onChange={event => { setEmployeeId(event.target.value); setTripId(""); }}>{eligibleEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
-        <label>Trip<select id="expense-trip" name="expense-trip" value={tripId} onChange={event => setTripId(event.target.value)}><option value="">No trip link</option>{employeeTrips.map(trip => <option key={trip.id} value={trip.id}>{trip.destination} - {formatDate(trip.from)}</option>)}</select></label>
-        <label>Category<select id="expense-category" name="expense-category" value={category} onChange={event => setCategory(event.target.value)}><option>Travel</option><option>Hotel</option><option>Meal</option><option>Medical</option><option>Fuel</option><option>Other</option></select></label>
-        <label>Date<input id="expense-date" name="expense-date" type="date" value={date} onChange={event => setDate(event.target.value)} /></label>
-        <label htmlFor="expense-amount">Amount<input id="expense-amount" name="expense-amount" type="number" min="0" value={amount} onChange={event => setAmount(event.target.value)} /></label>
-        <label className="wide" htmlFor="expense-description">Description<textarea id="expense-description" name="expense-description" value={description} onChange={event => setDescription(event.target.value)} /></label>
-      </div>
-      <div className="form-actions"><button className="primary" onClick={submit}>Submit expense</button></div>
-    </div>}
-    <div className="panel">
-      <div className="panel-head"><h3>Expense Register</h3><span>{state.expenses.length} records</span></div>
-      <DataTable label="Employee expenses" empty="No expenses yet." columns={["Employee", "Category", "Date", "Amount", "Trip", "Status", "Actions"]} rows={state.expenses.map(expense => {
-        const employee = state.employees.find(item => item.id === expense.employeeId);
-        const trip = state.businessTrips.find(item => item.id === expense.tripId);
-        return [
-          employeeName(employee),
-          expense.category,
-          formatDate(expense.date),
-          formatMoney(expense.amount, state.settings.company.currency),
-          trip?.destination || "-",
-          <Badge key="status" value={expense.status} />,
-          <div className="row-actions" key="actions">
-            {canReview && expense.status === "Submitted" && <><button onClick={() => updateExpense(expense.id, { status: "Approved" })}>Approve</button><button onClick={() => updateExpense(expense.id, { status: "Rejected" })}>Reject</button></>}
-            {canPay && expense.status === "Approved" && <button onClick={() => updateExpense(expense.id, { status: "Paid" })}>Mark paid</button>}
-            {(authorization.hasPermission("expense.hr.approve") || (authorization.hasPermission("expense.self.create") && expense.employeeId === authorization.scopes.employeeId)) && expense.status === "Submitted" && <button onClick={() => confirmDelete(`${expense.category} expense`) && setState(prev => ({ ...prev, expenses: prev.expenses.filter(item => item.id !== expense.id) }))}>Delete</button>}
-          </div>
-        ];
-      })} />
-    </div>
-  </section>;
 }
 
 function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
@@ -1929,7 +1856,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   async function downloadRecruitment(candidate: RecruitmentCandidate, document: "interview-assessment" | "offer-letter" | "nda") {
     try {
       const file = await apiDownload(`/recruitment/candidates/${candidate.id}/${document}.pdf`);
-      downloadBlob(file.blob, file.fileName);
+      saveDownload(file.blob, file.fileName);
       notify(`${file.fileName} downloaded.`);
     } catch (error) { notify(errorMessage(error)); }
   }
@@ -2334,22 +2261,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Backend request failed.";
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-function downloadDataUrl(dataUrl: string, filename: string) {
-  downloadBlob(dataUrlBlob(dataUrl), filename);
-}
-
 function loadState(): HrState {
   try {
     const raw = localStorage.getItem(storageKey);
@@ -2415,7 +2326,6 @@ const rootRoute = createRootRoute({
 const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: "hr-shell", component: App });
 const dashboardRoute = createRoute({ getParentRoute: () => shellRoute, path: "/" });
 const meRoute = createRoute({ getParentRoute: () => shellRoute, path: "me" });
-const teamRoute = createRoute({ getParentRoute: () => shellRoute, path: "team" });
 const employeesRoute = createRoute({ getParentRoute: () => shellRoute, path: "employees" });
 const attendanceRoute = createRoute({ getParentRoute: () => shellRoute, path: "attendance" });
 const leaveRoute = createRoute({ getParentRoute: () => shellRoute, path: "leave" });
@@ -2435,7 +2345,6 @@ const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([
     dashboardRoute,
     meRoute,
-    teamRoute,
     employeesRoute,
     attendanceRoute,
     leaveRoute,

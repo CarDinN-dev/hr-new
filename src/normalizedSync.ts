@@ -16,9 +16,8 @@ export async function persistNormalizedStateDelta(before: HrState, after: HrStat
     needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([])
   ]);
   await syncSettings(before, after, existingDepartments, existingLeaveTypes, request, session);
-  const [departments, leaveTypes, positions] = await Promise.all([
+  const [departments, positions] = await Promise.all([
     needsDepartments ? apiList<BackendRecord>("/departments") : Promise.resolve([]),
-    needsLeaveTypes ? apiList<BackendRecord>("/leave/types") : Promise.resolve([]),
     needsEmployeeRelations && hasPermission(session, "position.read") ? apiList<BackendRecord>("/job-positions") : Promise.resolve([])
   ]);
   const departmentIds = new Map(departments.map(row => [String(row.name), String(row.id)]));

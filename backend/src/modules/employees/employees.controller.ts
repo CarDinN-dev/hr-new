@@ -28,13 +28,13 @@ export class EmployeesController {
     return this.employeesService.importMasterData(dto, user);
   }
 
-  @Permissions('session.self.read')
+  @AnyPermission('employee.hr.read', 'employee.read_all')
   @Get('upcoming-birthdays')
   upcomingBirthdays() {
     return this.employeesService.upcomingBirthdays();
   }
 
-  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
+  @AnyPermission('employee.self.read', 'employee.department.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
   @Get()
   list(@Query() query: QueryEmployeesDto, @CurrentUser() user: RequestUser) {
     return this.employeesService.list(query, user);
@@ -58,7 +58,7 @@ export class EmployeesController {
     return this.employeesService.updatePayrollBank(id, dto, user);
   }
 
-  @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
+  @AnyPermission('employee.self.read', 'employee.department.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.employeesService.findById(id, user);

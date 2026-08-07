@@ -12,5 +12,6 @@ describe("application routes", () => {
 
   it("does not silently map an unknown URL to the dashboard", () => {
     expect(navItemForPath("/not-a-module")).toBeNull();
+    expect(navItemForPath("/team")).toBeNull();
   });
 });

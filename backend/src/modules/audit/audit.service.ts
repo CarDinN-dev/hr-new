@@ -13,6 +13,18 @@ import { CreateAuditExportDto, CreateLegalHoldDto, QueryAuditDto, ReleaseLegalHo
 
 type AuditClient = Prisma.TransactionClient | PrismaService;
 
+const auditVerificationSelect = {
+  sequence: true, occurredAtUtc: true, actorUserId: true, actorEmployeeId: true,
+  actorNameSnapshot: true, actorEmailSnapshot: true, actorRoleCodesSnapshot: true,
+  action: true, module: true, resourceType: true, resourceId: true, outcome: true, reason: true,
+  requestId: true, correlationId: true, subjectEmployeeId: true, subjectDepartmentId: true,
+  targetUserId: true, permissionCode: true, scopeType: true, workflowId: true, workflowStage: true,
+  workflowStatus: true, payrollPeriod: true, requestType: true, sessionId: true, ipHash: true,
+  userAgent: true, route: true, httpMethod: true, isOverride: true, isSelfApproval: true,
+  changedFields: true, beforeJson: true, afterJson: true, metadataJson: true,
+  previousEventHash: true, eventHash: true,
+} satisfies Prisma.AuditEventSelect;
+
 export type AuditEntry = {
   action: AuditAction;
   entityType?: string;
@@ -175,35 +187,75 @@ export class AuditService {
 
   async verifyChain(user: RequestUser) {
     this.assertAuditScope(user, 'audit.read');
-    const events = await this.prisma.auditEvent.findMany({ orderBy: { sequence: 'asc' } });
-    const state = await this.prisma.auditChainState.findUnique({ where: { id: 'default' } });
-    let previous: string | null = state?.prunedThroughHash ?? null;
-    let expectedSequence = (state?.prunedThroughSequence ?? 0n) + 1n;
-    for (const event of events) {
-      if (event.sequence !== expectedSequence) return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'sequence gap' };
-      if (event.previousEventHash !== previous) return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'previous hash mismatch' };
-      const payload: Record<string, unknown> = {
-        sequence: event.sequence.toString(), occurredAtUtc: event.occurredAtUtc.toISOString(), actorUserId: event.actorUserId,
-        actorEmployeeId: event.actorEmployeeId, actorNameSnapshot: event.actorNameSnapshot,
-        actorEmailSnapshot: event.actorEmailSnapshot, actorRoleCodesSnapshot: event.actorRoleCodesSnapshot,
-        action: event.action, module: event.module, resourceType: event.resourceType, resourceId: event.resourceId,
-        outcome: event.outcome, reason: event.reason, requestId: event.requestId, correlationId: event.correlationId,
-        subjectEmployeeId: event.subjectEmployeeId, subjectDepartmentId: event.subjectDepartmentId,
-        targetUserId: event.targetUserId, permissionCode: event.permissionCode, scopeType: event.scopeType,
-        workflowId: event.workflowId, workflowStage: event.workflowStage, workflowStatus: event.workflowStatus,
-        payrollPeriod: event.payrollPeriod, requestType: event.requestType, sessionId: event.sessionId,
-        ipHash: event.ipHash, userAgent: event.userAgent, route: event.route, httpMethod: event.httpMethod,
-        isOverride: event.isOverride, isSelfApproval: event.isSelfApproval,
-        changedFields: event.changedFields, before: event.beforeJson, after: event.afterJson,
-        metadata: event.metadataJson, previousEventHash: event.previousEventHash,
-      };
-      const expected: string = createHmac('sha256', this.hashKey).update(this.canonical(payload)).digest('hex');
-      if (expected !== event.eventHash) return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'event hash mismatch' };
-      previous = event.eventHash;
-      expectedSequence += 1n;
+    const state = await this.prisma.auditChainState.findUnique({
+      where: { id: 'default' },
+      select: { lastSequence: true, lastHash: true, prunedThroughSequence: true, prunedThroughHash: true },
+    });
+    if (!state) {
+      const eventCount = await this.prisma.auditEvent.count();
+      return eventCount ? { valid: false, reason: 'chain state mismatch' } : { valid: true, eventCount: 0, lastHash: null };
     }
-    if (state && (state.lastSequence !== expectedSequence - 1n || state.lastHash !== previous)) return { valid: false, reason: 'chain state mismatch' };
-    return { valid: true, eventCount: events.length, lastHash: previous };
+    const target = state;
+    const assertPruneWatermarkUnchanged = async () => {
+      const current = await this.prisma.auditChainState.findUnique({
+        where: { id: 'default' },
+        select: { prunedThroughSequence: true, prunedThroughHash: true },
+      });
+      if ((current?.prunedThroughSequence ?? 0n) !== target.prunedThroughSequence || (current?.prunedThroughHash ?? null) !== target.prunedThroughHash) {
+        throw new ConflictException('Audit retention changed during verification. Try again.');
+      }
+    };
+    let previous: string | null = target.prunedThroughHash;
+    let expectedSequence = target.prunedThroughSequence + 1n;
+    let eventCount = 0;
+    let checkedWatermark = false;
+    while (expectedSequence <= target.lastSequence) {
+      const events = await this.prisma.auditEvent.findMany({
+        where: { sequence: { gte: expectedSequence, lte: target.lastSequence } },
+        orderBy: { sequence: 'asc' },
+        take: 1_000,
+        select: auditVerificationSelect,
+      });
+      if (!events.length) break;
+      for (const event of events) {
+        if (event.sequence !== expectedSequence) {
+          await assertPruneWatermarkUnchanged();
+          return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'sequence gap' };
+        }
+        if (event.previousEventHash !== previous) {
+          await assertPruneWatermarkUnchanged();
+          return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'previous hash mismatch' };
+        }
+        const payload: Record<string, unknown> = {
+          sequence: event.sequence.toString(), occurredAtUtc: event.occurredAtUtc.toISOString(), actorUserId: event.actorUserId,
+          actorEmployeeId: event.actorEmployeeId, actorNameSnapshot: event.actorNameSnapshot,
+          actorEmailSnapshot: event.actorEmailSnapshot, actorRoleCodesSnapshot: event.actorRoleCodesSnapshot,
+          action: event.action, module: event.module, resourceType: event.resourceType, resourceId: event.resourceId,
+          outcome: event.outcome, reason: event.reason, requestId: event.requestId, correlationId: event.correlationId,
+          subjectEmployeeId: event.subjectEmployeeId, subjectDepartmentId: event.subjectDepartmentId,
+          targetUserId: event.targetUserId, permissionCode: event.permissionCode, scopeType: event.scopeType,
+          workflowId: event.workflowId, workflowStage: event.workflowStage, workflowStatus: event.workflowStatus,
+          payrollPeriod: event.payrollPeriod, requestType: event.requestType, sessionId: event.sessionId,
+          ipHash: event.ipHash, userAgent: event.userAgent, route: event.route, httpMethod: event.httpMethod,
+          isOverride: event.isOverride, isSelfApproval: event.isSelfApproval,
+          changedFields: event.changedFields, before: event.beforeJson, after: event.afterJson,
+          metadata: event.metadataJson, previousEventHash: event.previousEventHash,
+        };
+        const expected: string = createHmac('sha256', this.hashKey).update(this.canonical(payload)).digest('hex');
+        if (expected !== event.eventHash) {
+          await assertPruneWatermarkUnchanged();
+          return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'event hash mismatch' };
+        }
+        previous = event.eventHash;
+        expectedSequence += 1n;
+        eventCount += 1;
+      }
+      await assertPruneWatermarkUnchanged();
+      checkedWatermark = true;
+    }
+    if (!checkedWatermark) await assertPruneWatermarkUnchanged();
+    if (target.lastSequence !== expectedSequence - 1n || target.lastHash !== previous) return { valid: false, reason: 'chain state mismatch' };
+    return { valid: true, eventCount, lastHash: previous };
   }
 
   async createExport(dto: CreateAuditExportDto, user: RequestUser) {

@@ -1,0 +1,11 @@
+[Unit]
+Description=Prune MedTech HR ERP audit events hourly when retention is enabled
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10m
+Persistent=true
+Unit=medtech-hr-erp-audit-prune.service
+
+[Install]
+WantedBy=timers.target

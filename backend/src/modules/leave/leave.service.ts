@@ -192,7 +192,7 @@ export class LeaveService {
       this.findTypeById(dto.leaveTypeId),
     ]);
     try {
-      const policy = this.leavePolicy(employee, leaveType, this.leaveDate(dto.startDate), this.leaveDate(dto.endDate), dto.isHalfDay ?? false);
+      const policy = this.leavePolicy(employee, leaveType, this.leaveDate(dto.startDate), this.leaveDate(dto.endDate), this.parseIsHalfDay(dto.isHalfDay));
       const balance = policy.paidDays.gt(0)
         ? await this.prisma.$transaction((tx) => this.ensureBalance(tx, employeeId, leaveType, policy.balanceYear))
         : null;
@@ -255,8 +255,9 @@ export class LeaveService {
     const employeeId = await this.resolveRequestEmployee(dto.employeeId, user);
     const startDate = this.leaveDate(dto.startDate);
     const endDate = this.leaveDate(dto.endDate);
+    const isHalfDay = this.parseIsHalfDay(dto.isHalfDay);
     const [previewEmployee, previewType] = await Promise.all([this.ensureEmployee(employeeId), this.findTypeById(dto.leaveTypeId)]);
-    const preview = this.leavePolicy(previewEmployee, previewType, startDate, endDate, dto.isHalfDay ?? false);
+    const preview = this.leavePolicy(previewEmployee, previewType, startDate, endDate, isHalfDay);
     if (preview.requiresAttachment && !file?.buffer?.length) throw new BadRequestException('An attachment is required for this leave type');
     if (file?.buffer?.length && !user.employeeId) throw new BadRequestException('The uploader must have an employee profile');
     const stored = file?.buffer?.length ? await this.storage.upload(employeeId, file) : null;
@@ -273,7 +274,7 @@ export class LeaveService {
         ]);
         if (!employee?.userId || !employee.user?.isActive) throw new BadRequestException('Employee requires an active linked user account');
         if (!leaveType) throw new NotFoundException('Leave type not found');
-        const policy = this.leavePolicy(employee, leaveType, startDate, endDate, dto.isHalfDay ?? false);
+        const policy = this.leavePolicy(employee, leaveType, startDate, endDate, isHalfDay);
         if (policy.requiresAttachment && !stored) throw new BadRequestException('An attachment is required for this leave type');
         await this.assertLeavePeriodAvailable(employeeId, startDate, endDate, undefined, tx);
         if (policy.paidDays.gt(0)) await this.reserveBalance(tx, employeeId, leaveType, policy.balanceYear, policy.paidDays);
@@ -283,7 +284,7 @@ export class LeaveService {
           data: {
             requesterUserId: user.id, employeeId, leaveTypeId: dto.leaveTypeId, startDate, endDate,
             totalDays: policy.totalDays, paidDays: policy.paidDays,
-            isHalfDay: dto.isHalfDay ?? false, reason: dto.reason,
+            isHalfDay, reason: dto.reason,
             status: workflow.blocked ? LeaveRequestStatus.BLOCKED_APPROVER_MISSING : stageStatus[workflow.steps[0].stage],
             currentStage: workflow.blocked?.stage ?? workflow.steps[0].stage,
             routeType: workflow.routeType, workflowVersion,
@@ -367,7 +368,7 @@ export class LeaveService {
     const nextTypeId = dto.leaveTypeId ?? current.leaveTypeId;
     const nextStart = this.leaveDate(dto.startDate ?? current.startDate);
     const nextEnd = this.leaveDate(dto.endDate ?? current.endDate);
-    const nextHalf = dto.isHalfDay ?? current.isHalfDay;
+    const nextHalf = dto.isHalfDay == null ? current.isHalfDay : this.parseIsHalfDay(dto.isHalfDay);
     const [employee, nextType] = await Promise.all([this.ensureEmployee(current.employeeId), this.findTypeById(nextTypeId)]);
     const preview = this.leavePolicy(employee, nextType, nextStart, nextEnd, nextHalf);
     const validAttachment = await this.prisma.employeeDocument.findFirst({
@@ -526,10 +527,24 @@ export class LeaveService {
         await this.assertPayrollIsOpen(request.employeeId, request.startDate, request.endDate, tx);
       }
       await this.releaseBalance(tx, request, request.status === LeaveRequestStatus.APPROVED);
-      const active = await tx.leaveApprovalStep.findFirst({ where: { requestId: id, workflowVersion: request.workflowVersion, stage: request.currentStage ?? undefined } });
-      if (active && active.status === LeaveStepStatus.PENDING) await tx.leaveApprovalStep.update({ where: { id: active.id }, data: { status: LeaveStepStatus.REJECTED, decisionType: LeaveDecisionType.CANCEL, decidedByUserId: user.id, decidedAt: new Date(), reason: dto.reason, version: { increment: 1 } } });
+      const active = request.currentStage ? await tx.leaveApprovalStep.findFirst({
+        where: { requestId: id, workflowVersion: request.workflowVersion, stage: request.currentStage },
+        include: { assignees: { where: { isActive: true, revokedAt: null }, select: { userId: true } } },
+      }) : null;
+      if (active?.status === LeaveStepStatus.PENDING) {
+        const updated = await tx.leaveApprovalStep.updateMany({
+          where: { id: active.id, version: active.version, status: LeaveStepStatus.PENDING },
+          data: { status: LeaveStepStatus.SKIPPED, decisionType: LeaveDecisionType.CANCEL, decidedByUserId: user.id, decidedAt: new Date(), reason: dto.reason, version: { increment: 1 } },
+        });
+        if (updated.count !== 1) throw new ConflictException('This approval step was already decided');
+      }
+      await this.closePendingSteps(tx, id, request.workflowVersion, active?.id);
       await tx.leaveRequest.update({ where: { id }, data: { status: LeaveRequestStatus.CANCELLED, currentStage: null, finalDecisionAt: new Date(), version: { increment: 1 } } });
       await tx.leaveDecision.create({ data: { requestId: id, stepId: active?.id, actorUserId: user.id, stage: request.currentStage, decisionType: LeaveDecisionType.CANCEL, fromStatus: request.status, toStatus: LeaveRequestStatus.CANCELLED, reason: dto.reason, idempotencyKey: key } });
+      const subject = await tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } });
+      const recipients = [...new Set([request.requesterUserId, subject?.userId, ...(active?.assignees.map(({ userId }) => userId) ?? [])])]
+        .filter((userId): userId is string => Boolean(userId) && userId !== user.id);
+      if (recipients.length) await tx.notification.createMany({ data: recipients.map((userId) => ({ userId, type: 'LEAVE_STATUS', title: 'Leave request cancelled', message: 'A leave request was cancelled and no longer requires approval.', resourceType: 'LeaveRequest', resourceId: id })) });
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: request.currentStage ?? undefined, workflowStatus: LeaveRequestStatus.CANCELLED, summary: 'Leave request cancelled', reason: dto.reason, subjectEmployeeId: request.employeeId, changes: [{ field: 'status', previousValue: request.status, nextValue: LeaveRequestStatus.CANCELLED }] });
       await this.saveIdempotency(tx, user, 'leave.cancel', key, { id, dto }, id);
       return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
@@ -615,7 +630,13 @@ export class LeaveService {
       else await this.releaseBalance(tx, request, request.status === LeaveRequestStatus.APPROVED);
       const step = request.currentStage ? await tx.leaveApprovalStep.findFirst({ where: { requestId: id, workflowVersion: request.workflowVersion, stage: request.currentStage }, include: { assignees: { where: { isActive: true, revokedAt: null }, select: { userId: true } } } }) : null;
       const pendingSteps = await tx.leaveApprovalStep.findMany({ where: { requestId: id, workflowVersion: request.workflowVersion, status: LeaveStepStatus.PENDING }, include: { assignees: { where: { isActive: true, revokedAt: null }, select: { userId: true } } }, orderBy: { sequence: 'asc' } });
-      if (step) await tx.leaveApprovalStep.update({ where: { id: step.id }, data: { status: dto.targetStatus === LeaveRequestStatus.APPROVED ? LeaveStepStatus.APPROVED : LeaveStepStatus.REJECTED, decisionType: LeaveDecisionType.OVERRIDE, decidedByUserId: user.id, decidedAt: new Date(), reason: dto.reason, version: { increment: 1 } } });
+      if (step?.status === LeaveStepStatus.PENDING) {
+        const stepStatus = dto.targetStatus === LeaveRequestStatus.APPROVED
+          ? LeaveStepStatus.APPROVED
+          : dto.targetStatus === LeaveRequestStatus.REJECTED ? LeaveStepStatus.REJECTED : LeaveStepStatus.SKIPPED;
+        await tx.leaveApprovalStep.update({ where: { id: step.id }, data: { status: stepStatus, decisionType: LeaveDecisionType.OVERRIDE, decidedByUserId: user.id, decidedAt: new Date(), reason: dto.reason, version: { increment: 1 } } });
+      }
+      await this.closePendingSteps(tx, id, request.workflowVersion, step?.id);
       await tx.leaveRequest.update({ where: { id }, data: { status: dto.targetStatus, currentStage: null, finalDecisionAt: new Date(), rejectionReason: dto.targetStatus === LeaveRequestStatus.REJECTED ? dto.reason : null, version: { increment: 1 } } });
       await tx.leaveDecision.create({ data: { requestId: id, stepId: step?.id, actorUserId: user.id, stage: request.currentStage, decisionType: LeaveDecisionType.OVERRIDE, fromStatus: request.status, toStatus: dto.targetStatus, reason: dto.reason, idempotencyKey: key, isOverride: true } });
       const [hrUsers, subject] = await Promise.all([
@@ -681,6 +702,7 @@ export class LeaveService {
       ? await tx.leaveApprovalStep.findFirst({ where: { requestId: request.id, workflowVersion: request.workflowVersion, sequence: { gt: step.sequence } }, orderBy: { sequence: 'asc' } })
       : null;
     const terminal = ([LeaveRequestStatus.APPROVED, LeaveRequestStatus.REJECTED] as LeaveRequestStatus[]).includes(nextStatus);
+    if (terminal || nextStatus === LeaveRequestStatus.RETURNED_FOR_CORRECTION) await this.closePendingSteps(tx, request.id, request.workflowVersion, step.id);
     const updatedCount = await tx.leaveRequest.updateMany({
       where: { id: request.id, version: request.version, status: request.status },
       data: {
@@ -711,6 +733,13 @@ export class LeaveService {
       changes: [{ field: 'status', previousValue: request.status, nextValue: nextStatus }],
     });
     return tx.leaveRequest.findUniqueOrThrow({ where: { id: request.id }, include: leaveRequestInclude });
+  }
+
+  private closePendingSteps(tx: Prisma.TransactionClient, requestId: string, workflowVersion: number, decidedStepId?: string) {
+    return tx.leaveApprovalStep.updateMany({
+      where: { requestId, workflowVersion, status: LeaveStepStatus.PENDING, id: decidedStepId ? { not: decidedStepId } : undefined },
+      data: { status: LeaveStepStatus.SKIPPED, version: { increment: 1 } },
+    });
   }
 
   private async workflowPlan(
@@ -1010,6 +1039,10 @@ export class LeaveService {
     return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
   }
 
+  private parseIsHalfDay(value: unknown) {
+    return value === true || value === 'true';
+  }
+
   private leaveDuration(startDate: Date, endDate: Date, isHalfDay: boolean) {
     if (endDate < startDate) throw new BadRequestException('endDate must be on or after startDate');
     if (isHalfDay && endDate.getTime() !== startDate.getTime()) throw new BadRequestException('Half-day leave must use one date');
@@ -1152,6 +1185,7 @@ export class LeaveService {
   private async idempotentResult(tx: Prisma.TransactionClient, user: RequestUser, operation: string, key: string | undefined, payload: unknown) {
     this.validateIdempotencyKey(key);
     const hash = this.requestHash(payload);
+    await tx.idempotencyRecord.deleteMany({ where: { expiresAt: { lte: new Date() } } });
     const existing = await tx.idempotencyRecord.findUnique({ where: { actorUserId_operation_key: { actorUserId: user.id, operation, key: key! } } });
     if (!existing) return null;
     if (existing.requestHash !== hash) throw new ConflictException('Idempotency key was already used with a different request');

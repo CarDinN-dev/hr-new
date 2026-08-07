@@ -52,6 +52,20 @@ test('role inheritance and business separation match the production matrix', () 
   for (const permission of ['employee.self.read', 'leave.self.create', 'announcement.read', 'notification.self.read']) {
     assert.equal(employee.has(permission), true, `EMPLOYEE requires ${permission}`);
   }
+  assert.equal(employee.has('employee.department.read'), true, 'EMPLOYEE requires its department directory');
+  for (const [name, role] of [['EMPLOYEE', employee], ['LINE_MANAGER', lineManager], ['MANAGER', manager]]) {
+    assert.equal(role.has('employee.self.update_basic'), false, `${name} must not update a self-service photo`);
+    for (const permission of catalog.permissions.filter((code) => code.startsWith('attendance.'))) {
+      assert.equal(role.has(permission), false, `${name} must not access Attendance through ${permission}`);
+    }
+  }
+  assert.equal(lineManager.has('employee.team.read'), false);
+  assert.equal(manager.has('employee.management.read'), false);
+  for (const [name, role] of [['HR', hr], ['CPO', cpo], ['COO', coo], ['ADMIN', admin]]) {
+    for (const permission of ['employee.self.update_basic', 'attendance.self.read', 'attendance.self.create', 'attendance.self.correct_request']) {
+      assert.equal(role.has(permission), true, `${name} must retain ${permission}`);
+    }
+  }
   for (const permission of ['employee.self.read_bank', 'employee.self.update_bank']) {
     assert.equal(employee.has(permission), false, `EMPLOYEE must not access self-service bank details`);
   }

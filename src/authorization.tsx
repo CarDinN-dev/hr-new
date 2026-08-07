@@ -6,8 +6,7 @@ import type { NavItem } from "./data";
 const routePermissions: Record<NavItem, string[]> = {
   Dashboard: ["session.self.read"],
   "My HR": ["employee.self.read", "leave.self.read", "service_request.self.read", "payroll.self.read_payslip", "session.self.read"],
-  Team: ["employee.team.read", "employee.management.read", "leave.team.read", "leave.management.read"],
-  Employees: ["employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all"],
+  Employees: ["employee.self.read", "employee.department.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all"],
   Attendance: ["attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"],
   Leave: ["leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.audit.read", "leave.read_all"],
   Loans: ["loan.self.read", "loan.hr.read", "loan.audit.read", "loan.read_all"],
@@ -56,4 +55,13 @@ export function canAccessRoute(session: BackendSession, route: NavItem) {
   if (route === "Hierarchy") return hasActiveHierarchyRole(session);
   if (route === "Payroll") return hasActiveSuperAdminRole(session) || ["HR", "CPO", "COO"].some(role => session.roles.includes(role));
   return hasAnyPermission(session, ...routePermissions[route]);
+}
+
+export type WorkforceDashboardRole = "EMPLOYEE" | "LINE_MANAGER" | "MANAGER";
+
+export function workforceDashboardRole(session: Pick<BackendSession, "roles">): WorkforceDashboardRole | null {
+  if (["HR", "CPO", "COO", "ADMIN", "SUPER_ADMIN"].some(role => session.roles.includes(role))) return null;
+  if (session.roles.includes("MANAGER")) return "MANAGER";
+  if (session.roles.includes("LINE_MANAGER")) return "LINE_MANAGER";
+  return session.roles.includes("EMPLOYEE") ? "EMPLOYEE" : null;
 }

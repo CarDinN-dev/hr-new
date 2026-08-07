@@ -21,6 +21,7 @@ const { AuthService, sessionTokenFromRequest } = require('../dist/modules/auth/a
 const { JwtStrategy } = require('../dist/modules/auth/strategies/jwt.strategy');
 const { MicrosoftAuthService } = require('../dist/modules/auth/microsoft-auth.service');
 const { DocumentsService } = require('../dist/modules/documents/documents.service');
+const { EmployeesService } = require('../dist/modules/employees/employees.service');
 const { LoansService } = require('../dist/modules/loans/loans.service');
 const { LeaveService } = require('../dist/modules/leave/leave.service');
 const { PayrollService } = require('../dist/modules/payroll/payroll.service');
@@ -47,6 +48,7 @@ function user(overrides = {}) {
     authorizationVersion: 1,
     csrfToken: 'csrf',
     employeeId: 'employee-1',
+    employeeDepartmentId: 'department-1',
     departmentScopeIds: [],
     requestId: 'request-1',
     ...overrides,
@@ -435,6 +437,33 @@ test('database throttling survives service recreation and session cookies remain
   );
   assert.equal(sessionTokenFromRequest({ headers: { cookie: 'other=x; __Host-medtech_hr_session=signed-session' } }), 'signed-session');
   assert.equal('accessToken' in first.browserSession({ user: user(), accessToken: 'secret', csrfToken: 'csrf' }), false);
+});
+
+test('employee directory scope is limited to the current department with a self-only fallback', async () => {
+  const queries = [];
+  const employees = new EmployeesService({
+    employee: {
+      findMany: async (query) => { queries.push(query); return []; },
+      count: async () => 0,
+    },
+  }, audit, authorizationStub());
+  await employees.list({ page: 1, limit: 20 }, user({
+    permissions: ['employee.self.read', 'employee.department.read'],
+    rolePermissions: ['employee.self.read', 'employee.department.read'],
+  }));
+  const departmentScope = JSON.stringify(queries.pop().where);
+  assert.match(departmentScope, /"departmentId":"department-1"/u);
+  assert.match(departmentScope, /"ACTIVE","ON_LEAVE","PROBATION"/u);
+  assert.doesNotMatch(departmentScope, /TERMINATED|RESIGNED/u);
+
+  await employees.list({ page: 1, limit: 20 }, user({
+    employeeDepartmentId: null,
+    permissions: ['employee.self.read', 'employee.department.read'],
+    rolePermissions: ['employee.self.read', 'employee.department.read'],
+  }));
+  const selfScope = JSON.stringify(queries.pop().where);
+  assert.match(selfScope, /"id":"employee-1"/u);
+  assert.doesNotMatch(selfScope, /departmentId/u);
 });
 
 test('signed-in devices only include active sessions', async () => {

@@ -16,7 +16,7 @@ import { DocumentStorageService } from '../documents/document-storage.service';
 import { LoansService } from '../loans/loans.service';
 import { CreateSalaryRecordDto } from './dto/create-salary-record.dto';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
-import { CreatePayrollAdjustmentDto, QueryPayrollAdjustmentsDto, ReconcilePayrollPaymentItemDto } from './dto/payroll-adjustment.dto';
+import { CreatePayrollAdjustmentDto, QueryPayrollAdjustmentsDto } from './dto/payroll-adjustment.dto';
 import { MarkPayrollPaidDto, ReconcilePayrollPaymentsDto } from './dto/payment-reconciliation.dto';
 import { PayrollReasonTransitionDto, PayrollTransitionDto } from './dto/payroll-workflow.dto';
 import { QueryPayrollDto } from './dto/query-payroll.dto';
@@ -481,7 +481,7 @@ export class PayrollService {
   async publish(id: string, dto: PayrollTransitionDto, key: string | undefined, user: RequestUser) {
     this.assertRunPermission(user, ['payroll.publish'], id);
     this.validateIdempotencyKey(key);
-    const existing = await this.prisma.idempotencyRecord.findUnique({ where: { actorUserId_operation_key: { actorUserId: user.id, operation: 'payroll.publish', key } } });
+    const existing = await this.prisma.idempotencyRecord.findFirst({ where: { actorUserId: user.id, operation: 'payroll.publish', key, expiresAt: { gt: new Date() } } });
     if (existing) {
       if (existing.requestHash !== this.requestHash({ id, dto })) throw new ConflictException('Idempotency key was already used with a different request');
       return this.findRun(existing.resourceId, user);
@@ -783,10 +783,6 @@ export class PayrollService {
     return days;
   }
 
-  private async payrollLopDays(employeeId: string, monthStart: Date, monthEnd: Date, client: Prisma.TransactionClient | PrismaService = this.prisma) {
-    return sumMoney([...(await this.payrollLopDayValues(employeeId, monthStart, monthEnd, client)).values()]);
-  }
-
   private *eachDay(start: Date, end: Date) { for (const day = this.dayStart(start); day <= end; day.setUTCDate(day.getUTCDate() + 1)) yield new Date(day); }
   private inclusiveDays(start: Date, end: Date) { return Math.max(1, Math.round((Number(this.dayStart(end)) - Number(this.dayStart(start))) / 86_400_000) + 1); }
   private dateKey(date: Date) { return this.dayStart(date).toISOString().slice(0, 10); }
@@ -850,6 +846,7 @@ export class PayrollService {
 
   private async idempotentRun(tx: Prisma.TransactionClient, user: RequestUser, operation: string, key: string | undefined, payload: unknown) {
     this.validateIdempotencyKey(key); const hash = this.requestHash(payload);
+    await tx.idempotencyRecord.deleteMany({ where: { expiresAt: { lte: new Date() } } });
     const existing = await tx.idempotencyRecord.findUnique({ where: { actorUserId_operation_key: { actorUserId: user.id, operation, key: key! } } });
     if (!existing) return null; if (existing.requestHash !== hash) throw new ConflictException('Idempotency key was already used with a different request');
     return this.presentRun(await tx.payrollRun.findUniqueOrThrow({ where: { id: existing.resourceId }, include: payrollRunInclude }));

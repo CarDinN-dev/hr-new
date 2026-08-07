@@ -71,7 +71,7 @@ export class ServiceRequestsService {
   async generate(id: string, dto: ServiceRequestTransitionDto, key: string | undefined, user: RequestUser) {
     this.assertWorkflowPermission(user, 'service_request.hr.generate', id);
     this.validateKey(key);
-    const existingKey = await this.prisma.idempotencyRecord.findUnique({ where: { actorUserId_operation_key: { actorUserId: user.id, operation: 'service-request.generate', key } } });
+    const existingKey = await this.prisma.idempotencyRecord.findFirst({ where: { actorUserId: user.id, operation: 'service-request.generate', key, expiresAt: { gt: new Date() } } });
     if (existingKey) { if (existingKey.requestHash !== this.hash({ id, dto })) throw new ConflictException('Idempotency key was already used with a different request'); return this.findById(existingKey.resourceId, user); }
     const request = await this.prisma.serviceRequest.findUnique({ where: { id }, include: requestInclude });
     if (!request) throw new NotFoundException('Service request not found');
@@ -277,7 +277,9 @@ export class ServiceRequestsService {
   }
 
   private async idempotent(tx: Prisma.TransactionClient, user: RequestUser, operation: string, key: string | undefined, payload: unknown) {
-    this.validateKey(key); const hash = this.hash(payload); const existing = await tx.idempotencyRecord.findUnique({ where: { actorUserId_operation_key: { actorUserId: user.id, operation, key: key! } } });
+    this.validateKey(key); const hash = this.hash(payload);
+    await tx.idempotencyRecord.deleteMany({ where: { expiresAt: { lte: new Date() } } });
+    const existing = await tx.idempotencyRecord.findUnique({ where: { actorUserId_operation_key: { actorUserId: user.id, operation, key: key! } } });
     if (!existing) return null; if (existing.requestHash !== hash) throw new ConflictException('Idempotency key was already used with a different request'); return this.present(await tx.serviceRequest.findUniqueOrThrow({ where: { id: existing.resourceId }, include: requestInclude }), user);
   }
   private saveIdempotency(tx: Prisma.TransactionClient, user: RequestUser, operation: string, key: string | undefined, payload: unknown, resourceId: string) { return tx.idempotencyRecord.create({ data: { actorUserId: user.id, operation, key: key!, requestHash: this.hash(payload), resourceType: 'ServiceRequest', resourceId, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } }); }

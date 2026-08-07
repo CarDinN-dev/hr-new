@@ -1,0 +1,16 @@
+[Unit]
+Description=Prune MedTech HR ERP audit events under the configured retention policy
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/docker exec -e AUDIT_RETENTION_CONFIRM=DELETE_EXPIRED_AUDIT_EVENTS medtech-hr-erp-api-1 npm run audit:prune
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

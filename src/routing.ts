@@ -3,7 +3,6 @@ import type { NavItem } from "./data";
 export const navPaths = {
   Dashboard: "/",
   "My HR": "/me",
-  Team: "/team",
   Employees: "/employees",
   Attendance: "/attendance",
   Leave: "/leave",

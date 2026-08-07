@@ -42,6 +42,7 @@ preflight() {
   "${compose[@]}" config --quiet
   docker inspect --format '{{.State.Health.Status}}' medtech-hr-erp-postgres-1 | grep -qx healthy
   systemctl is-active --quiet medtech-hr-erp-backup.timer
+  systemctl is-active --quiet medtech-hr-erp-audit-prune.timer
   local backup_age
   backup_age=$(( $(date +%s) - $(systemctl show medtech-hr-erp-backup.service -p ExecMainExitTimestamp --value | xargs -I{} date -d '{}' +%s) ))
   (( backup_age <= 36 * 60 * 60 )) || { echo 'Latest successful backup is older than 36 hours.' >&2; exit 1; }

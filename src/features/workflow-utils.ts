@@ -3,7 +3,7 @@ import type { BackendSession } from "../api";
 export const workflowKey = (session: BackendSession, feature: string, ...parts: unknown[]) =>
   [feature, session.sessionId, session.authorizationVersion, ...parts] as const;
 
-export const idempotencyHeaders = () => ({ "Idempotency-Key": crypto.randomUUID() });
+export const idempotencyHeaders = (key = crypto.randomUUID()) => ({ "Idempotency-Key": key });
 
 export const displayTitle = (value?: string | null) =>
   (value || "").toLowerCase().replaceAll("_", " ").replace(/\b\w/g, character => character.toUpperCase());

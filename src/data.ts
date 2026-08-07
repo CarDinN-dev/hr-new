@@ -295,7 +295,6 @@ export const reportTemplates: Array<{ id: PdfTemplate; label: string; descriptio
 export const navItems = [
   "Dashboard",
   "My HR",
-  "Team",
   "Employees",
   "Attendance",
   "Leave",

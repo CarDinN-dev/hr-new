@@ -460,6 +460,15 @@ export class EmployeesService {
       }
       else if (rule.includeIds.length) scopes.push({ id: { in: rule.includeIds } });
     }
+    if (user.employeeDepartmentId) {
+      const rule = this.authorization.scopeRule(user, 'employee.department.read', AccessScopeType.ALL_EMPLOYEES);
+      const currentTeam: Prisma.EmployeeWhereInput = {
+        departmentId: user.employeeDepartmentId,
+        employmentStatus: { in: [EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE, EmploymentStatus.PROBATION] },
+      };
+      if (rule.unrestricted) scopes.push(rule.excludeIds.length ? { AND: [currentTeam, { id: { notIn: rule.excludeIds } }] } : currentTeam);
+      else if (rule.includeIds.length) scopes.push({ AND: [currentTeam, { id: { in: rule.includeIds } }] });
+    }
     if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'employee.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ id: user.employeeId });
     if (user.employeeId && this.authorization.has(user, 'employee.team.read')) {
       const directReports = await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } });

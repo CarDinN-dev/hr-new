@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ShieldCheck } from "lucide-react";
 import { apiDownload, apiList, apiPage, apiRequest, hasActiveSuperAdminRole, hasPermission, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
+import { saveDownload } from "./workflow-utils";
 
 type AuditEvent = {
   id: string;
@@ -210,15 +211,6 @@ export function auditParams(filters: { search: string; outcome: string; action: 
   params.set("page", String(pagination.page));
   params.set("limit", String(pagination.limit));
   return params;
-}
-
-function saveDownload(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function ReasonModal({ title, reason, setReason, busy, onCancel, onConfirm }: { title: string; reason: string; setReason: (value: string) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
