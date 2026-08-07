@@ -1,0 +1,118 @@
+{
+  "generated_at": "2026-08-07T18:34:32.028645+00:00",
+  "nodes": {
+    "backend_src_modules_leave_leave_service_leaveservice": {
+      "code_fingerprint": "8a660a40210c8caec9f5ee6332ad6ccef12b0ca29d93aa28a55f8609f74cda2e",
+      "label": "LeaveService",
+      "last": "2026-07-29T21:37:03.011892+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-29T21:37:03.011892+00:00",
+          "outcome": "useful",
+          "q": "Explain to me the current leave application system for user roles."
+        }
+      ],
+      "score": 0.814634555,
+      "source_file": "backend/src/modules/leave/leave.service.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_src_modules_leave_leave_workflow_controller_leaveworkflowcontroller": {
+      "code_fingerprint": "d051b87fa8c6f71a2da123923379699857ece0a561fbcafd839df5c13f155ec3",
+      "label": "LeaveWorkflowController",
+      "last": "2026-07-29T21:37:03.011892+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-29T21:37:03.011892+00:00",
+          "outcome": "useful",
+          "q": "Explain to me the current leave application system for user roles."
+        }
+      ],
+      "score": 0.814634555,
+      "source_file": "backend/src/modules/leave/leave-workflow.controller.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_src_modules_system_dto_system_dto_querysystemusersdto": {
+      "code_fingerprint": "d1a5cdf2135beee950196d2d61ec6f554bbd6887f6bfb9dda8ea019accc9becf",
+      "label": "QuerySystemUsersDto",
+      "last": "2026-07-28T09:33:10.717013+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-28T09:33:10.717013+00:00",
+          "outcome": "useful",
+          "q": "/plan Implement a UI branching feature in system page. This UI branching feature is for showcasing the hierarchy between different roles while also acting as a search filter in place to find users."
+        }
+      ],
+      "score": 0.786836232,
+      "source_file": "backend/src/modules/system/dto/system.dto.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "backend_src_modules_system_system_service_systemservice_listusers": {
+      "code_fingerprint": "b3f927f97d5a6f99b8066c84a1dbbdd5d21ab990f38075b8c9b3f432aba29fae",
+      "label": ".listUsers()",
+      "last": "2026-07-28T09:33:10.717013+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-28T09:33:10.717013+00:00",
+          "outcome": "useful",
+          "q": "/plan Implement a UI branching feature in system page. This UI branching feature is for showcasing the hierarchy between different roles while also acting as a search filter in place to find users."
+        }
+      ],
+      "score": 0.786836232,
+      "source_file": "backend/src/modules/system/system.service.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_features_hierarchy_page": {
+      "code_fingerprint": "8aab42fcdc4a2e7efc4d9e6fc0b8bc4d84091e639c13c643b36afd49aa33ca39",
+      "label": "hierarchy-page.tsx",
+      "last": "2026-07-29T14:10:50.980408+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-29T14:10:50.980408+00:00",
+          "outcome": "useful",
+          "q": "Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
+        }
+      ],
+      "score": 0.808823153,
+      "source_file": "src/features/hierarchy-page.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_features_hierarchy_page_buildorganizationhierarchy": {
+      "code_fingerprint": "8aab42fcdc4a2e7efc4d9e6fc0b8bc4d84091e639c13c643b36afd49aa33ca39",
+      "label": "buildOrganizationHierarchy()",
+      "last": "2026-07-29T14:10:50.980408+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-29T14:10:50.980408+00:00",
+          "outcome": "useful",
+          "q": "Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
+        }
+      ],
+      "score": 0.808823153,
+      "source_file": "src/features/hierarchy-page.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_features_hierarchy_page_organizationchart": {
+      "code_fingerprint": "8aab42fcdc4a2e7efc4d9e6fc0b8bc4d84091e639c13c643b36afd49aa33ca39",
+      "label": "OrganizationChart()",
+      "last": "2026-07-29T14:10:50.980408+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-29T14:10:50.980408+00:00",
+          "outcome": "useful",
+          "q": "Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
+        }
+      ],
+      "score": 0.808823153,
+      "source_file": "src/features/hierarchy-page.tsx",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}
