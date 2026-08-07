@@ -104,7 +104,7 @@ export class ServiceRequestsService {
   }
 
   approve(id: string, dto: ServiceRequestTransitionDto, key: string | undefined, user: RequestUser) {
-    this.assertWorkflowPermission(user, 'service_request.hr.approve', id);
+    if (!hasActiveSuperAdminRole(user)) this.assertWorkflowPermission(user, 'service_request.hr.approve', id);
     return this.transaction(async (tx) => {
       const duplicate = await this.idempotent(tx, user, 'service-request.approve', key, { id, dto }); if (duplicate) return duplicate;
       const request = await tx.serviceRequest.findUnique({ where: { id }, include: { documents: { where: { revokedAt: null }, orderBy: { versionNumber: 'desc' }, take: 1 } } });

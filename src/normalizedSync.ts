@@ -314,7 +314,7 @@ async function syncDocuments(before: HrState, after: HrState, session: BackendSe
   for (const document of after.documents) if (!previous.has(document.id) && document.dataUrl && document.employeeId) {
     const response = await fetch(document.dataUrl); const blob = await response.blob();
     const body = new FormData();
-    body.set("employeeId", document.employeeId); body.set("documentType", document.template); body.set("visibility", "HR_ONLY");
+    body.set("employeeId", document.employeeId); body.set("documentType", document.template); body.set("visibility", "MANAGER_AND_HR");
     body.set("file", new File([blob], document.filename || `${document.documentNumber}.pdf`, { type: blob.type || "application/pdf" }));
     await apiRequest("/documents/upload", { method: "POST", csrfToken: session.csrfToken, body });
   }

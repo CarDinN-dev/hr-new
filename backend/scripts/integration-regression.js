@@ -472,6 +472,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal((await mutate(`/service-requests/${serviceRequest.id}/generate`, sessions.HR, { expectedVersion: certificatePublished.data.version })).status, 400);
   assert.equal(await prisma.generatedDocumentVersion.count({ where: { requestId: serviceRequest.id } }), 1);
   assert.equal((await mutate(`/service-requests/${serviceRequest.id}/approve`, sessions.ADMIN, { expectedVersion: certificatePublished.data.version })).status, 403);
+  assert.equal((await mutate(`/service-requests/${serviceRequest.id}/approve`, sessions.SUPER_ADMIN, { expectedVersion: certificatePublished.data.version })).status, 400);
 
   const documentBody = new FormData();
   documentBody.set('employeeId', sessions.EMPLOYEE.user.employeeId);

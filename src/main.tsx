@@ -119,7 +119,7 @@ import { preparePhoto } from "./photo";
 import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
-import { ApprovalInboxPanel, LeaveWorkflowPage, MyLeaveStatusPanel, MyPayslipsPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
+import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
 import "./styles.css";
@@ -583,7 +583,7 @@ function App() {
           {nav === "Payroll" && <PayrollWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
-          {nav === "Documents" && <Documents state={state} setState={setState} notify={notify} savePdf={savePdf} />}
+          {nav === "Documents" && <Documents state={state} session={backendSession} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
           {nav === "Audit" && <AuditHistoryPage session={backendSession} notify={notify} />}
           {nav === "Hierarchy" && <HierarchyPage session={backendSession} employees={state.employees} onAddNode={(role, parent) => {
@@ -704,8 +704,6 @@ function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { s
       </div>}
     </section>
     <MyLeaveStatusPanel session={session} onOpenLeave={onOpenLeave} />
-    <ServiceRequestsPanel session={session} notify={notify} />
-    <MyPayslipsPanel session={session} notify={notify} />
   </div>;
 }
 
@@ -2143,10 +2141,9 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   </section>;
 }
 
-function Documents({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function Documents({ state, session, notify, savePdf }: { state: HrState; session: BackendSession; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
   const authorization = useAuthorization();
   const canGenerate = authorization.hasPermission("document.hr.manage");
-  const canDelete = authorization.hasAnyPermission("document.self.manage", "document.hr.manage");
   const active = activeEmployees(state.employees);
   const [employeeId, setEmployeeId] = useState(active[0]?.id || "");
   const [template, setTemplate] = useState<PdfTemplate>("offer_letter");
@@ -2156,12 +2153,6 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
   function generate() {
     if (!employee) return notify("Select an employee first.");
     void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf(template, employee, state, notes), template, employee.id));
-  }
-
-  function removeDocument(id: string, name: string) {
-    if (!confirmDelete(name)) return;
-    setState(prev => ({ ...prev, documents: prev.documents.filter(item => item.id !== id) }));
-    notify("Generated document deleted.");
   }
 
   return (
@@ -2176,27 +2167,8 @@ function Documents({ state, setState, notify, savePdf }: { state: HrState; setSt
         </div>
         {employee && ["final_settlement", "gratuity_statement", "clearance_certificate"].includes(template) && <SettlementPreview employee={employee} state={state} />}
       </div>}
-      <div className="panel">
-        <div className="panel-head"><h3>Document Templates</h3><span>{pdfTemplates.length} templates</span></div>
-        <div className="template-grid">{pdfTemplates.map(item => <div className="template-card" key={item.id}><FileText size={18} /><strong>{item.label}</strong><span>{item.category}</span></div>)}</div>
-      </div>
-      <div className="panel">
-        <div className="panel-head"><h3>Generated Document Log</h3><span>{state.documents.length} records</span></div>
-        <DataTable label="Generated HR documents" columns={["Document No.", "Template", "Employee", "Generated", "File", "Actions"]} rows={state.documents.map(doc => {
-          const rowEmployee = state.employees.find(item => item.id === doc.employeeId);
-          return [
-            doc.documentNumber,
-            templateName(doc.template),
-            doc.employeeId ? employeeName(rowEmployee) : "-",
-            formatDate(doc.generatedOn),
-            doc.filename || doc.status,
-            <div className="row-actions" key="actions">
-              {doc.dataUrl ? <><button onClick={() => { try { openDataUrl(doc.dataUrl!); } catch (error) { notify(errorMessage(error)); } }}>View</button><button onClick={() => downloadDataUrl(doc.dataUrl!, doc.filename || `${doc.documentNumber}.pdf`)}>Download</button></> : doc.downloadUrl ? <a className="button-like" href={doc.downloadUrl}>Download</a> : <Badge value={doc.status} />}
-              {canDelete && <button className="danger-outline" onClick={() => removeDocument(doc.id, doc.filename || doc.documentNumber)}><Trash2 size={15} /> Delete</button>}
-            </div>
-          ];
-        })} empty="No documents generated yet." />
-      </div>
+      <DocumentsLibraryPanel session={session} notify={notify} />
+      <ServiceRequestsPanel session={session} notify={notify} />
     </section>
   );
 }
