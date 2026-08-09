@@ -134,16 +134,24 @@ export class SystemService {
     this.assertSystemScope(actor, 'user.delete_soft', targetId);
     if (targetId === actor.id) throw new ForbiddenException('Self deletion is not permitted');
     return this.serializable(async (tx) => {
-      const target = await tx.user.findFirst({ where: { id: targetId, deletedAt: null }, select: { id: true, authorizationVersion: true, isActive: true } });
+      const target = await tx.user.findFirst({ where: { id: targetId, deletedAt: null }, select: { id: true, email: true, authorizationVersion: true, isActive: true } });
       if (!target) throw new NotFoundException('User not found');
       this.assertAuthorizationVersion(target.authorizationVersion, dto.expectedVersion);
       await this.assertNotFinalSuperAdmin(targetId, tx);
       const deletedAt = new Date();
-      const updated = await tx.user.updateMany({ where: { id: targetId, authorizationVersion: dto.expectedVersion, deletedAt: null }, data: { isActive: false, deletedAt, authorizationVersion: { increment: 1 } } });
+      const updated = await tx.user.updateMany({
+        where: { id: targetId, authorizationVersion: dto.expectedVersion, deletedAt: null },
+        data: {
+          email: `${targetId}@deleted.invalid`, microsoftObjectId: null, passwordHash: null,
+          localLoginEnabled: false, microsoftLoginEnabled: false, isActive: false, deletedAt,
+          authorizationVersion: { increment: 1 },
+        },
+      });
       if (updated.count !== 1) throw new ConflictException('User authorization changed; refresh and retry');
+      await tx.employee.updateMany({ where: { userId: targetId }, data: { userId: null } });
       await this.revokeUserSessions(tx, targetId);
       await this.notifyAccessChange(tx, targetId, 'ACCOUNT_DELETED', 'Account access removed', 'Your HR account was deactivated by an administrator.', 'User', targetId);
-      await this.audit.record(tx, actor, { action: AuditAction.DELETE, resourceType: 'User', resourceId: targetId, targetUserId: targetId, summary: 'Login user soft-deleted', reason: dto.reason, before: target, after: { isActive: false, deletedAt } });
+      await this.audit.record(tx, actor, { action: AuditAction.DELETE, resourceType: 'User', resourceId: targetId, targetUserId: targetId, summary: 'Login user deleted', reason: dto.reason, before: target, after: { isActive: false, deletedAt, emailReleased: true } });
       return { deleted: true };
     });
   }

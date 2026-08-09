@@ -88,6 +88,39 @@ test('Local user creation links a matching employee email', async () => {
   assert.deepEqual(calls.employeeUpdates, [{ where: { id: 'employee-1' }, data: { userId: 'user-1' } }]);
 });
 
+test('User deletion releases sign-in identifiers and unlinks the employee', async () => {
+  const calls = { user: [], employee: [], sessions: [], audit: [] };
+  const target = { id: 'user-1', email: 'employee@example.com', authorizationVersion: 2, isActive: true };
+  const tx = {
+    user: {
+      findFirst: async () => target,
+      updateMany: async (args) => { calls.user.push(args); return { count: 1 }; },
+    },
+    userRole: { findFirst: async () => null },
+    employee: { updateMany: async (args) => { calls.employee.push(args); return { count: 1 }; } },
+    authSession: { updateMany: async (args) => { calls.sessions.push(args); return { count: 1 }; } },
+    notification: { create: async () => ({ id: 'notification-1' }) },
+  };
+  const prisma = { $transaction: async (operation) => operation(tx) };
+  const authorization = { permissionAllowedForScope: () => true };
+  const audit = { record: async (...args) => { calls.audit.push(args); } };
+  const service = new SystemService(prisma, audit, authorization, new ConfigService(), {});
+
+  await service.softDeleteUser('user-1', { expectedVersion: 2, reason: 'Deletion regression' }, { ...actor, permissions: ['user.delete_soft'] });
+
+  assert.deepEqual(calls.user[0].where, { id: 'user-1', authorizationVersion: 2, deletedAt: null });
+  assert.deepEqual(calls.user[0].data, {
+    email: 'user-1@deleted.invalid', microsoftObjectId: null, passwordHash: null,
+    localLoginEnabled: false, microsoftLoginEnabled: false, isActive: false,
+    deletedAt: calls.user[0].data.deletedAt, authorizationVersion: { increment: 1 },
+  });
+  assert.ok(calls.user[0].data.deletedAt instanceof Date);
+  assert.deepEqual(calls.employee, [{ where: { userId: 'user-1' }, data: { userId: null } }]);
+  assert.equal(calls.sessions.length, 1);
+  assert.equal(calls.audit[0][2].before.email, 'employee@example.com');
+  assert.equal(calls.audit[0][2].after.emailReleased, true);
+});
+
 test('Employee creation links a matching user by normalized email', async () => {
   const calls = [];
   const microsoftUser = { id: 'user-1', employee: null };
