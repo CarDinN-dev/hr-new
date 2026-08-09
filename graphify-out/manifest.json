@@ -1620,8 +1620,8 @@
     "semantic_hash": ""
   },
   "e2e/page-search.spec.ts": {
-    "mtime": 1786282217.266924,
-    "ast_hash": "10b78267abee67c6a05b1a12a0527cf8",
+    "mtime": 1786286004.0585675,
+    "ast_hash": "985945dcfce6d499341ab50464f7e3a6",
     "semantic_hash": ""
   },
   "src/page-search.test.tsx": {

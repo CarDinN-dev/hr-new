@@ -45,6 +45,10 @@ test("every sidebar page exposes one page-specific search control", async ({ pag
       await expect(input).toBeVisible();
       await expect(input).toHaveAttribute("aria-label", /Search/i);
       await expect(input).toHaveAttribute("maxlength", "100");
+      await input.focus();
+      await expect(input).toHaveCSS("outline-style", "none");
+      const [inputBox, iconBox] = await Promise.all([input.boundingBox(), page.locator(".page-search > svg").boundingBox()]);
+      expect(inputBox!.x).toBeGreaterThan(iconBox!.x + iconBox!.width);
     });
   }
 });
