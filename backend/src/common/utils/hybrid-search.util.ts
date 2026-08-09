@@ -11,6 +11,7 @@ type SearchDelegate<T extends SearchableRecord> = {
 };
 
 type HybridListOptions<T extends SearchableRecord> = Parameters<typeof listArgs>[1] & {
+  additionalSearch?: string;
   searchDocument(record: T): string;
 };
 
@@ -95,7 +96,9 @@ export async function hybridListRecords<T extends SearchableRecord>(
   query: PaginationQueryDto,
   options: HybridListOptions<T>,
 ) {
-  if (!query.search) {
+  const primarySearch = query.search || options.additionalSearch;
+  const additionalSearch = query.search ? options.additionalSearch : undefined;
+  if (!primarySearch) {
     const { page, limit, ...args } = listArgs(query, options);
     const [data, total] = await Promise.all([
       delegate.findMany(args),
@@ -113,14 +116,22 @@ export async function hybridListRecords<T extends SearchableRecord>(
   const authorized = await delegate.findMany(authorizedArgs);
   const ranked = await rankSearchCandidates(
     prisma,
-    query.search,
+    primarySearch,
     authorized.map((record, ordinal) => ({ id: record.id, document: options.searchDocument(record), ordinal })),
   );
+  const additionalIds = additionalSearch
+    ? new Set((await rankSearchCandidates(
+      prisma,
+      additionalSearch,
+      authorized.map((record, ordinal) => ({ id: record.id, document: options.searchDocument(record), ordinal })),
+    )).map(({ id }) => id))
+    : null;
+  const matches = additionalIds ? ranked.filter(({ id }) => additionalIds.has(id)) : ranked;
   const records = new Map(authorized.map((record) => [record.id, record]));
-  const data = ranked
+  const data = matches
     .slice((page - 1) * limit, page * limit)
     .map(({ id }) => records.get(id))
     .filter((record): record is T => Boolean(record));
 
-  return { data, meta: paginationMeta(ranked.length, page, limit) };
+  return { data, meta: paginationMeta(matches.length, page, limit) };
 }

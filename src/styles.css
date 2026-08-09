@@ -3008,6 +3008,11 @@ summary {
   transform: translateY(-1px);
 }
 
+.organization-node.search-match {
+  border-color: color-mix(in srgb, var(--info) 72%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 14%, transparent), 0 10px 24px rgba(17, 29, 44, 0.08);
+}
+
 /* Leave balances are a summary, not recruitment pipeline cards. */
 .app .leave-balance-grid {
   display: grid;

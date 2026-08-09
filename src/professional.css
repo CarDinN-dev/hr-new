@@ -1908,6 +1908,12 @@ td button {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--pro-brand) 13%, transparent), var(--pro-shadow-sm) !important;
 }
 
+.company-role-leadership.search-match,
+.company-role-hierarchy .company-role-card.search-match {
+  border-color: color-mix(in srgb, var(--pro-brand) 72%, var(--pro-border)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pro-brand) 14%, transparent), var(--pro-shadow-sm) !important;
+}
+
 .company-role-leadership.selected,
 .company-role-unassigned.selected,
 .company-role-department.selected,

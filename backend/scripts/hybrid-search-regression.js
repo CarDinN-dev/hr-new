@@ -4,6 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 const { plainToInstance } = require('class-transformer');
 const { validateSync } = require('class-validator');
 const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto');
+const { QuerySystemSessionsDto, QuerySystemUsersDto } = require('../dist/modules/system/dto/system.dto');
 const { hybridListRecords, rankSearchCandidates } = require('../dist/common/utils/hybrid-search.util');
 
 test('search input is trimmed and constrained to 2-100 characters', () => {
@@ -16,6 +17,17 @@ test('search input is trimmed and constrained to 2-100 characters', () => {
   const empty = plainToInstance(PaginationQueryDto, { search: '   ' });
   assert.equal(validateSync(empty).length, 0);
   assert.equal(empty.search, undefined);
+});
+
+test('system section search is trimmed and constrained to 2-100 characters', () => {
+  for (const QueryDto of [QuerySystemUsersDto, QuerySystemSessionsDto]) {
+    const valid = plainToInstance(QueryDto, { filterSearch: '  Alice Smith  ' });
+    assert.equal(validateSync(valid).length, 0);
+    assert.equal(valid.filterSearch, 'Alice Smith');
+    for (const filterSearch of ['x', 'x'.repeat(101)]) {
+      assert.ok(validateSync(plainToInstance(QueryDto, { filterSearch })).some(error => error.property === 'filterSearch'));
+    }
+  }
 });
 
 test('hybrid pagination resolves the authorized scope before ranking', async () => {
@@ -42,6 +54,34 @@ test('hybrid pagination resolves the authorized scope before ranking', async () 
   });
   assert.deepEqual(result.data.map(record => record.id), ['scope-2']);
   assert.deepEqual(result.meta, { total: 2, page: 2, limit: 1, totalPages: 2 });
+});
+
+test('additional search intersects authorized matches before pagination and preserves primary rank', async () => {
+  const records = [
+    { id: 'scope-1', name: 'Alice Smith' },
+    { id: 'scope-2', name: 'Alice Jones' },
+    { id: 'scope-3', name: 'Bob Smith' },
+  ];
+  const delegate = {
+    async findMany(args) {
+      assert.deepEqual(args.where.AND, [{ deletedAt: null }, { tenantId: 'authorized' }]);
+      return records;
+    },
+  };
+  const searches = [];
+  const prisma = { async $queryRaw(sql) {
+    const search = sql.values.find(value => typeof value === 'string' && !value.startsWith('['));
+    searches.push(search);
+    return search === 'alice'
+      ? [{ id: 'scope-2', score: 10 }, { id: 'scope-1', score: 9 }]
+      : [{ id: 'scope-3', score: 10 }, { id: 'scope-1', score: 9 }];
+  } };
+  const result = await hybridListRecords(prisma, delegate, { page: 1, limit: 1, search: 'alice' }, {
+    where: { tenantId: 'authorized' }, additionalSearch: 'smith', searchDocument: record => record.name,
+  });
+  assert.deepEqual(searches, ['alice', 'smith']);
+  assert.deepEqual(result.data.map(record => record.id), ['scope-1']);
+  assert.deepEqual(result.meta, { total: 1, page: 1, limit: 1, totalPages: 1 });
 });
 
 const integrationUrl = process.env.INTEGRATION_DATABASE_URL;

@@ -184,7 +184,7 @@ export class SystemService {
       },
     } satisfies Prisma.UserSelect;
     return hybridListRecords(this.prisma, this.prisma.user, query, {
-      where, select, defaultSortBy: 'createdAt',
+      where, select, defaultSortBy: 'createdAt', additionalSearch: query.filterSearch,
       searchDocument: (account: any) => searchText(
         account.email, account.isActive ? 'active enabled' : 'inactive disabled',
         account.employee && [account.employee.employeeCode, account.employee.firstName, account.employee.lastName],
@@ -496,7 +496,7 @@ export class SystemService {
     return hybridListRecords(this.prisma, this.prisma.authSession, query, {
       where,
       select: { id: true, provider: true, userAgent: true, createdAt: true, reauthenticatedAt: true, lastSeenAt: true, expiresAt: true, revokedAt: true, authorizationVersion: true, user: { select: { id: true, email: true, isActive: true } } },
-      defaultSortBy: 'lastSeenAt', softDelete: false,
+      defaultSortBy: 'lastSeenAt', softDelete: false, additionalSearch: query.filterSearch,
       searchDocument: (session: any) => searchText(
         session.user.email, session.provider, session.userAgent,
         session.revokedAt ? 'revoked inactive' : session.expiresAt <= now ? 'expired inactive' : 'active',

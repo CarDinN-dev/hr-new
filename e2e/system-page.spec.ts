@@ -61,16 +61,33 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
     if (path === "/auth/step-up/local") return json({ reauthenticatedAt: new Date().toISOString() }, 201);
     if (path === "/system/users" && request.method() === "GET") {
       const search = url.searchParams.get("search")?.toLowerCase();
+      const filterSearch = url.searchParams.get("filterSearch")?.toLowerCase();
       const roleId = url.searchParams.get("roleId");
       const pageNumber = Number(url.searchParams.get("page") || "1");
       const limit = Number(url.searchParams.get("limit") || "20");
-      const matches = users.filter(user => (!search || user.email.toLowerCase().includes(search)) && (!roleId || user.roles.some(item => item.role.id === roleId)));
+      const matches = users.filter(user => (!search || user.email.toLowerCase().includes(search)) && (!filterSearch || user.email.toLowerCase().includes(filterSearch)) && (!roleId || user.roles.some(item => item.role.id === roleId)));
       return json(matches.slice((pageNumber - 1) * limit, pageNumber * limit), 200, { total: matches.length, page: pageNumber, limit, totalPages: Math.ceil(matches.length / limit) || 1 });
     }
     if (path === "/system/roles" && request.method() === "GET") return json(roles);
-    if (path === "/employees" && request.method() === "GET") return json(employees);
+    if (path === "/employees" && request.method() === "GET") {
+      const search = url.searchParams.get("search")?.toLowerCase();
+      const matches = search ? employees.filter(employee => [
+        employee.employeeCode, employee.firstName, employee.lastName, employee.email,
+        employee.department?.name, employee.department?.code, employee.position?.title, employee.position?.code,
+        ...employee.user.roles.map(item => item.role.code),
+        employee.manager?.firstName, employee.manager?.lastName, employee.lineManager?.firstName, employee.lineManager?.lastName,
+      ].filter(Boolean).join(" ").toLowerCase().includes(search)) : employees;
+      return json(matches);
+    }
     if (path === "/system/permissions") return json(permissions);
-    if (path === "/system/sessions" && request.method() === "GET") return json(sessions, 200, { total: sessions.length, page: 1, limit: 20, totalPages: 1 });
+    if (path === "/system/sessions" && request.method() === "GET") {
+      const search = url.searchParams.get("search")?.toLowerCase();
+      const filterSearch = url.searchParams.get("filterSearch")?.toLowerCase();
+      const matches = sessions.filter(item => (!search || item.user.email.toLowerCase().includes(search)) && (!filterSearch || item.user.email.toLowerCase().includes(filterSearch)));
+      const pageNumber = Number(url.searchParams.get("page") || "1");
+      const limit = Number(url.searchParams.get("limit") || "20");
+      return json(matches.slice((pageNumber - 1) * limit, pageNumber * limit), 200, { total: matches.length, page: pageNumber, limit, totalPages: Math.ceil(matches.length / limit) || 1 });
+    }
     if (path === "/system/workflow-policy" && request.method() === "GET") return json(policies);
     if (path === "/system/delegations" && request.method() === "GET") return json(delegations);
     if (path === "/system/users" && request.method() === "POST") {
@@ -137,6 +154,34 @@ test("Users and access paginates at 15 and supports 50 per page", async ({ page 
   await usersPanel.getByLabel("Users per page").selectOption("50");
   await expect(usersPanel.getByText("Page 1 of 1 · 16 users")).toBeVisible();
   await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
+});
+
+test("System page-wide search intersects independent user and session searches", async ({ page }) => {
+  await loginAndOpenSystem(page);
+  const pageSearch = page.getByRole("searchbox", { name: "Search users, roles and sessions" });
+  const globalUsers = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith("/system/users") && url.searchParams.get("search") === "target" && !url.searchParams.has("filterSearch");
+  });
+  await pageSearch.fill("target");
+  await globalUsers;
+
+  const intersectedUsers = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith("/system/users") && url.searchParams.get("search") === "target" && url.searchParams.get("filterSearch") === "example" && url.searchParams.get("page") === "1";
+  });
+  await page.getByLabel("Find users").fill("example");
+  await intersectedUsers;
+  await expect(page.getByRole("row", { name: /target@example\.invalid/ })).toBeVisible();
+
+  const intersectedSessions = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith("/system/sessions") && url.searchParams.get("search") === "target" && url.searchParams.get("filterSearch") === "target" && url.searchParams.get("page") === "1";
+  });
+  await page.getByLabel("Email search").fill("target");
+  await intersectedSessions;
+  const sessionsPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Active sessions" }) });
+  await expect(sessionsPanel.getByText("target@example.invalid")).toBeVisible();
 });
 
 test("Super Admin can create a local account without Entra provisioning", async ({ page }) => {
@@ -253,20 +298,32 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect(page.locator('.company-role-canvas .role-flowchart-line[data-source-id="reporting-hr-line-manager"][data-target-id="reporting-target-employee"]')).toHaveClass(/direct-active/);
   expect(await target.evaluate(element => parseFloat(getComputedStyle(element.closest(".company-role-card-shell")!).animationDuration))).toBeLessThan(0.001);
 
-  const search = page.getByPlaceholder("Find department, manager, or employee");
+  const search = page.getByRole("searchbox", { name: "Search reporting hierarchy" });
   await search.fill("Riley Report");
   await expect(operations.getByText("Riley Report")).toBeVisible();
   await expect(page.getByText("1 matching person")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Selected reporting path" })).toContainText("Operations");
   await expect(page.getByRole("button", { name: "Previous role hierarchy result" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next role hierarchy result" })).toBeVisible();
+
+  await organizationTab.click();
+  await expect(page.getByText("Riley Report")).toBeVisible();
+  await expect(page.getByText("Morgan Manager")).toBeVisible();
+  await expect(page.locator(".organization-tree").getByText("Omar Operations", { exact: true })).toBeVisible();
+  await expect(page.getByText("Corey Direct")).toHaveCount(0);
+  await roleTab.click();
+  await expect(operations.getByText("Riley Report")).toBeVisible();
   await search.fill("");
 
   await search.fill("Manager");
-  await expect(page.getByText("3 matching people")).toBeVisible();
-  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("1 of 3");
+  await expect(page.getByText("4 matching people")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("1 of 4");
   await page.getByRole("button", { name: "Next role hierarchy result" }).click();
-  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("2 of 3");
+  await expect(page.getByRole("group", { name: "Search result navigation" })).toContainText("2 of 4");
+  await search.fill("");
+
+  await search.fill("Nobody exists");
+  await expect(page.getByText(/No departments, reporting relationships, or employees match/)).toBeVisible();
   await search.fill("");
 
   await page.getByRole("button", { name: "Focus Human Resources department" }).click();
@@ -337,7 +394,7 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await expect(page.getByRole("button", { name: "Create user" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Revoke all" })).toBeEnabled();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid.*Current user/ })).toBeVisible();
-  const searched = page.waitForRequest(request => request.url().includes("/api/v1/system/sessions?") && request.url().includes("search=target"));
+  const searched = page.waitForRequest(request => request.url().includes("/api/v1/system/sessions?") && request.url().includes("filterSearch=target"));
   await page.getByLabel("Email search").fill("target");
   await searched;
   await expect(page.getByRole("row", { name: /target@example\.invalid/ })).toBeVisible();

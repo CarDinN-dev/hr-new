@@ -72,3 +72,36 @@ test("search is debounced, mapped to the page endpoint, clearable and reset by n
   await page.goto(navPaths.Attendance);
   await expect(page.getByRole("searchbox")).toHaveValue("");
 });
+
+test("record-page filters remain available and combine with header search", async ({ page }) => {
+  await installApi(page);
+  await page.goto(navPaths.Employees);
+  await expect(page.getByLabel("Filter employees by department")).toBeVisible();
+  await expect(page.getByLabel("Filter employees by status")).toBeVisible();
+  await page.getByLabel("Filter employees by department").selectOption("Finance");
+  const searched = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "Alice";
+  });
+  await page.getByRole("searchbox").fill("Alice");
+  await searched;
+  await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();
+  await page.getByLabel("Filter employees by status").selectOption("On Leave");
+  await expect(page.getByRole("button", { name: /Alice Smith/ })).toHaveCount(0);
+
+  await page.goto(navPaths.Attendance);
+  await expect(page.getByLabel("Attendance date")).toBeVisible();
+  await expect(page.getByLabel("Department filter")).toBeVisible();
+  await expect(page.getByLabel("Status filter")).toBeVisible();
+
+  await page.goto(navPaths.Loans);
+  await expect(page.getByLabel("Loan status filter")).toBeVisible();
+  await expect(page.getByLabel("Loan department filter")).toBeVisible();
+
+  await page.goto(navPaths.Audit);
+  await expect(page.getByLabel("Outcome")).toBeVisible();
+  await expect(page.getByLabel("Action")).toBeVisible();
+  await expect(page.getByLabel("Resource type")).toBeVisible();
+  await expect(page.getByLabel("From")).toBeVisible();
+  await expect(page.getByLabel("To", { exact: true })).toBeVisible();
+});

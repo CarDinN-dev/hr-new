@@ -63,12 +63,26 @@ export class ReplaceRolePermissionsDto extends SystemMutationDto {
   @ApiProperty({ type: [String] }) @IsArray() @ArrayUnique() @IsUUID('4', { each: true }) permissionIds: string[];
 }
 
-export class QuerySystemUsersDto extends PaginationQueryDto {
+class SystemFilterSearchQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ minLength: 2, maxLength: 100 })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  filterSearch?: string;
+}
+
+export class QuerySystemUsersDto extends SystemFilterSearchQueryDto {
   @ApiPropertyOptional() @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsUUID() roleId?: string;
 }
 
-export class QuerySystemSessionsDto extends PaginationQueryDto {
+export class QuerySystemSessionsDto extends SystemFilterSearchQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() userId?: string;
   @ApiPropertyOptional() @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() active?: boolean;
 }

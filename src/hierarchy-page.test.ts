@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrganizationHierarchy, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload } from "./features/hierarchy-page";
+import { buildOrganizationHierarchy, filterRoleHierarchyBranch, hierarchyLineManagerCode, hierarchyManagerCode, hierarchyReportingPayload, organizationBranchContainsMatch } from "./features/hierarchy-page";
 import { buildCompanyRoleHierarchy, type RoleHierarchyBranch } from "./roleHierarchy";
 
 const employee = (id: string, code: string, fields: Record<string, string> = {}, roleCodes: string[] = []) => ({
@@ -127,6 +127,25 @@ describe("hierarchy page", () => {
     expect(manager.children[0]).toMatchObject({ role: "LINE_MANAGER", roleLabel: "Line manager" });
     expect(manager.children[0].children[0].employee.id).toBe("staff");
     expect(hierarchy.issues).toEqual([{ employee: expect.objectContaining({ id: "fallback" }), message: "Line Manager does not match another active employee." }]);
+  });
+
+  it("keeps the complete reporting path when a ranked search matches a descendant", () => {
+    const employees = [
+      employee("manager", "MGR-01", { Department: "Operations" }),
+      employee("lead", "LEAD-01", { Department: "Operations", "Manager Employee Code/Name": "MGR-01 - manager" }),
+      employee("target", "EMP-01", { Department: "Operations", "Line Manager Employee Code/Name": "LEAD-01 - lead" }),
+      employee("unrelated", "EMP-02", { Department: "Operations", "Manager Employee Code/Name": "MGR-01 - manager" }),
+    ];
+    const organization = buildOrganizationHierarchy(employees);
+    const manager = organization.roots[0];
+    expect(organizationBranchContainsMatch(manager, new Set(["target"]))).toBe(true);
+    expect(organizationBranchContainsMatch(manager.children.find(node => node.employee.id === "unrelated")!, new Set(["target"]))).toBe(false);
+
+    const roleHierarchy = buildCompanyRoleHierarchy(employees);
+    const roleManager = roleHierarchy.unassignedDepartments[0].branches.find(branch => branch.member.id === "manager")!;
+    const filtered = filterRoleHierarchyBranch(roleManager, new Set(["target"]))!;
+    expect(flatten([filtered]).map(branch => branch.member.id)).toEqual(["manager", "lead", "target"]);
+    expect(filterRoleHierarchyBranch(roleManager, new Set())).toBeNull();
   });
 
   it("uses the dedicated links for manager and line-manager hierarchy levels", () => {
