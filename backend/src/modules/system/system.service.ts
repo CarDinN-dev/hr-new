@@ -10,7 +10,8 @@ import { join } from 'path';
 import * as bcrypt from 'bcrypt';
 import { hasActiveSuperAdminRole, hasActiveSystemAdministratorRole } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
-import { paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, rankSearchRecords, searchText } from '../../common/utils/hybrid-search.util';
+import { PaginationQueryDto, SearchQueryDto } from '../../common/dto/pagination-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
@@ -157,8 +158,6 @@ export class SystemService {
   }
 
   async listUsers(query: QuerySystemUsersDto, actor: RequestUser) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
     const now = new Date();
     const access = hasActiveSystemAdministratorRole(actor)
       ? { unrestricted: true, includeIds: [] as string[], excludeIds: [] as string[] }
@@ -170,11 +169,6 @@ export class SystemService {
       deletedAt: null,
       isActive: query.isActive,
       roles: query.roleId ? { some: { roleId: query.roleId, ...activeAssignmentWhere(now) } } : undefined,
-      OR: query.search ? [
-        { email: { contains: query.search, mode: 'insensitive' } },
-        { employee: { firstName: { contains: query.search, mode: 'insensitive' } } },
-        { employee: { lastName: { contains: query.search, mode: 'insensitive' } } },
-      ] : undefined,
     };
     const select = {
       id: true, email: true, isActive: true, localLoginEnabled: true, microsoftLoginEnabled: true,
@@ -189,11 +183,15 @@ export class SystemService {
         select: { id: true, effect: true, scopeType: true, scopeIds: true, reason: true, startsAt: true, expiresAt: true, version: true, permission: { select: { id: true, code: true, displayName: true } } },
       },
     } satisfies Prisma.UserSelect;
-    const [data, total] = await Promise.all([
-      this.prisma.user.findMany({ where, select, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
-      this.prisma.user.count({ where }),
-    ]);
-    return { data, meta: paginationMeta(total, page, limit) };
+    return hybridListRecords(this.prisma, this.prisma.user, query, {
+      where, select, defaultSortBy: 'createdAt',
+      searchDocument: (account: any) => searchText(
+        account.email, account.isActive ? 'active enabled' : 'inactive disabled',
+        account.employee && [account.employee.employeeCode, account.employee.firstName, account.employee.lastName],
+        account.roles?.map((assignment: any) => [assignment.role.code, assignment.role.displayName]).flat(),
+        account.permissionOverrides?.map((override: any) => [override.permission.code, override.permission.displayName, override.effect, override.scopeType]).flat(),
+      ),
+    });
   }
 
   effectivePermissions(userId: string, actor: RequestUser) {
@@ -333,7 +331,7 @@ export class SystemService {
     });
   }
 
-  async listRoles(actor: RequestUser) {
+  async listRoles(query: PaginationQueryDto, actor: RequestUser) {
     const access = hasActiveSystemAdministratorRole(actor)
       ? { unrestricted: true, includeIds: [] as string[], excludeIds: [] as string[] }
       : this.authorization.scopeRule(actor, 'role.read', AccessScopeType.ALL_SYSTEM);
@@ -346,7 +344,12 @@ export class SystemService {
       },
       orderBy: [{ isBuiltIn: 'desc' }, { code: 'asc' }],
     });
-    return roles.map(({ inheritedRoles, ...role }) => ({ ...role, inherits: role.isBuiltIn ? roleInheritance.get(role.code) ?? [] : inheritedRoles.map((link) => link.parentRole.code) }));
+    const ranked = await rankSearchRecords(this.prisma, query.search, roles, (role) => searchText(
+      role.code, role.displayName, role.description, role.protection,
+      role.permissions.map((link) => [link.permission.code, link.permission.displayName, link.permission.category]).flat(),
+      role.inheritedRoles.map((link) => link.parentRole.code),
+    ));
+    return ranked.map(({ inheritedRoles, ...role }) => ({ ...role, inherits: role.isBuiltIn ? roleInheritance.get(role.code) ?? [] : inheritedRoles.map((link) => link.parentRole.code) }));
   }
 
   createRole(dto: CreateRoleDto, actor: RequestUser) {
@@ -469,35 +472,36 @@ export class SystemService {
     });
   }
 
-  listPermissions(actor: RequestUser) {
+  async listPermissions(query: SearchQueryDto, actor: RequestUser) {
     const access = this.authorization.scopeRule(actor, 'permission.read', AccessScopeType.ALL_SYSTEM);
-    return this.prisma.permission.findMany({
+    const permissions = await this.prisma.permission.findMany({
       where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } },
       select: { id: true, code: true, displayName: true, description: true, category: true, isProtected: true, isDeprecated: true },
       orderBy: [{ category: 'asc' }, { code: 'asc' }],
     });
+    return rankSearchRecords(this.prisma, query.search, permissions, (permission) => searchText(
+      permission.code, permission.displayName, permission.description, permission.category,
+      permission.isProtected ? 'protected' : 'standard', permission.isDeprecated ? 'deprecated' : 'active',
+    ));
   }
 
   async listSessions(query: QuerySystemSessionsDto, actor: RequestUser) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
     const now = new Date();
     const where: Prisma.AuthSessionWhereInput = {
       ...this.sessionScopeWhere(actor),
       userId: query.userId,
       ...(query.active === true ? { revokedAt: null, expiresAt: { gt: now } } : {}),
       ...(query.active === false ? { OR: [{ revokedAt: { not: null } }, { expiresAt: { lte: now } }] } : {}),
-      user: query.search ? { email: { contains: query.search, mode: 'insensitive' } } : undefined,
     };
-    const [data, total] = await Promise.all([
-      this.prisma.authSession.findMany({
-        where,
-        select: { id: true, provider: true, userAgent: true, createdAt: true, reauthenticatedAt: true, lastSeenAt: true, expiresAt: true, revokedAt: true, authorizationVersion: true, user: { select: { id: true, email: true, isActive: true } } },
-        orderBy: { lastSeenAt: 'desc' }, skip: (page - 1) * limit, take: limit,
-      }),
-      this.prisma.authSession.count({ where }),
-    ]);
-    return { data, meta: paginationMeta(total, page, limit) };
+    return hybridListRecords(this.prisma, this.prisma.authSession, query, {
+      where,
+      select: { id: true, provider: true, userAgent: true, createdAt: true, reauthenticatedAt: true, lastSeenAt: true, expiresAt: true, revokedAt: true, authorizationVersion: true, user: { select: { id: true, email: true, isActive: true } } },
+      defaultSortBy: 'lastSeenAt', softDelete: false,
+      searchDocument: (session: any) => searchText(
+        session.user.email, session.provider, session.userAgent,
+        session.revokedAt ? 'revoked inactive' : session.expiresAt <= now ? 'expired inactive' : 'active',
+      ),
+    });
   }
 
   revokeAllSessions(dto: RevokeSystemSessionDto, actor: RequestUser) {
@@ -546,9 +550,10 @@ export class SystemService {
     });
   }
 
-  listWorkflowPolicies(actor: RequestUser) {
+  async listWorkflowPolicies(query: PaginationQueryDto, actor: RequestUser) {
     const access = this.authorization.scopeRule(actor, 'workflow.policy.read', AccessScopeType.ALL_SYSTEM);
-    return this.prisma.workflowStagePolicy.findMany({ where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } }, include: { primaryUser: { select: { id: true, email: true } }, members: { include: { user: { select: { id: true, email: true } } } } }, orderBy: [{ workflowType: 'asc' }, { stage: 'asc' }] });
+    const policies = await this.prisma.workflowStagePolicy.findMany({ where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } }, include: { primaryUser: { select: { id: true, email: true } }, members: { include: { user: { select: { id: true, email: true } } } } }, orderBy: [{ workflowType: 'asc' }, { stage: 'asc' }] });
+    return rankSearchRecords(this.prisma, query.search, policies, policy => searchText(policy.workflowType, policy.stage, policy.mode, policy.primaryUser?.email, policy.members.map(member => member.user.email)));
   }
 
   updateWorkflowPolicy(workflowTypeValue: string, stageValue: string, dto: UpdateWorkflowPolicyDto, actor: RequestUser) {
@@ -574,9 +579,10 @@ export class SystemService {
     });
   }
 
-  listDelegations(actor: RequestUser) {
+  async listDelegations(query: PaginationQueryDto, actor: RequestUser) {
     const access = this.authorization.scopeRule(actor, 'workflow.delegation.read', AccessScopeType.ALL_SYSTEM);
-    return this.prisma.workflowDelegation.findMany({ where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } }, include: { delegator: { select: { id: true, email: true } }, delegate: { select: { id: true, email: true } } }, orderBy: { createdAt: 'desc' } });
+    const delegations = await this.prisma.workflowDelegation.findMany({ where: { id: access.unrestricted ? (access.excludeIds.length ? { notIn: access.excludeIds } : undefined) : { in: access.includeIds, notIn: access.excludeIds } }, include: { delegator: { select: { id: true, email: true } }, delegate: { select: { id: true, email: true } } }, orderBy: { createdAt: 'desc' } });
+    return rankSearchRecords(this.prisma, query.search, delegations, delegation => searchText(delegation.workflowType, delegation.stage, delegation.delegator.email, delegation.delegate.email, delegation.startsAt, delegation.endsAt, delegation.revokedAt ? 'revoked inactive' : 'active', delegation.reason));
   }
 
   createDelegation(dto: CreateWorkflowDelegationDto, actor: RequestUser) {

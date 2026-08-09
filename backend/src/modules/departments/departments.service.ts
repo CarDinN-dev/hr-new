@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessScopeType, AuditAction } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listRecords } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
@@ -40,12 +40,15 @@ export class DepartmentsService {
   }
 
   list(query: QueryDepartmentsDto, user: RequestUser) {
-    return listRecords(this.prisma.department, query, {
-      searchFields: ['name', 'code', 'description'],
+    return hybridListRecords(this.prisma, this.prisma.department, query, {
       allowedSortFields: ['createdAt', 'name', 'code'],
       defaultSortBy: 'createdAt',
       where: { AND: [this.systemWhere(user, 'department.read'), ...(query.managerId ? [{ managerId: query.managerId }] : [])] },
       include: departmentInclude,
+      searchDocument: (department: any) => searchText(
+        department.name, department.code, department.description,
+        department.manager && [department.manager.employeeCode, department.manager.firstName, department.manager.lastName, department.manager.email],
+      ),
     });
   }
 

@@ -88,6 +88,7 @@ import {
   nextEmployeeCode,
   payrollLoanDeductions,
   recordManualLoanRepayment,
+  recruitmentJobVacancies,
   setAttendance,
   setLoanDeductionOverride,
   todayISO,
@@ -122,6 +123,7 @@ import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
+import { PageSearchBar, PageSearchProvider, usePageSearch, usePageSearchStatus } from "./page-search";
 import "./styles.css";
 import "./professional.css";
 
@@ -165,6 +167,34 @@ const appQueryClient = new QueryClient({
 
 function workspaceQueryKey(session: BackendSession) {
   return ["workspace", session.sessionId, session.authorizationVersion] as const;
+}
+
+function pageSearchPath(path: string, search: string) {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}search=${encodeURIComponent(search)}`;
+}
+
+function usePageSearchList<T>(key: string, path: string, enabled = true) {
+  const { search, active } = usePageSearch();
+  const query = useQuery({
+    queryKey: ["page-search", key, search],
+    queryFn: () => apiList<T>(pageSearchPath(path, search)),
+    enabled: active && enabled,
+  });
+  usePageSearchStatus(key, { count: query.data?.length, loading: query.isFetching, error: query.error?.message });
+  return query;
+}
+
+function useSectionSearch(page: "dashboard" | "reports" | "settings") {
+  const { search, active } = usePageSearch();
+  const query = useQuery({
+    queryKey: ["section-search", page, search],
+    queryFn: () => apiRequest<{ data: Array<{ id: string; score: number }> }>(`/search/sections?page=${page}&search=${encodeURIComponent(search)}`),
+    enabled: active,
+  });
+  const ids = new Set(query.data?.data.map(item => item.id));
+  usePageSearchStatus(`sections-${page}`, { count: query.data?.data.length, loading: query.isFetching, error: query.error?.message });
+  return { active, ids, visible: (id: string) => !active || query.isPending || ids.has(id), query };
 }
 
 function backendSessionMarker(session: BackendSession) {
@@ -517,7 +547,7 @@ function App() {
   const pageHint = pageDescription(nav);
 
   return (
-    <AuthorizationProvider session={backendSession}><div className="app">
+    <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className="app">
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Main navigation">
         <div className="brand-block">
           <span className="logo-crop wordmark"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
@@ -561,6 +591,7 @@ function App() {
             <h1>{nav}</h1>
             <p className="page-hint">{pageHint}</p>
           </div>
+          <PageSearchBar page={nav} />
           <div className="topbar-actions">
             <NotificationsPanel session={backendSession} notify={notify} />
             <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
@@ -614,7 +645,7 @@ function App() {
       {sidebarOpen && <button aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
       {modal && <Dialog onClose={closeModal}>{modal}</Dialog>}
       {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
-    </div></AuthorizationProvider>
+    </div></PageSearchProvider></AuthorizationProvider>
   );
 }
 
@@ -690,10 +721,13 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 
 function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void>; onOpenLeave: () => void }) {
   const employee = state.employees.find(item => item.id === session.employeeId);
+  const { active: searchActive } = usePageSearch();
+  const matches = usePageSearchList<{ id: string }>("my-hr-employee", "/employees");
+  const profileMatches = !searchActive || matches.data?.some(item => item.id === employee?.id);
 
   return <div className="dashboard-grid">
-    <ProfilePhotoPanel employee={employee} session={session} notify={notify} refreshWorkspace={refreshWorkspace} />
-    <section className="panel span-2"><div className="panel-head"><div><h3>Personal information</h3><span>HR maintains these details in Employees.</span></div></div>
+    {profileMatches && <ProfilePhotoPanel employee={employee} session={session} notify={notify} refreshWorkspace={refreshWorkspace} />}
+    {profileMatches && <section className="panel span-2"><div className="panel-head"><div><h3>Personal information</h3><span>HR maintains these details in Employees.</span></div></div>
       {!employee ? <p className="muted">No employee record is linked to this account.</p> : <div className="form-grid">
         {[
           ["Name", employeeName(employee)], ["Employee ID", employee.fields["Employee Code"]], ["Designation", employee.fields.Designation],
@@ -702,16 +736,21 @@ function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { s
           ["Email address", employee.fields["E-Mail ID (Work)"]]
         ].map(([label, value]) => <label key={label}>{label}<input value={value || "-"} readOnly aria-readonly="true" /></label>)}
       </div>}
-    </section>
+    </section>}
     <MyLeaveStatusPanel session={session} onOpenLeave={onOpenLeave} />
+    {searchActive && matches.isSuccess && !profileMatches && <div className="empty span-2">No profile fields match this search.</div>}
   </div>;
 }
 
 function TeamPage({ state, session, notify }: { state: HrState; session: BackendSession; notify: (message: string) => void }) {
+  const { active: searchActive } = usePageSearch();
+  const matches = usePageSearchList<{ id: string }>("team-employees", "/employees");
+  const matchIds = new Set(matches.data?.map(item => item.id));
+  const employees = searchActive ? state.employees.filter(employee => matchIds.has(employee.id)) : state.employees;
   return <div className="dashboard-grid">
-    <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
+    <Metric label="PEOPLE IN SCOPE" value={employees.length} hint="Direct reports and managed departments" />
     <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
-      <DataTable label="People in scope" columns={["Employee", "Department", "Status", "Joined"]} rows={state.employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
+      <DataTable label="People in scope" empty="No team members match this search." columns={["Employee", "Department", "Status", "Joined"]} rows={employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
     </section>
     <ApprovalInboxPanel session={session} notify={notify} />
   </div>;
@@ -724,7 +763,12 @@ type DashboardPayslip = { id: string; netPay: string };
 type DashboardBirthday = { id: string; firstName: string; lastName: string; department: string | null; profilePhoto: string | null; date: string; daysUntil: number };
 
 function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
+  const { search, active: searchActive } = usePageSearch();
+  const sectionSearch = useSectionSearch("dashboard");
+  const employeeSearch = usePageSearchList<{ id: string }>("dashboard-employees", "/employees");
+  const employeeMatchIds = new Set(employeeSearch.data?.map(item => item.id));
   const active = activeEmployees(state.employees);
+  const matchingActive = searchActive ? active.filter(employee => employeeMatchIds.has(employee.id)) : active;
   const today = state.attendance[todayISO()] || {};
   const fallbackAttendance = attendanceDaySummary(state.employees, today);
   const todayValue = todayISO();
@@ -732,7 +776,9 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const attendance = useQuery({ queryKey: ["dashboard-attendance", session.sessionId, session.authorizationVersion, todayValue], queryFn: () => apiRequest<DashboardAttendanceReport>(`/attendance/reports/summary?dateFrom=${todayValue}&dateTo=${todayValue}&limit=100`), enabled: canReadAttendanceSummary });
   const canReadLeave = hasAnyPermission(session, "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
   const broadLeave = hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
-  const leaveRecords = useQuery({ queryKey: ["dashboard-leave", session.sessionId, session.authorizationVersion, broadLeave], queryFn: () => apiList<DashboardLeave>(broadLeave ? "/leave/requests" : "/leave/mine"), enabled: canReadLeave });
+  const leavePath = broadLeave ? "/leave/requests" : "/leave/mine";
+  const leaveRecords = useQuery({ queryKey: ["dashboard-leave", session.sessionId, session.authorizationVersion, broadLeave], queryFn: () => apiList<DashboardLeave>(leavePath), enabled: canReadLeave });
+  const searchedLeaveRecords = useQuery({ queryKey: ["dashboard-leave-search", session.sessionId, session.authorizationVersion, broadLeave, search], queryFn: () => apiList<DashboardLeave>(pageSearchPath(leavePath, search)), enabled: canReadLeave && searchActive });
   const currentYear = new Date().getFullYear(); const currentMonth = new Date().getMonth() + 1;
   const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
   const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasPermission(session, "payroll.payslip.read_all") });
@@ -741,20 +787,23 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const byStatus = attendanceSummary?.byStatus;
   const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendanceSummary.totalRecords) } : fallbackAttendance;
   const pendingLeave = (leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
+  const visiblePendingLeave = (searchActive ? searchedLeaveRecords.data ?? [] : leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
   const currentPayroll = payrollRuns.data ?? [];
   const expiringDocs = state.employees.filter(employee => daysUntil(employee.fields["QID Expiry Date"]) <= 60 || daysUntil(employee.fields["Passport Expiry Date"]) <= 60);
-  const openJobs = state.jobs.filter(job => job.status === "Open");
+  const openJobs = state.jobs.filter(job => job.status === "Open" && !recruitmentJobVacancies(job, state.candidates).isFilled);
+  const openPositions = openJobs.reduce((total, job) => total + recruitmentJobVacancies(job, state.candidates).remaining, 0);
   const pipelineCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" && candidate.stage !== "Rejected");
   const payrollTotal = (payrollSlips.data ?? []).reduce((sum, slip) => sum + Number(slip.netPay), 0);
   const headcount = state.settings.departments.map(department => ({
     department,
-    count: active.filter(employee => employee.fields.Department === department).length
+    count: matchingActive.filter(employee => employee.fields.Department === department).length
   })).filter(item => item.count > 0);
   const maxHeadcount = Math.max(1, ...headcount.map(item => item.count));
-  const upcomingBirthdays = birthdays.data ?? [];
-  const recentJoiners = [...state.employees]
+  const upcomingBirthdays = (birthdays.data ?? []).filter(item => !searchActive || employeeMatchIds.has(item.id));
+  const recentJoiners = [...state.employees].filter(employee => !searchActive || employeeMatchIds.has(employee.id))
     .sort((a, b) => (b.fields["Joining Date"] || "").localeCompare(a.fields["Joining Date"] || ""))
     .slice(0, 6);
+  const showSection = (id: string, hasMatches: boolean) => !searchActive || sectionSearch.query.isPending || hasMatches || sectionSearch.ids.has(id);
 
   return (
     <>
@@ -784,13 +833,13 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
         <Metric label="Active employees" value={active.length} hint={`${state.employees.length - active.length} inactive records`} />
         <Metric label="Present today" value={todaySummary.P} hint={`${todaySummary.A} absent · ${todaySummary.H} half-day · ${todaySummary.L} leave · ${todaySummary.unmarked} unmarked`} tone={todaySummary.A ? "warn" : "ok"} />
         <Metric label="Pending leave" value={pendingLeave.length} hint="awaiting approval" tone={pendingLeave.length ? "warn" : "ok"} />
-        <Metric label="Open positions" value={openJobs.length} hint={`${pipelineCandidates.length} candidates in pipeline`} />
+        <Metric label="Open positions" value={openPositions} hint={`${pipelineCandidates.length} candidates in pipeline`} />
         <Metric label="Payroll this month" value={payrollSlips.isSuccess ? formatMoney(payrollTotal, state.settings.company.currency) : `${currentPayroll.length} run(s)`} hint={`${payrollSlips.data?.length ?? currentPayroll.reduce((sum, run) => sum + (run._count?.payrolls ?? 0), 0)} payslips`} />
         <Metric label="Docs expiring" value={expiringDocs.length} hint="next 60 days" tone={expiringDocs.length ? "warn" : "ok"} />
       </section>
 
       <section className="two-col">
-        <div className="panel">
+        {showSection("headcount", headcount.length > 0) && <div className="panel">
           <div className="panel-head"><h3>Headcount by Department</h3><span>{active.length} active</span></div>
           <div className="bars">
             {headcount.map(item => (
@@ -801,20 +850,20 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
               </div>
             ))}
           </div>
-        </div>
-        <div className="panel">
-          <div className="panel-head"><h3>Pending Leave Approvals</h3><span>{pendingLeave.length} open</span></div>
+        </div>}
+        {showSection("leave-approvals", visiblePendingLeave.length > 0) && <div className="panel">
+          <div className="panel-head"><h3>Pending Leave Approvals</h3><span>{visiblePendingLeave.length} open</span></div>
           <DataTable
             label="Pending leave approvals"
             empty="No pending leave requests."
             columns={["Employee", "Type", "Dates", "Days", "Status"]}
-            rows={pendingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} - ${formatDate(leave.endDate)}`, leave.totalDays, leave.status.replaceAll("_", " ")])}
+            rows={visiblePendingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} - ${formatDate(leave.endDate)}`, leave.totalDays, leave.status.replaceAll("_", " ")])}
           />
-        </div>
+        </div>}
       </section>
 
       <section className="two-col dashboard-secondary">
-        <div className="panel">
+        {showSection("birthdays", upcomingBirthdays.length > 0) && <div className="panel">
           <div className="panel-head"><h3>Birthdays - next 30 days</h3><span>{upcomingBirthdays.length} upcoming</span></div>
           {birthdays.isPending ? <div className="empty">Loading birthdays…</div>
             : birthdays.isError ? <div className="empty">Birthdays could not be loaded.</div>
@@ -832,9 +881,9 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
               ))}
             </div>
           ) : <div className="empty">No upcoming birthdays.</div>}
-        </div>
+        </div>}
 
-        <div className="panel">
+        {showSection("recent-joiners", recentJoiners.length > 0) && <div className="panel">
           <div className="panel-head"><h3>Recent Joiners</h3><span>latest employee records</span></div>
           <DataTable
             label="Recent joiners"
@@ -847,7 +896,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
               <Badge key="status" value={employee.status} />
             ])}
           />
-        </div>
+        </div>}
       </section>
     </>
   );
@@ -884,18 +933,19 @@ function pageDescription(nav: NavItem) {
 }
 
 function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
-  const [query, setQuery] = useState("");
+  const { active: searchActive } = usePageSearch();
+  const searchResults = usePageSearchList<{ id: string }>("employees", "/employees");
+  const searchIds = new Set(searchResults.data?.map(employee => employee.id));
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
   const activeCount = state.employees.filter(employee => employee.status === "Active").length;
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
   const employees = useMemo(() => state.employees.filter(employee => {
-    const haystack = Object.values(employee.fields).join(" ").toLowerCase();
-    return (!query || haystack.includes(query.toLowerCase())) &&
+    return (!searchActive || searchIds.has(employee.id)) &&
       (!department || employee.fields.Department === department) &&
       (!status || employee.status === status);
-  }).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])), [state.employees, query, department, status]);
+  }).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])), [state.employees, searchActive, searchResults.data, department, status]);
 
   function edit(employee?: EmployeeRecord) {
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
@@ -940,7 +990,6 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       </div>
       <div className="panel employee-directory-panel">
         <div className="filters employee-filters">
-          <label><Search size={16} /><input aria-label="Search employees" placeholder="Search employee, code, email, department..." value={query} onChange={event => setQuery(event.target.value)} /></label>
           <select aria-label="Filter employees by department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
           <select aria-label="Filter employees by status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map(item => <option key={item}>{item}</option>)}</select>
         </div>
@@ -1161,7 +1210,7 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
   }
 
   return (
-    <div>
+    <div className="employee-editor">
       <h2>{employee ? "Edit employee" : "Add employee"}</h2>
       <p className="muted">Complete the employee details below.</p>
       <div className="employee-photo-editor">
@@ -1244,7 +1293,9 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
   const [year, setYear] = useState(now.getFullYear());
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
-  const [query, setQuery] = useState("");
+  const { active: searchActive } = usePageSearch();
+  const searchResults = usePageSearchList<{ employeeId: string }>("attendance", `/attendance?dateFrom=${date}&dateTo=${date}`);
+  const searchEmployeeIds = new Set(searchResults.data?.map(record => record.employeeId));
   const active = activeEmployees(state.employees).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"]));
   const day = state.attendance[date] || {};
   const stats = attendanceStats(state.employees, state.attendance, year, month);
@@ -1252,12 +1303,11 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
   const daySummary = attendanceDaySummary(state.employees, day);
   const departments = Array.from(new Set(active.map(employee => employee.fields.Department || "Unassigned"))).sort();
   const visibleEmployees = active.filter(employee => {
-    const text = [employee.fields["Employee Code"], employeeName(employee), employee.fields.Department, employee.fields.Designation].join(" ").toLowerCase();
     const code = day[employee.id];
     const label = code ? statusLabels[code] : "Unmarked";
     return (!department || (employee.fields.Department || "Unassigned") === department) &&
       (!status || label === status) &&
-      (!query || text.includes(query.toLowerCase()));
+      (!searchActive || searchEmployeeIds.has(employee.id));
   });
   const payrollImpact = active.reduce((sum, employee) => {
     const code = day[employee.id];
@@ -1324,7 +1374,6 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
         </div>
 
         <div className="attendance-toolbar department-style">
-          <label><Search size={16} /><input id="attendance-search" name="attendance-search" aria-label="Search attendance" placeholder="Search employee, department or status..." value={query} onChange={event => setQuery(event.target.value)} /></label>
           <input id="attendance-date" name="attendance-date" aria-label="Attendance date" type="date" value={date} onChange={event => setDate(event.target.value)} />
           <select value={department} onChange={event => setDepartment(event.target.value)} aria-label="Department filter"><option value="">All departments</option>{departments.map(item => <option key={item}>{item}</option>)}</select>
           <select value={status} onChange={event => setStatus(event.target.value)} aria-label="Status filter"><option value="">All statuses</option>{["Present", "Half-day", "Leave", "Absent", "Unmarked"].map(item => <option key={item}>{item}</option>)}</select>
@@ -1579,7 +1628,9 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
   close: () => void;
   canOverrideLimit: boolean;
 }) {
-  const [query, setQuery] = useState("");
+  const { active: searchActive } = usePageSearch();
+  const searchResults = usePageSearchList<{ id: string }>("loans", "/loans");
+  const searchIds = new Set(searchResults.data?.map(loan => loan.id));
   const [status, setStatus] = useState("");
   const [department, setDepartment] = useState("");
   const loans = state.loans ?? [];
@@ -1589,8 +1640,7 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
   const scheduled = activeEmployees(state.employees).reduce((sum, employee) => sum + payrollLoanDeductions(state, employee, now.getFullYear(), now.getMonth() + 1, employeeSalary(employee).total).reduce((total, item) => total + item.amount, 0), 0);
   const visible = loans.filter(loan => {
     const employee = state.employees.find(item => item.id === loan.employeeId);
-    const text = `${employeeName(employee)} ${employee?.fields["Employee Code"] ?? ""} ${loan.type} ${loan.reference}`.toLowerCase();
-    return (!query || text.includes(query.toLowerCase())) && (!status || loan.status === status) && (!department || employee?.fields.Department === department);
+    return (!searchActive || searchIds.has(loan.id)) && (!status || loan.status === status) && (!department || employee?.fields.Department === department);
   });
 
   function saveLoan(loan: EmployeeLoan) {
@@ -1617,7 +1667,6 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
     <div className="panel">
       <div className="panel-head"><div><h3>Employee Loans</h3><span>Automatic plans, manual deductions and repayment history.</span></div>{canOverrideLimit && <button className="primary" onClick={() => openLoanForm()}><HandCoins size={16} /> Add loan</button>}</div>
       <div className="inline-controls">
-        <input aria-label="Search loans" placeholder="Search employee, loan type or reference..." value={query} onChange={event => setQuery(event.target.value)} />
         <select aria-label="Loan status filter" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{["Draft", "Active", "Paused", "Settled", "Cancelled"].map(item => <option key={item}>{item}</option>)}</select>
         <select aria-label="Loan department filter" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
       </div>
@@ -1744,6 +1793,13 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const authorization = useAuthorization();
   const canManage = authorization.hasPermission("recruitment.manage");
   const canHire = authorization.hasAllPermissions("recruitment.manage", "employee.hr.create");
+  const { active: searchActive } = usePageSearch();
+  const jobSearch = usePageSearchList<{ id: string }>("recruitment-jobs", "/recruitment/jobs");
+  const candidateSearch = usePageSearchList<{ id: string }>("recruitment-candidates", "/recruitment/candidates");
+  const jobSearchIds = new Set(jobSearch.data?.map(item => item.id));
+  const candidateSearchIds = new Set(candidateSearch.data?.map(item => item.id));
+  const visibleJobs = searchActive ? state.jobs.filter(job => jobSearchIds.has(job.id)) : state.jobs;
+  const visibleCandidates = searchActive ? state.candidates.filter(candidate => candidateSearchIds.has(candidate.id)) : state.candidates;
   const [editingJobId, setEditingJobId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [jobDept, setJobDept] = useState(state.settings.departments[0] || "");
@@ -1765,14 +1821,17 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [offerDraft, setOfferDraft] = useState<OfferDetails>({});
   const [savingStageDocument, setSavingStageDocument] = useState(false);
   const pipeline = candidatePipeline(state.candidates);
-  const openJobs = state.jobs.filter(job => job.status === "Open");
-  const openPositions = openJobs.reduce((sum, job) => sum + job.openings, 0);
+  const vacancies = new Map(state.jobs.map(job => [job.id, recruitmentJobVacancies(job, state.candidates)]));
+  const openJobs = state.jobs.filter(job => job.status === "Open" && !vacancies.get(job.id)?.isFilled);
+  const openPositions = openJobs.reduce((sum, job) => sum + (vacancies.get(job.id)?.remaining ?? 0), 0);
+  const editingCandidateJobId = state.candidates.find(candidate => candidate.id === editingCandidateId)?.jobId;
+  const candidateJobs = state.jobs.filter(job => openJobs.some(openJob => openJob.id === job.id) || job.id === editingCandidateJobId);
   const activeCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" && candidate.stage !== "Rejected");
 
   useEffect(() => {
-    if (!candidateJobId && state.jobs[0]) setCandidateJobId(state.jobs[0].id);
-    if (candidateJobId && !state.jobs.some(job => job.id === candidateJobId)) setCandidateJobId(state.jobs[0]?.id || "");
-  }, [candidateJobId, state.jobs]);
+    if (!candidateJobId && candidateJobs[0]) setCandidateJobId(candidateJobs[0].id);
+    if (candidateJobId && !candidateJobs.some(job => job.id === candidateJobId)) setCandidateJobId(candidateJobs[0]?.id || "");
+  }, [candidateJobId, editingCandidateId, state.jobs, state.candidates]);
 
   function resetJobForm() {
     setEditingJobId("");
@@ -1849,13 +1908,15 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   }
 
   function saveCandidate() {
-    if (!state.jobs.length) return notify("Add a job opening first.");
+    if (!editingCandidateId && !openJobs.length) return notify("Add or reopen a job with an available position first.");
     if (!candidateName.trim()) return notify("Candidate name is required.");
+    const selectedJobId = candidateJobs.some(job => job.id === candidateJobId) ? candidateJobId : candidateJobs[0]?.id;
+    if (!selectedJobId) return notify("Select an available job opening.");
     const existingCandidate = state.candidates.find(candidate => candidate.id === editingCandidateId);
     const record: RecruitmentCandidate = {
       id: editingCandidateId || newId(),
       version: editingCandidateId ? state.candidates.find(candidate => candidate.id === editingCandidateId)?.version ?? 1 : 1,
-      jobId: candidateJobId || state.jobs[0].id,
+      jobId: selectedJobId,
       name: candidateName.trim(),
       email: candidateEmail.trim(),
       phone: candidatePhone.trim(),
@@ -1879,6 +1940,10 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   function moveCandidate(id: string, stage: RecruitmentCandidate["stage"]) {
     const candidate = state.candidates.find(item => item.id === id);
     if (candidate?.stage === "Hired" && stage !== "Hired") return notify("A hired candidate must be managed through the employee offboarding process.");
+    const job = candidate && state.jobs.find(item => item.id === candidate.jobId);
+    if (candidate && job && candidate.stage !== "Hired" && stage === "Hired" && (job.status !== "Open" || vacancies.get(job.id)?.isFilled)) {
+      return notify("All openings for this job are filled or closed.");
+    }
     setState(prev => ({
       ...prev,
       candidates: prev.candidates.map(candidate => candidate.id === id ? { ...candidate, stage } : candidate)
@@ -1936,11 +2001,11 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
 
   return <section className="stack recruitment-workspace">
     <div className="settlement-preview">
-      <div><span>Open positions</span><strong>{openPositions}</strong></div>
+      <div><span>Remaining</span><strong>{openPositions}</strong></div>
       <div><span>Open jobs</span><strong>{openJobs.length}</strong></div>
       <div><span>Pipeline</span><strong>{activeCandidates.length}</strong></div>
       <div><span>Offer stage</span><strong>{pipeline.Offer}</strong></div>
-      <div><span>Hired</span><strong>{pipeline.Hired}</strong></div>
+      <div><span>Filled</span><strong>{pipeline.Hired}</strong></div>
     </div>
 
     <div className="panel">
@@ -1960,16 +2025,19 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       <DataTable
         label="Job openings"
         empty="No job openings yet."
-        columns={["Title", "Department", "Openings", "Candidates", "Posted", "Status", "Actions"]}
-        rows={state.jobs.map(job => {
+        columns={["Title", "Department", "Openings", "Filled", "Remaining", "Candidates", "Posted", "Status", "Actions"]}
+        rows={visibleJobs.map(job => {
           const count = state.candidates.filter(candidate => candidate.jobId === job.id).length;
+          const vacancy = vacancies.get(job.id)!;
           return [
             <strong key="title">{job.title}</strong>,
             job.dept || "-",
             job.openings,
+            vacancy.filled,
+            vacancy.remaining,
             count,
             formatDate(job.postedOn),
-            <Badge key="status" value={job.status} />,
+            <Badge key="status" value={vacancy.isFilled ? "Filled" : job.status} />,
             canManage ? <div className="row-actions" key="actions"><button onClick={() => editJob(job)}>Edit</button><button onClick={() => deleteJob(job.id)}>Delete</button></div> : "-"
           ];
         })}
@@ -1983,7 +2051,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       </div>
       {canManage && <><div className="form-grid compact">
         <label htmlFor="candidate-name">Full name *<input id="candidate-name" name="candidate-name" value={candidateName} onChange={event => setCandidateName(event.target.value)} /></label>
-        <label>Applying for<select id="candidate-job" name="candidate-job" value={candidateJobId} disabled={!state.jobs.length} onChange={event => setCandidateJobId(event.target.value)}>{state.jobs.map(job => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
+        <label>Applying for<select id="candidate-job" name="candidate-job" value={candidateJobId} disabled={!candidateJobs.length} onChange={event => setCandidateJobId(event.target.value)}>{candidateJobs.map(job => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
         <label htmlFor="candidate-email">Email<input id="candidate-email" name="candidate-email" type="email" value={candidateEmail} onChange={event => setCandidateEmail(event.target.value)} /></label>
         <label htmlFor="candidate-phone">Phone<input id="candidate-phone" name="candidate-phone" value={candidatePhone} onChange={event => setCandidatePhone(event.target.value)} /></label>
         <label>Stage<select id="candidate-stage" name="candidate-stage" value={candidateStage} disabled={!editingCandidateId} onChange={event => setCandidateStage(event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(stage => <option key={stage}>{stage}</option>)}</select></label>
@@ -1994,7 +2062,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
 
       <div className="recruitment-pipeline">
         {candidateStages.map(stage => {
-          const cards = state.candidates.filter(candidate => candidate.stage === stage);
+          const cards = visibleCandidates.filter(candidate => candidate.stage === stage);
           return <div className="pipeline-column" key={stage}>
             <div className="pipeline-head"><strong>{stage}</strong><span>{cards.length}</span></div>
             {cards.length ? cards.map(candidate => {
@@ -2060,6 +2128,10 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   const authorization = useAuthorization();
   const canManage = authorization.hasPermission("eos.manage");
   const canExport = authorization.hasAnyPermission("document.hr.manage", "report.export");
+  const { active: searchActive } = usePageSearch();
+  const eosSearch = usePageSearchList<{ id: string }>("eos", "/eos");
+  const eosSearchIds = new Set(eosSearch.data?.map(item => item.id));
+  const visibleEosRecords = searchActive ? state.eosRecords.filter(record => eosSearchIds.has(record.id)) : state.eosRecords;
   const employees = state.employees;
   const [employeeId, setEmployeeId] = useState(activeEmployees(employees)[0]?.id || employees[0]?.id || "");
   const [asOf, setAsOf] = useState(todayISO());
@@ -2117,8 +2189,8 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
       </div>}
     </div>
     <div className="panel">
-      <div className="panel-head"><h3>EOS Register</h3><span>{state.eosRecords.length} records</span></div>
-      <DataTable label="End-of-service settlements" empty="No EOS records yet." columns={["Employee", "Date", "Gratuity", "Expenses", "Advances", "Net", "Status", "Actions"]} rows={state.eosRecords.map(record => {
+      <div className="panel-head"><h3>EOS Register</h3><span>{visibleEosRecords.length} records</span></div>
+      <DataTable label="End-of-service settlements" empty="No EOS records match this search." columns={["Employee", "Date", "Gratuity", "Expenses", "Advances", "Net", "Status", "Actions"]} rows={visibleEosRecords.map(record => {
         const rowEmployee = state.employees.find(item => item.id === record.employeeId);
         return [
           employeeName(rowEmployee),
@@ -2188,10 +2260,12 @@ function SettlementPreview({ employee, state }: { employee: EmployeeRecord; stat
 
 function Reports({ state, savePdf }: { state: HrState; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
   const { hasPermission: can } = useAuthorization();
+  const sections = useSectionSearch("reports");
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
-  return <section className="report-grid">{reportTemplates.map(report => (
+  const visibleReports = reportTemplates.filter(report => sections.visible(report.id));
+  return <section className="report-grid">{visibleReports.map(report => (
     <div className="report-card" key={report.id}>
       <BarChart3 size={20} />
       <h3>{report.label}</h3>
@@ -2200,7 +2274,7 @@ function Reports({ state, savePdf }: { state: HrState; notify: (message: string)
       {report.id === "leave_report" && <div className="inline-controls report-controls"><input aria-label="Leave report year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} /></div>}
       {can("report.export") ? <button className="primary" onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf(report.id, state, year, month), report.id))}><Download size={16} /> Download PDF</button> : <span className="muted">View only</span>}
     </div>
-  ))}</section>;
+  ))}{sections.active && !sections.query.isPending && !visibleReports.length && <div className="empty">No report cards match this search.</div>}</section>;
 }
 
 function SettingsPage({
@@ -2214,6 +2288,7 @@ function SettingsPage({
   notify: (message: string) => void;
   backendSession: BackendSession | null;
 }) {
+  const sections = useSectionSearch("settings");
   const canConfigureSystem = Boolean(backendSession && hasPermission(backendSession, "system.configure"));
   const canManageDepartments = Boolean(backendSession && hasPermission(backendSession, "department.manage"));
   const canConfigureLeave = Boolean(backendSession && hasPermission(backendSession, "leave.configure"));
@@ -2248,22 +2323,22 @@ function SettingsPage({
   }
 
   return <section className="settings-grid">
-    {backendSession && <SignedInDevicesPanel session={backendSession} notify={notify} />}
-    {canConfigureSystem && <div className="panel">
+    {backendSession && sections.visible("sessions") && <SignedInDevicesPanel session={backendSession} notify={notify} />}
+    {canConfigureSystem && sections.visible("company") && <div className="panel">
       <div className="panel-head"><h3>Data Protection</h3><span>Managed on Google Cloud</span></div>
       <p className="muted">The database and private document bucket are backed up by the server schedule. Restore operations are restricted to administrators with server access.</p>
     </div>}
-    {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Company Profile</h3></div><div className="form-grid compact">
+    {canConfigureSystem && sections.visible("company") && <div className="panel"><div className="panel-head"><h3>Company Profile</h3></div><div className="form-grid compact">
       {(["name", "legalName", "tagline", "address", "phone", "email", "website", "currency", "wpsEmployerEid", "wpsPayerEid", "wpsPayerQid", "wpsPayerBank", "wpsPayerIban"] as const).map(key => {
         const fieldId = `company-${key}`;
         return <label htmlFor={fieldId} key={key}>{labelize(key)}<input id={fieldId} name={fieldId} value={company[key]} onChange={event => setCompany(prev => ({ ...prev, [key]: event.target.value }))} /></label>;
       })}
     </div></div>}
-    {canManageDepartments && <div className="panel"><div className="panel-head"><h3>Departments</h3></div><textarea id="settings-departments" name="settings-departments" aria-label="Departments" value={departments} onChange={event => setDepartments(event.target.value)} /></div>}
-    {canConfigureLeave && <div className="panel"><div className="panel-head"><h3>Leave Types</h3><span>Format: Name:days</span></div><textarea id="settings-leave-types" name="settings-leave-types" aria-label="Leave types" value={leaveTypes} onChange={event => setLeaveTypes(event.target.value)} /></div>}
-    {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>}
-    {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>}
-    {canConfigureSystem && <div className="panel"><div className="panel-head"><h3>Payroll Controls</h3><span>These values are snapshotted on every run.</span></div><div className="form-grid compact"><label>Proration basis<select value={payrollProrationBasis} onChange={event => setPayrollProrationBasis(event.target.value as "Fixed 30" | "Calendar Days")}><option>Fixed 30</option><option>Calendar Days</option></select></label><label>Net pay variance warning (%)<input type="number" min="0" max="1000" step="0.01" value={payrollVarianceThreshold} onChange={event => setPayrollVarianceThreshold(Number(event.target.value) || 0)} /></label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireBankDetails} onChange={event => setPayrollRequireBankDetails(event.target.checked)} /> Require bank details before payroll</label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireAttendance} onChange={event => setPayrollRequireAttendance(event.target.checked)} /> Block payroll when attendance is missing</label></div><p className="muted">Bank data is required by default. Attendance can remain a warning while the rollout is in progress.</p></div>}
+    {canManageDepartments && sections.visible("departments") && <div className="panel"><div className="panel-head"><h3>Departments</h3></div><textarea id="settings-departments" name="settings-departments" aria-label="Departments" value={departments} onChange={event => setDepartments(event.target.value)} /></div>}
+    {canConfigureLeave && sections.visible("leave-types") && <div className="panel"><div className="panel-head"><h3>Leave Types</h3><span>Format: Name:days</span></div><textarea id="settings-leave-types" name="settings-leave-types" aria-label="Leave types" value={leaveTypes} onChange={event => setLeaveTypes(event.target.value)} /></div>}
+    {canConfigureSystem && sections.visible("payroll-policy") && <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>}
+    {canConfigureSystem && sections.visible("loan-policy") && <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>}
+    {canConfigureSystem && sections.visible("payroll-policy") && <div className="panel"><div className="panel-head"><h3>Payroll Controls</h3><span>These values are snapshotted on every run.</span></div><div className="form-grid compact"><label>Proration basis<select value={payrollProrationBasis} onChange={event => setPayrollProrationBasis(event.target.value as "Fixed 30" | "Calendar Days")}><option>Fixed 30</option><option>Calendar Days</option></select></label><label>Net pay variance warning (%)<input type="number" min="0" max="1000" step="0.01" value={payrollVarianceThreshold} onChange={event => setPayrollVarianceThreshold(Number(event.target.value) || 0)} /></label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireBankDetails} onChange={event => setPayrollRequireBankDetails(event.target.checked)} /> Require bank details before payroll</label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireAttendance} onChange={event => setPayrollRequireAttendance(event.target.checked)} /> Block payroll when attendance is missing</label></div><p className="muted">Bank data is required by default. Attendance can remain a warning while the rollout is in progress.</p></div>}
     {canSaveOrganizationSettings && <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>}
   </section>;
 }
@@ -2274,11 +2349,13 @@ type AuthSessionRecord = {
 };
 
 function SignedInDevicesPanel({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
+  const { search } = usePageSearch();
   const sessions = useQuery({
-    queryKey: ["auth-sessions", session.sessionId, session.authorizationVersion],
-    queryFn: () => apiRequest<AuthSessionRecord[]>("/auth/sessions"),
+    queryKey: ["auth-sessions", session.sessionId, session.authorizationVersion, search],
+    queryFn: () => apiRequest<AuthSessionRecord[]>(pageSearchPath("/auth/sessions", search)),
     enabled: hasPermission(session, "session.self.read")
   });
+  usePageSearchStatus("own-sessions", { count: sessions.data?.length, loading: sessions.isFetching, error: sessions.error?.message });
 
   async function revoke(id: string) {
     await apiRequest(`/auth/sessions/${id}`, { method: "DELETE", csrfToken: session.csrfToken });
@@ -2302,7 +2379,7 @@ function DataTable({ columns, rows, empty, label = "Data table" }: { columns: Re
 
 function Badge({ value }: { value: string }) {
   const lower = value.toLowerCase();
-  const tone = lower.includes("active") || lower.includes("approved") || lower.includes("final") || lower.includes("present") ? "good" : lower.includes("pending") || lower.includes("draft") || lower.includes("review") || lower.includes("late") || lower.includes("half") || lower.includes("leave") ? "warn" : lower.includes("reject") || lower.includes("terminat") || lower.includes("absent") ? "bad" : "neutral";
+  const tone = lower.includes("active") || lower.includes("approved") || lower.includes("filled") || lower.includes("final") || lower.includes("present") ? "good" : lower.includes("pending") || lower.includes("draft") || lower.includes("review") || lower.includes("late") || lower.includes("half") || lower.includes("leave") ? "warn" : lower.includes("reject") || lower.includes("terminat") || lower.includes("absent") ? "bad" : "neutral";
   return <span className={`badge ${tone}`}>{value}</span>;
 }
 

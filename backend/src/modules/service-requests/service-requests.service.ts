@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { jsPDF } from 'jspdf';
 import { RequestUser } from '../../common/types/request-user.type';
 import { hasActiveSuperAdminRole } from '../../common/authorization';
-import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -52,9 +52,17 @@ export class ServiceRequestsService {
   async list(query: QueryServiceRequestsDto, user: RequestUser) {
     const filters: Prisma.ServiceRequestWhereInput[] = [this.accessWhere(user)];
     if (query.requestType) filters.push({ requestType: query.requestType }); if (query.status) filters.push({ status: query.status }); if (query.subjectEmployeeId) filters.push({ subjectEmployeeId: query.subjectEmployeeId });
-    const { page, limit, ...args } = listArgs(query, { allowedSortFields: ['createdAt', 'updatedAt', 'status', 'requestType'], defaultSortBy: 'createdAt', where: { AND: filters }, include: requestInclude, softDelete: false });
-    const [data, total] = await Promise.all([this.prisma.serviceRequest.findMany(args), this.prisma.serviceRequest.count({ where: args.where })]);
-    return { data: (data as unknown as ServiceRequestRecord[]).map((request) => this.present(request, user)), meta: paginationMeta(total, page, limit) };
+    const result = await hybridListRecords(this.prisma, this.prisma.serviceRequest, query, {
+      allowedSortFields: ['createdAt', 'updatedAt', 'status', 'requestType'], defaultSortBy: 'createdAt',
+      where: { AND: filters }, include: requestInclude, softDelete: false,
+      searchDocument: (request: any) => searchText(
+        request.subject.employeeCode, request.subject.firstName, request.subject.lastName, request.subject.email,
+        request.subject.department?.name, request.subject.position?.title,
+        request.requestType, request.status, request.requesterComment, request.hrComment, request.rejectionReason,
+        request.documents?.map((document: any) => [document.fileName, document.template?.title, document.template?.code]).flat(),
+      ),
+    });
+    return { ...result, data: (result.data as unknown as ServiceRequestRecord[]).map((request) => this.present(request, user)) };
   }
 
   async findById(id: string, user: RequestUser) {

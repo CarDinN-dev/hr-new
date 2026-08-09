@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Permissions, SystemAdministratorOnly } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
+import { PaginationQueryDto, SearchQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   AssignUserRolesDto, ChangeUserStatusDto, CreateRoleDto, CreateSystemUserDto, QuerySystemSessionsDto, QuerySystemUsersDto,
   CreatePermissionOverrideDto, CreateWorkflowDelegationDto, ReplaceRolePermissionsDto,
@@ -29,24 +30,24 @@ export class SystemController {
   @Permissions('permission.assign') @Post('users/:id/overrides') createOverride(@Param('id') id: string, @Body() dto: CreatePermissionOverrideDto, @CurrentUser() user: RequestUser) { return this.system.createOverride(id, dto, user); }
   @Permissions('permission.assign') @Post('users/:id/overrides/:overrideId/revoke') revokeOverride(@Param('id') id: string, @Param('overrideId') overrideId: string, @Body() dto: RevokePermissionOverrideDto, @CurrentUser() user: RequestUser) { return this.system.revokeOverride(id, overrideId, dto, user); }
 
-  @Permissions('system.configure') @Get('roles') listRoles(@CurrentUser() user: RequestUser) { return this.system.listRoles(user); }
+  @Permissions('system.configure') @Get('roles') listRoles(@Query() query: PaginationQueryDto, @CurrentUser() user: RequestUser) { return this.system.listRoles(query, user); }
   @Permissions('role.manage') @Post('roles') createRole(@Body() dto: CreateRoleDto, @CurrentUser() user: RequestUser) { return this.system.createRole(dto, user); }
   @Permissions('role.manage') @Patch('roles/:id') updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto, @CurrentUser() user: RequestUser) { return this.system.updateRole(id, dto, user); }
   @Permissions('system.configure') @Put('roles/:id/inheritance') replaceInheritance(@Param('id') id: string, @Body() dto: ReplaceRoleInheritanceDto, @CurrentUser() user: RequestUser) { return this.system.replaceRoleInheritance(id, dto, user); }
   @Permissions('role.manage') @Put('roles/:id/permissions') replacePermissions(@Param('id') id: string, @Body() dto: ReplaceRolePermissionsDto, @CurrentUser() user: RequestUser) { return this.system.replaceRolePermissions(id, dto, user); }
   @Permissions('role.manage') @Delete('roles/:id') deleteRole(@Param('id') id: string, @Body() dto: SystemMutationDto, @CurrentUser() user: RequestUser) { return this.system.deleteRole(id, dto, user); }
 
-  @Permissions('permission.read') @Get('permissions') permissions(@Query() query: Record<string, unknown>, @CurrentUser() user: RequestUser) {
-    if (Object.keys(query).length) throw new BadRequestException('The permissions catalogue does not support query parameters.');
-    return this.system.listPermissions(user);
+  @Permissions('permission.read') @Get('permissions') permissions(@Query() query: SearchQueryDto, @CurrentUser() user: RequestUser) {
+    if (Object.keys(query).some((key) => key !== 'search')) throw new BadRequestException('Only search is supported for the permissions catalogue');
+    return this.system.listPermissions(query, user);
   }
   @Permissions('session.manage') @Get('sessions') sessions(@Query() query: QuerySystemSessionsDto, @CurrentUser() user: RequestUser) { return this.system.listSessions(query, user); }
   @Permissions('session.manage') @Post('sessions/revoke-all') revokeAllSessions(@Body() dto: RevokeSystemSessionDto, @CurrentUser() user: RequestUser) { return this.system.revokeAllSessions(dto, user); }
   @Permissions('session.manage') @Post('sessions/:id/revoke') revokeSession(@Param('id') id: string, @Body() dto: RevokeSystemSessionDto, @CurrentUser() user: RequestUser) { return this.system.revokeSession(id, dto, user); }
 
-  @Permissions('workflow.policy.read') @Get('workflow-policy') workflowPolicies(@CurrentUser() user: RequestUser) { return this.system.listWorkflowPolicies(user); }
+  @Permissions('workflow.policy.read') @Get('workflow-policy') workflowPolicies(@Query() query: PaginationQueryDto, @CurrentUser() user: RequestUser) { return this.system.listWorkflowPolicies(query, user); }
   @Permissions('workflow.policy.manage') @Put('workflow-policy/:workflowType/:stage') updateWorkflowPolicy(@Param('workflowType') workflowType: string, @Param('stage') stage: string, @Body() dto: UpdateWorkflowPolicyDto, @CurrentUser() user: RequestUser) { return this.system.updateWorkflowPolicy(workflowType, stage, dto, user); }
-  @Permissions('workflow.delegation.read') @Get('delegations') delegations(@CurrentUser() user: RequestUser) { return this.system.listDelegations(user); }
+  @Permissions('workflow.delegation.read') @Get('delegations') delegations(@Query() query: PaginationQueryDto, @CurrentUser() user: RequestUser) { return this.system.listDelegations(query, user); }
   @Permissions('workflow.delegation.manage') @Post('delegations') createDelegation(@Body() dto: CreateWorkflowDelegationDto, @CurrentUser() user: RequestUser) { return this.system.createDelegation(dto, user); }
   @Permissions('workflow.delegation.manage') @Post('delegations/:id/revoke') revokeDelegation(@Param('id') id: string, @Body() dto: RevokeWorkflowDelegationDto, @CurrentUser() user: RequestUser) { return this.system.revokeDelegation(id, dto, user); }
 }

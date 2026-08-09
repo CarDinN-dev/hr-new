@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessScopeType, AuditAction } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listRecords } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
@@ -33,12 +33,15 @@ export class JobPositionsService {
   }
 
   list(query: QueryJobPositionsDto, user: RequestUser) {
-    return listRecords(this.prisma.jobPosition, query, {
-      searchFields: ['title', 'code', 'description', 'level'],
+    return hybridListRecords(this.prisma, this.prisma.jobPosition, query, {
       allowedSortFields: ['createdAt', 'title', 'code', 'level'],
       defaultSortBy: 'createdAt',
       where: { AND: [this.systemWhere(user, 'position.read'), ...(query.departmentId ? [{ departmentId: query.departmentId }] : [])] },
       include: positionInclude,
+      searchDocument: (position: any) => searchText(
+        position.title, position.code, position.description, position.level,
+        position.department?.name, position.department?.code,
+      ),
     });
   }
 

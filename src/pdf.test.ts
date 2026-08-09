@@ -16,11 +16,13 @@ describe("professional PDF output", () => {
     const profile = saveEmployeeProfilePdf(employee, state.settings);
     const payslip = savePayslipPdf(payroll, employee, state.settings);
 
+    expect(state.settings.company.phone).toBe("+974 4443 4140");
     expect(profile.filename).toContain(employee.fields["Employee Code"]);
     expect(profile.dataUrl).toMatch(/^data:application\/pdf/);
     expect(dataUrlBlob(profile.dataUrl).type).toBe("application/pdf");
     expect(dataUrlBlob(profile.dataUrl).size).toBeGreaterThan(5_000);
     expect(profile.sizeBytes).toBeGreaterThan(5_000);
+    expect(Buffer.from(profile.dataUrl.split(",")[1], "base64").toString("latin1")).toContain("/Subtype /Image");
     expect(payslip.filename).toContain("2026-07");
     expect(payslip.sizeBytes).toBeGreaterThan(5_000);
   });

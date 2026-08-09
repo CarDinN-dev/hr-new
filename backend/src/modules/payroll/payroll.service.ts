@@ -4,10 +4,13 @@ import {
   PayrollAdjustmentDirection, PayrollLineKind, PayrollPaymentStatus, PayrollRunStatus, PayrollRunType, Prisma,
 } from '@prisma/client';
 import { createHash } from 'crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { jsPDF } from 'jspdf';
 import { money, nonNegativeMoney, percentageMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -75,6 +78,14 @@ type PayrollPreflight = {
   year: number; month: number; runType: PayrollRunType; purpose?: string; calculations: PayrollCalculation[]; issues: PayrollIssue[];
   policy: { prorationBasis: 'FIXED_30' | 'CALENDAR_DAYS'; requireBankDetails: boolean; requireAttendance: boolean; varianceThreshold: Prisma.Decimal; financialPolicyVersion: number };
 };
+
+const defaultPdfPhone = '+974 4443 4140';
+let payrollBrandMark: string | undefined;
+
+function payrollLogo() {
+  payrollBrandMark ??= `data:image/png;base64,${readFileSync(resolve(process.cwd(), 'assets', 'recruitment-templates', 'brand-mark.png')).toString('base64')}`;
+  return payrollBrandMark;
+}
 
 @Injectable()
 export class PayrollService {
@@ -211,10 +222,17 @@ export class PayrollService {
       appliedPayrollId: query.applied === undefined ? undefined : query.applied ? { not: null } : null,
       employee: this.compensationEmployeeWhere(user),
     };
-    const { page, limit, ...args } = listArgs(query, { allowedSortFields: ['createdAt', 'year', 'month', 'amount'], defaultSortBy: 'createdAt', where });
-    const [data, total] = await Promise.all([this.prisma.payrollAdjustment.findMany(args), this.prisma.payrollAdjustment.count({ where: args.where })]);
+    const result = await hybridListRecords(this.prisma, this.prisma.payrollAdjustment, query, {
+      allowedSortFields: ['createdAt', 'year', 'month', 'amount'], defaultSortBy: 'createdAt', where,
+      include: { employee: { select: employeePayrollSelect } }, softDelete: false,
+      searchDocument: (adjustment: any) => searchText(
+        adjustment.employee.employeeCode, adjustment.employee.firstName, adjustment.employee.lastName,
+        adjustment.employee.department?.name, adjustment.description, adjustment.reason,
+        `${adjustment.year}-${String(adjustment.month).padStart(2, '0')}`,
+      ),
+    });
     await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, resourceType: 'PayrollAdjustment', summary: 'Payroll adjustments viewed' });
-    return { data, meta: paginationMeta(total, page, limit) };
+    return result;
   }
 
   private generateInternal(dto: GeneratePayrollDto, key: string | undefined, user: RequestUser, correctionOfId?: string, correctionReason?: string) {
@@ -442,14 +460,18 @@ export class PayrollService {
   }
 
   async listRuns(query: QueryPayrollDto, user: RequestUser) {
-    const page = query.page ?? 1; const limit = query.limit ?? 20;
     const where: Prisma.PayrollRunWhereInput = { AND: [this.runAccessWhere(user, ['payroll.read', 'payroll.audit.read']), { year: query.year, month: query.month, status: query.status, payrolls: query.departmentId ? { some: { employee: { departmentId: query.departmentId } } } : undefined }] };
-    const [data, total] = await Promise.all([
-      this.prisma.payrollRun.findMany({ where, include: { generatedBy: { select: { id: true, email: true } }, approvedBy: { select: { id: true, email: true } }, _count: { select: { payrolls: true } } }, orderBy: [{ year: 'desc' }, { month: 'desc' }, { revision: 'desc' }], skip: (page - 1) * limit, take: limit }),
-      this.prisma.payrollRun.count({ where }),
-    ]);
+    const result = await hybridListRecords(this.prisma, this.prisma.payrollRun, query, {
+      where,
+      include: { generatedBy: { select: { id: true, email: true } }, approvedBy: { select: { id: true, email: true } }, _count: { select: { payrolls: true } } },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }, { revision: 'desc' }], softDelete: false,
+      searchDocument: (run: any) => searchText(
+        `${run.year}-${String(run.month).padStart(2, '0')}`, run.runType, run.purpose, run.status,
+        run.paymentBatchReference, run.generatedBy?.email, run.approvedBy?.email,
+      ),
+    });
     await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, resourceType: 'PayrollRun', summary: 'Payroll runs viewed', permissionCode: 'payroll.read' });
-    return { data, meta: paginationMeta(total, page, limit) };
+    return result;
   }
 
   async findRun(id: string, user: RequestUser) {
@@ -486,13 +508,16 @@ export class PayrollService {
       if (existing.requestHash !== this.requestHash({ id, dto })) throw new ConflictException('Idempotency key was already used with a different request');
       return this.findRun(existing.resourceId, user);
     }
-    const run = await this.prisma.payrollRun.findUnique({ where: { id }, include: payrollRunInclude });
+    const [run, settings] = await Promise.all([
+      this.prisma.payrollRun.findUnique({ where: { id }, include: payrollRunInclude }),
+      this.prisma.organizationSettings.findUnique({ where: { id: 'default' }, select: { phone: true } }),
+    ]);
     if (!run) throw new NotFoundException('Payroll run not found');
     this.assertVersion(run.version, dto.expectedVersion);
     if (run.status !== PayrollRunStatus.APPROVED) throw new BadRequestException('Only approved payroll can be published');
     const uploads = new Map<string, Awaited<ReturnType<DocumentStorageService['uploadPrivate']>>>();
     for (const payroll of run.payrolls) {
-      const buffer = this.payslipPdf(payroll, run);
+      const buffer = this.payslipPdf(payroll, run, settings);
       const uploaded = await this.storage.uploadPrivate(`payroll/${run.year}/${String(run.month).padStart(2, '0')}/run-${run.id}`, `${payroll.id}.pdf`, 'application/pdf', buffer, { payrollId: payroll.id, employeeId: payroll.employeeId, runId: run.id });
       uploads.set(payroll.id, uploaded);
     }
@@ -583,10 +608,19 @@ export class PayrollService {
     const filters: Prisma.PayrollWhereInput[] = [base];
     if (query.employeeId) filters.push({ employeeId: query.employeeId }); if (query.year) filters.push({ year: query.year }); if (query.month) filters.push({ month: query.month });
     if (query.status) filters.push({ payrollRun: { status: query.status } }); if (query.departmentId) filters.push({ employee: { departmentId: query.departmentId } });
-    const { page, limit, ...args } = listArgs(query, { allowedSortFields: ['createdAt', 'year', 'month', 'grossPay', 'netPay'], defaultSortBy: 'createdAt', where: { AND: filters }, include: payrollInclude, softDelete: false });
-    const [data, total] = await Promise.all([this.prisma.payroll.findMany(args), this.prisma.payroll.count({ where: args.where })]);
+    const result = await hybridListRecords(this.prisma, this.prisma.payroll, query, {
+      allowedSortFields: ['createdAt', 'year', 'month', 'grossPay', 'netPay'], defaultSortBy: 'createdAt',
+      where: { AND: filters }, include: payrollInclude, softDelete: false,
+      searchDocument: (payroll: any) => searchText(
+        payroll.employee.employeeCode, payroll.employee.firstName, payroll.employee.lastName, payroll.employee.email,
+        payroll.employee.department?.name, payroll.employee.department?.code,
+        `${payroll.year}-${String(payroll.month).padStart(2, '0')}`, payroll.payrollRun?.status,
+        payroll.paymentStatus, payroll.paymentReference,
+        payroll.lineItems?.map((item: any) => item.description),
+      ),
+    });
     await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, resourceType: 'Payroll', summary: 'Payslips viewed' });
-    return { data: (data as unknown as PayrollView[]).map((payroll) => this.presentPayroll(payroll)), meta: paginationMeta(total, page, limit) };
+    return { ...result, data: (result.data as unknown as PayrollView[]).map((payroll) => this.presentPayroll(payroll)) };
   }
 
   async listExportDepartments(user: RequestUser) {
@@ -735,10 +769,12 @@ export class PayrollService {
     }) };
   }
 
-  private payslipPdf(payroll: Prisma.PayrollGetPayload<{ include: { employee: { select: typeof employeePayrollSelect }; lineItems: true } }>, run: { year: number; month: number; revision: number }) {
+  private payslipPdf(payroll: Prisma.PayrollGetPayload<{ include: { employee: { select: typeof employeePayrollSelect }; lineItems: true } }>, run: { year: number; month: number; revision: number }, settings: { phone: string | null } | null) {
     const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     const safe = (value: string) => stripControlCharacters(value).slice(0, 200);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('Payslip', 40, 50);
+    const phone = settings?.phone?.trim() || defaultPdfPhone;
+    doc.addImage(payrollLogo(), 'PNG', 40, 20, 50, 40, undefined, 'FAST');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('Payslip', 110, 50);
     doc.setFontSize(10); doc.setFont('helvetica', 'normal');
     doc.text(`Employee: ${safe(`${payroll.employee.firstName} ${payroll.employee.lastName}`)}`, 40, 82);
     doc.text(`Employee code: ${safe(payroll.employee.employeeCode)}`, 40, 100);
@@ -750,7 +786,8 @@ export class PayrollService {
     doc.text('Gross pay', 330, y); doc.text(payroll.grossPay.toFixed(2), 480, y, { align: 'right' });
     y += 20; doc.text('Total deductions', 330, y); doc.text(payroll.deductions.plus(payroll.taxAmount).toFixed(2), 480, y, { align: 'right' });
     y += 20; doc.text('Net pay', 330, y); doc.text(payroll.netPay.toFixed(2), 480, y, { align: 'right' });
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text('System-generated payroll record', 40, 800);
+    doc.setDrawColor(217, 39, 62); doc.line(40, 785, 555, 785);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text('System-generated payroll record', 40, 805); doc.text(safe(phone), 555, 805, { align: 'right' });
     return Buffer.from(doc.output('arraybuffer'));
   }
 

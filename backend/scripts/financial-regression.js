@@ -32,6 +32,13 @@ async function main() {
   const netPay = grossPay.minus(sumMoney(['100', '25']));
   assert.equal(grossPay.toFixed(2), '3250.00');
   assert.equal(netPay.toFixed(2), '3125.00');
+  const brandedPayslip = payroll.payslipPdf({
+    employee: { firstName: 'Payroll', lastName: 'Employee', employeeCode: 'MT-0001', department: { name: 'Human Resources' } },
+    lineItems: [{ description: 'Basic salary', amount: new Prisma.Decimal('3250.00') }],
+    grossPay, deductions: new Prisma.Decimal('100.00'), taxAmount: new Prisma.Decimal('25.00'), netPay,
+  }, { year: 2026, month: 8, revision: 1 }, { phone: '+974 4443 4140' });
+  assert.equal(brandedPayslip.subarray(0, 4).toString(), '%PDF');
+  assert.match(brandedPayslip.toString('latin1'), /\/Subtype \/Image/);
   const lopDays = await payroll.payrollLopDays('employee-1', new Date('2026-07-01T00:00:00Z'), new Date('2026-07-31T23:59:59Z'), {
     attendance: { findMany: async () => [
       { attendanceDate: new Date('2026-07-02T00:00:00Z'), status: AttendanceStatus.ABSENT },

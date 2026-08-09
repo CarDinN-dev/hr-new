@@ -1,4 +1,4 @@
-import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeLoan, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollLoanDeduction, PayrollSlip, RecruitmentCandidate } from "./data";
+import type { AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, EmployeeExpense, EmployeeLoan, EmployeeRecord, EosRecord, HrSettings, HrState, LeaveRequest, LeaveStatus, PayrollLoanDeduction, PayrollSlip, RecruitmentCandidate, RecruitmentJob } from "./data";
 import { candidateStages, createEmptyEmployee, months, normalizeEmployee } from "./data";
 import { newId } from "./id";
 
@@ -46,10 +46,10 @@ export function employeeSalary(employee: EmployeeRecord) {
 
 export function nextEmployeeCode(employees: EmployeeRecord[]) {
   const max = employees.reduce((highest, employee) => {
-    const match = /^MT-(\d+)$/.exec(employee.fields["Employee Code"] || "");
+    const match = /^MTC(\d+)$/i.exec(employee.fields["Employee Code"] || "");
     return match ? Math.max(highest, Number(match[1])) : highest;
   }, 0);
-  return `MT-${String(max + 1).padStart(4, "0")}`;
+  return `MTC${String(max + 1).padStart(3, "0")}`;
 }
 
 export function inclusiveDays(from: string, to: string) {
@@ -445,6 +445,11 @@ export function candidatePipeline(candidates: RecruitmentCandidate[]) {
     counts[stage] = candidates.filter(item => item.stage === stage).length;
     return counts;
   }, {} as Record<CandidateStage, number>);
+}
+
+export function recruitmentJobVacancies(job: Pick<RecruitmentJob, "id" | "openings">, candidates: RecruitmentCandidate[]) {
+  const filled = candidates.filter(candidate => candidate.jobId === job.id && candidate.stage === "Hired").length;
+  return { filled, remaining: Math.max(0, job.openings - filled), isFilled: filled >= job.openings };
 }
 
 export function hireCandidateAsEmployee(state: HrState, candidateId: string) {

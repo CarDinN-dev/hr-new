@@ -393,7 +393,7 @@ export function defaultState(): HrState {
         legalName: "MedTech Corporation Trading W.L.L.",
         tagline: "Human Resources Operations",
         address: "Doha, State of Qatar",
-        phone: "+974 4000 0000",
+        phone: "+974 4443 4140",
         email: "hr@medtech.qa",
         website: "www.medtech.qa",
         currency: "QAR",

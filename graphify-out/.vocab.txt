@@ -6,7 +6,6 @@ accounting
 accounts
 acting
 action
-actions
 activate
 active
 actor
@@ -40,10 +39,8 @@ apply
 approval
 approvals
 approve
-approver
 architecture
 args
-around
 array
 assert
 assessment
@@ -106,6 +103,7 @@ boolean
 bootstrap
 boundaries
 box
+branc
 branch
 branches
 branching
@@ -215,7 +213,6 @@ control
 controlled
 controller
 controls
-coo
 cookie
 core
 correct
@@ -225,7 +222,6 @@ corrupts
 cost
 covered
 covers
-cpo
 create
 creation
 cross
@@ -402,7 +398,6 @@ formula
 formulas
 found
 foundations
-fresh
 from
 frontend
 full
@@ -413,12 +408,10 @@ gender
 generate
 generated
 get
-getting
 git
 github
 give
 given
-good
 google
 graph
 graphify
@@ -478,7 +471,6 @@ inclusive
 increment
 incremental
 index
-information
 inheritance
 init
 initial
@@ -572,7 +564,6 @@ map
 mark
 marker
 master
-match
 matches
 maternity
 matrix
@@ -647,7 +638,6 @@ omit
 only
 open
 openid
-operating
 operations
 opt
 options
@@ -671,11 +661,11 @@ paginated
 pagination
 paid
 panel
-panels
 paragraph
 paragraphs
 parallel
 params
+parent
 parse
 parser
 part
@@ -699,8 +689,8 @@ permission
 permissions
 persist
 persona
-personal
 personas
+phone
 photo
 pid
 pipeline
@@ -719,7 +709,6 @@ port
 position
 positions
 post
-practice
 preflight
 prepare
 present
@@ -847,7 +836,6 @@ rounds
 route
 router
 routes
-routine
 routing
 row
 rows
@@ -917,7 +905,6 @@ source
 sources
 spawn
 spec
-specific
 split
 spreadsheet
 stack
@@ -962,6 +949,7 @@ take
 tanstack
 target
 targeted
+team
 tech
 template
 templates
@@ -989,7 +977,6 @@ token
 top
 total
 totals
-track
 tracker
 transaction
 transcribe
@@ -1063,7 +1050,6 @@ work
 workbook
 workflow
 workflows
-workforce
 working
 workspace
 worth

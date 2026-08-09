@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileCheck2, ShieldCheck } from "lucide-react";
 import { apiDownload, apiPage, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { displayDate, displayTitle, idempotencyHeaders, saveDownload, workflowKey } from "./workflow-utils";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 type ServiceRequest = {
   id: string;
@@ -28,6 +29,7 @@ type PaginationMeta = { total: number; page: number; limit: number; totalPages: 
 
 export function ServiceRequestsPanel({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
   const client = useQueryClient();
+  const { search } = usePageSearch();
   const [requestType, setRequestType] = useState("SALARY_CERTIFICATE");
   const [action, setAction] = useState<ActionDialog | null>(null);
   const [reason, setReason] = useState("");
@@ -36,11 +38,13 @@ export function ServiceRequestsPanel({ session, notify }: { session: BackendSess
   const [page, setPage] = useState(1);
   const requiresStepUp = !hasActiveSuperAdminRole(session);
   const canRead = hasAnyPermission(session, "service_request.self.read", "service_request.hr.read", "service_request.read_all");
+  useEffect(() => setPage(1), [search]);
   const requests = useQuery({
-    queryKey: workflowKey(session, "service-requests", page),
-    queryFn: () => apiPage<ServiceRequest, PaginationMeta>(`/service-requests?page=${page}&limit=15`),
+    queryKey: [...workflowKey(session, "service-requests", page), search],
+    queryFn: () => apiPage<ServiceRequest, PaginationMeta>(`/service-requests?page=${page}&limit=15${search ? `&search=${encodeURIComponent(search)}` : ""}`),
     enabled: canRead,
   });
+  usePageSearchStatus("service-requests", { count: requests.data?.meta?.total, loading: requests.isFetching, error: requests.error?.message });
   const refresh = () => Promise.all([
     client.invalidateQueries({ queryKey: workflowKey(session, "service-requests") }),
     client.invalidateQueries({ queryKey: workflowKey(session, "approval-inbox") }),

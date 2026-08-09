@@ -5,7 +5,7 @@ import {
 } from '@prisma/client';
 import { money, nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
-import { paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
@@ -44,7 +44,10 @@ export class OperationsService {
   async listTrips(query: EmployeeScopedQueryDto, user: RequestUser) {
     const filters = await this.employeeFilters(query.employeeId, user, 'trip');
     if (query.status) filters.push({ status: query.status as TripStatus });
-    return this.paginated(this.prisma.businessTrip, query, { AND: filters, deletedAt: null }, { employee: { select: employeeSummary } });
+    return this.paginated(this.prisma.businessTrip, query, { AND: filters, deletedAt: null }, { employee: { select: employeeSummary } }, (trip: any) => searchText(
+      trip.employee.employeeCode, trip.employee.firstName, trip.employee.lastName, trip.destination, trip.purpose,
+      trip.startDate?.toISOString?.().slice(0, 10), trip.endDate?.toISOString?.().slice(0, 10), trip.status,
+    ));
   }
 
   async transitionTrip(id: string, dto: TransitionTripDto, user: RequestUser) {
@@ -86,7 +89,11 @@ export class OperationsService {
   async listExpenses(query: EmployeeScopedQueryDto, user: RequestUser) {
     const filters = await this.employeeFilters(query.employeeId, user, 'expense');
     if (query.status) filters.push({ status: query.status as ExpenseStatus });
-    return this.paginated(this.prisma.employeeExpense, query, { AND: filters, deletedAt: null }, { employee: { select: employeeSummary }, trip: true });
+    return this.paginated(this.prisma.employeeExpense, query, { AND: filters, deletedAt: null }, { employee: { select: employeeSummary }, trip: true }, (expense: any) => searchText(
+      expense.employee.employeeCode, expense.employee.firstName, expense.employee.lastName,
+      expense.category, expense.description, expense.expenseDate?.toISOString?.().slice(0, 10), expense.status,
+      expense.trip?.destination, expense.trip?.purpose,
+    ));
   }
 
   async transitionExpense(id: string, dto: TransitionExpenseDto, user: RequestUser) {
@@ -120,8 +127,10 @@ export class OperationsService {
   }
 
   listJobs(query: QueryRecruitmentDto, user: RequestUser) {
-    const where = { deletedAt: null, ...this.systemRecordWhere(user, 'recruitment.read'), status: query.status, OR: query.search ? [{ title: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined };
-    return this.paginated(this.prisma.recruitmentJob, query, where, { department: true, candidates: true });
+    const where = { deletedAt: null, ...this.systemRecordWhere(user, 'recruitment.read'), status: query.status };
+    return this.paginated(this.prisma.recruitmentJob, query, where, { department: true, candidates: true }, (job: any) => searchText(
+      job.title, job.description, job.department?.name, job.department?.code, job.status,
+    ));
   }
 
   async updateJob(id: string, dto: UpdateRecruitmentJobDto, user: RequestUser) {
@@ -130,6 +139,11 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const existing = await tx.recruitmentJob.findFirst({ where: { id, deletedAt: null } });
       if (!existing) throw new NotFoundException('Recruitment job not found');
+      const hiredCount = await tx.recruitmentCandidate.count({ where: { jobId: id, stage: CandidateStage.HIRED, deletedAt: null } });
+      const openings = dto.openings ?? existing.openings;
+      const status = dto.status ?? existing.status;
+      if (openings < hiredCount) throw new BadRequestException('Openings cannot be lower than the number of hired candidates');
+      if (status === RecruitmentJobStatus.OPEN && hiredCount >= openings) throw new BadRequestException('Increase openings before reopening a filled job');
       const updated = await tx.recruitmentJob.update({ where: { id }, data: { ...dto, version: { increment: 1 } }, include: { department: true } });
       await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentJob', id, 'Recruitment job updated');
       return updated;
@@ -150,9 +164,11 @@ export class OperationsService {
 
   async createCandidate(dto: CreateCandidateDto, user: RequestUser) {
     this.assertSystemScope(user, 'recruitment.manage');
-    const job = await this.prisma.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null } });
-    if (!job) throw new NotFoundException('Open recruitment job not found');
     return this.transaction(async (tx) => {
+      const job = await tx.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null } });
+      if (!job) throw new NotFoundException('Open recruitment job not found');
+      const hiredCount = await tx.recruitmentCandidate.count({ where: { jobId: job.id, stage: CandidateStage.HIRED, deletedAt: null } });
+      if (hiredCount >= job.openings) throw new BadRequestException('All openings for this job are filled');
       const candidate = await tx.recruitmentCandidate.create({
         data: { ...dto, email: dto.email.trim().toLowerCase(), rating: nonNegativeMoney(dto.rating ?? 0, 'rating') },
       });
@@ -164,9 +180,11 @@ export class OperationsService {
   listCandidates(query: QueryRecruitmentDto, user: RequestUser) {
     const where = {
       deletedAt: null, ...this.systemRecordWhere(user, 'recruitment.read'), jobId: query.jobId, stage: query.stage,
-      OR: query.search ? [{ name: { contains: query.search, mode: Prisma.QueryMode.insensitive } }, { email: { contains: query.search, mode: Prisma.QueryMode.insensitive } }] : undefined,
     };
-    return this.paginated(this.prisma.recruitmentCandidate, query, where, { job: { include: { department: true } }, employee: { select: employeeSummary } });
+    return this.paginated(this.prisma.recruitmentCandidate, query, where, { job: { include: { department: true } }, employee: { select: employeeSummary } }, (candidate: any) => searchText(
+      candidate.name, candidate.email, candidate.phone, candidate.stage, candidate.notes,
+      candidate.job?.title, candidate.job?.description, candidate.job?.department?.name,
+    ));
   }
 
   async updateCandidate(id: string, dto: UpdateCandidateDto, user: RequestUser) {
@@ -175,9 +193,11 @@ export class OperationsService {
       const existing = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
       if (!existing) throw new NotFoundException('Candidate not found');
       let job = existing.job;
-      if (dto.jobId) {
+      if (dto.jobId && dto.jobId !== existing.jobId) {
         const nextJob = await tx.recruitmentJob.findFirst({ where: { id: dto.jobId, status: RecruitmentJobStatus.OPEN, deletedAt: null }, include: { department: true } });
         if (!nextJob) throw new NotFoundException('Open recruitment job not found');
+        const hiredCount = await tx.recruitmentCandidate.count({ where: { jobId: nextJob.id, stage: CandidateStage.HIRED, deletedAt: null } });
+        if (hiredCount >= nextJob.openings) throw new BadRequestException('All openings for this job are filled');
         job = nextJob;
       }
       const { interviewAssessment, offerDetails, ...candidateDetails } = dto;
@@ -228,6 +248,13 @@ export class OperationsService {
       const next = order.indexOf(dto.stage);
       const linkingHiredEmployee = candidate.stage === CandidateStage.HIRED && dto.stage === CandidateStage.HIRED && Boolean(dto.employeeId);
       if (!rejection && !linkingHiredEmployee && (current < 0 || next !== current + 1)) throw new BadRequestException('Candidate stages must move forward one step at a time');
+      const fillingOpening = candidate.stage !== CandidateStage.HIRED && dto.stage === CandidateStage.HIRED;
+      let hiredCount = 0;
+      if (fillingOpening) {
+        if (candidate.job.status !== RecruitmentJobStatus.OPEN) throw new BadRequestException('This recruitment job is not open');
+        hiredCount = await tx.recruitmentCandidate.count({ where: { jobId: candidate.jobId, stage: CandidateStage.HIRED, deletedAt: null } });
+        if (hiredCount >= candidate.job.openings) throw new BadRequestException('All openings for this job are filled');
+      }
       if (dto.employeeId) {
         if (dto.stage !== CandidateStage.HIRED) throw new BadRequestException('An employee can only be linked to a hired candidate');
         const employee = await tx.employee.findFirst({ where: { id: dto.employeeId, deletedAt: null } });
@@ -249,6 +276,10 @@ export class OperationsService {
         },
         include: { job: { include: { department: true } }, employee: { select: employeeSummary } },
       });
+      if (fillingOpening && hiredCount + 1 >= candidate.job.openings) {
+        await tx.recruitmentJob.update({ where: { id: candidate.jobId }, data: { status: RecruitmentJobStatus.CLOSED, version: { increment: 1 } } });
+        await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentJob', candidate.jobId, 'Recruitment job automatically closed because all openings were filled');
+      }
       if (linkingHiredEmployee) {
         await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'RecruitmentCandidate', entityId: id, summary: 'Employee linked to hired candidate', changes: [{ field: 'employeeId', previousValue: candidate.employeeId, nextValue: dto.employeeId }] });
       } else {
@@ -327,7 +358,10 @@ export class OperationsService {
 
   listEos(query: EmployeeScopedQueryDto, user: RequestUser) {
     const where = { deletedAt: null, AND: [this.employeeRecordWhere(user, 'eos.read'), ...(query.employeeId ? [{ employeeId: query.employeeId }] : [])], status: query.status as EosStatus | undefined };
-    return this.paginated(this.prisma.eosRecord, query, where, { employee: { select: employeeSummary } });
+    return this.paginated(this.prisma.eosRecord, query, where, { employee: { select: employeeSummary } }, (eos: any) => searchText(
+      eos.employee.employeeCode, eos.employee.firstName, eos.employee.lastName,
+      eos.reason, eos.asOf?.toISOString?.().slice(0, 10), eos.status,
+    ));
   }
 
   async transitionEos(id: string, dto: TransitionEosDto, user: RequestUser) {
@@ -512,12 +546,16 @@ export class OperationsService {
 
   private fileName(value: string) { return value.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'candidate'; }
 
-  private paginated(delegate: any, query: EmployeeScopedQueryDto | QueryRecruitmentDto, where: object, include: object) {
-    const page = query.page ?? 1; const limit = query.limit ?? 20;
-    return Promise.all([
-      delegate.findMany({ where, include, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' } }),
-      delegate.count({ where }),
-    ]).then(([data, total]) => ({ data, meta: paginationMeta(total, page, limit) }));
+  private paginated(
+    delegate: any,
+    query: EmployeeScopedQueryDto | QueryRecruitmentDto,
+    where: Record<string, unknown>,
+    include: Record<string, unknown>,
+    searchDocument: (record: any) => string,
+  ) {
+    return hybridListRecords(this.prisma, delegate, query, {
+      allowedSortFields: ['createdAt'], defaultSortBy: 'createdAt', where, include, searchDocument,
+    });
   }
 
   private record(tx: Prisma.TransactionClient, user: RequestUser, action: AuditAction, entityType: string, entityId: string, summary: string) {

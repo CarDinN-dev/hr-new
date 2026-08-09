@@ -26,6 +26,7 @@ import { SystemModule } from './modules/system/system.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ApprovalsModule } from './modules/approvals/approvals.module';
+import { SearchController } from './search.controller';
 
 @Module({
   imports: [
@@ -51,7 +52,7 @@ import { ApprovalsModule } from './modules/approvals/approvals.module';
     DocumentsModule,
     AnnouncementsModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, SearchController],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },

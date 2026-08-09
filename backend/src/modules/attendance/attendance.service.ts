@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { AccessScopeType, AttendanceStatus, AuditAction, PayrollRunStatus, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckAttendanceDto } from './dto/check-attendance.dto';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
@@ -21,6 +22,7 @@ const attendanceInclude = {
       departmentId: true,
       managerId: true,
       lineManagerId: true,
+      department: { select: { name: true, code: true } },
     },
   },
 };
@@ -59,19 +61,18 @@ export class AttendanceService {
 
   async list(query: QueryAttendanceDto, user: RequestUser) {
     const filters = await this.buildFilters(query, user);
-    const { page, limit, ...args } = listArgs(query, {
+    return hybridListRecords(this.prisma, this.prisma.attendance, query, {
       allowedSortFields: ['createdAt', 'attendanceDate', 'checkIn', 'checkOut', 'workingHours', 'status'],
       defaultSortBy: 'attendanceDate',
       where: { AND: filters },
       include: attendanceInclude,
+      searchDocument: (attendance: any) => searchText(
+        attendance.employee.employeeCode, attendance.employee.firstName, attendance.employee.lastName,
+        attendance.employee.email, attendance.employee.department?.name, attendance.employee.department?.code,
+        attendance.attendanceDate?.toISOString?.().slice(0, 10), attendance.status, attendance.approvalStatus,
+        attendance.checkIn?.toISOString?.(), attendance.checkOut?.toISOString?.(), attendance.notes,
+      ),
     });
-
-    const [data, total] = await Promise.all([
-      this.prisma.attendance.findMany(args),
-      this.prisma.attendance.count({ where: args.where }),
-    ]);
-
-    return { data, meta: paginationMeta(total, page, limit) };
   }
 
   async findById(id: string, user: RequestUser) {

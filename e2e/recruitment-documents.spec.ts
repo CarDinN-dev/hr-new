@@ -8,7 +8,7 @@ const session = {
 
 const job = {
   id: "job-1", version: 1, title: "Clinical Applications Specialist", department: { id: "dept-1", name: "Diagnostics & POCT" },
-  openings: 1, status: "OPEN", postedOn: "2026-08-01", description: "Clinical support"
+  openings: 1, status: "CLOSED", postedOn: "2026-08-01", description: "Clinical support"
 };
 
 const candidates = [
@@ -22,6 +22,10 @@ const candidates = [
     stage: "OFFER", rating: "5", notes: "", appliedOn: "2026-08-01",
     interviewAssessment: { date: "2026-08-05", overallRating: 5 },
     offerDetails: { issueDate: "2026-08-06", basic: 10000, hra: 4000, conveyance: 1000, otherAllowance: 500, lineOfBusiness: job.department.name }
+  },
+  {
+    id: "candidate-hired", version: 3, jobId: job.id, name: "Salem Driver", email: "salem@example.invalid", phone: "+974 5000 3000",
+    stage: "HIRED", rating: "5", notes: "", appliedOn: "2026-07-30", employeeId: "employee-driver"
   }
 ];
 
@@ -46,6 +50,12 @@ async function installApi(page: Page) {
 test("recruitment stage editors auto-fill candidate data and expose exact PDF downloads", async ({ page }) => {
   await installApi(page);
   await page.goto("/recruitment");
+
+  const jobRow = page.getByRole("region", { name: "Job openings" }).getByRole("row").filter({ hasText: job.title });
+  await expect(jobRow.getByRole("cell").nth(3)).toHaveText("1");
+  await expect(jobRow.getByRole("cell").nth(4)).toHaveText("0");
+  await expect(jobRow).toContainText("Filled");
+  await expect(page.locator(".settlement-preview").getByText("Remaining", { exact: true }).locator("..")).toContainText("0");
 
   await page.getByRole("button", { name: "Assessment", exact: true }).click();
   const assessment = page.getByRole("dialog", { name: "Interview assessment" });

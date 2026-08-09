@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, finalizePayrollSlip, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, loanBalance, markAllAttendance, recordManualLoanRepayment, serviceYears, setAttendance, setLoanDeductionOverride, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
+import { attendanceDaySummary, candidatePipeline, clearAttendanceDay, createEosRecord, createPayroll, decideAttendance, decideLeave, deleteEmployee, deleteLeave, employeeSalary, eosSummary, expenseTotals, finalizePayrollSlip, hireCandidateAsEmployee, inclusiveDays, leaveBalanceSummary, loanBalance, markAllAttendance, nextEmployeeCode, recordManualLoanRepayment, recruitmentJobVacancies, serviceYears, setAttendance, setLoanDeductionOverride, settlementSummary, todayISO, tripTotal, upcomingBirthdays } from "./domain";
 import { type EmployeeLoan } from "./data";
 import { testState } from "./testState";
 
 describe("HR domain", () => {
+  it("generates sequential MTC employee codes", () => {
+    const employees = testState().employees;
+    employees[0].fields["Employee Code"] = "MTC005";
+    employees[1].fields["Employee Code"] = "mtc082";
+    employees[2].fields["Employee Code"] = "MT-9999";
+
+    expect(nextEmployeeCode([])).toBe("MTC001");
+    expect(nextEmployeeCode(employees)).toBe("MTC083");
+  });
+
   it("keeps leave balances, LOP payroll and settlement in sync", () => {
     let state = testState();
     const employee = state.employees[0];
@@ -293,6 +303,8 @@ describe("HR domain", () => {
     const hired = hireCandidateAsEmployee(state, candidate.id);
     const addedEmployee = hired.employees.find(employee => employee.fields["Full Name"] === candidate.name);
     const pipeline = candidatePipeline(hired.candidates);
+    const vacancies = recruitmentJobVacancies(hired.jobs[0], hired.candidates);
+    const partiallyFilled = recruitmentJobVacancies({ ...hired.jobs[0], openings: 2 }, hired.candidates);
     const duplicateAttempt = hireCandidateAsEmployee(hired, candidate.id);
 
     expect(hired.employees).toHaveLength(beforeCount + 1);
@@ -300,6 +312,8 @@ describe("HR domain", () => {
     expect(addedEmployee?.fields.Department).toBe(state.jobs.find(job => job.id === candidate.jobId)?.dept);
     expect(hired.candidates.find(item => item.id === candidate.id)?.employeeId).toBe(addedEmployee?.id);
     expect(pipeline.Hired).toBeGreaterThan(0);
+    expect(vacancies).toEqual({ filled: 1, remaining: 0, isFilled: true });
+    expect(partiallyFilled).toEqual({ filled: 1, remaining: 1, isFilled: false });
     expect(duplicateAttempt.employees).toHaveLength(beforeCount + 1);
   });
 });

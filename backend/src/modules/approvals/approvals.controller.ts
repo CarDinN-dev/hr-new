@@ -1,6 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { AnyPermission } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { ApprovalsService } from './approvals.service';
@@ -8,5 +9,5 @@ import { ApprovalsService } from './approvals.service';
 export class ApprovalsController {
   constructor(private readonly service: ApprovalsService) {}
   @AnyPermission('leave.team.approve_line_manager', 'leave.management.approve_manager', 'leave.hr.approve', 'leave.executive.approve_cpo', 'leave.executive.approve_coo', 'leave.executive.self_approve_coo', 'service_request.hr.approve', 'payroll.approve')
-  @Get('inbox') inbox(@CurrentUser() user: RequestUser) { return this.service.inbox(user); }
+  @Get('inbox') inbox(@Query() query: PaginationQueryDto, @CurrentUser() user: RequestUser) { return this.service.inbox(user, query.search); }
 }

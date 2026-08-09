@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import { RequestUser } from '../../common/types/request-user.type';
+import { rankSearchRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { AuditService } from '../audit/audit.service';
@@ -167,13 +168,15 @@ export class AuthService {
     }
   }
 
-  async listOwnSessions(user: RequestUser) {
+  async listOwnSessions(user: RequestUser, search?: string) {
     const now = new Date();
-    return this.prisma.authSession.findMany({
+    const sessions = await this.prisma.authSession.findMany({
       where: { userId: user.id, revokedAt: null, expiresAt: { gt: now } },
       select: { id: true, provider: true, userAgent: true, createdAt: true, lastSeenAt: true, expiresAt: true, revokedAt: true },
       orderBy: { lastSeenAt: 'desc' },
-    }).then((sessions) => sessions.map((session) => ({ ...session, current: session.id === user.sessionId })));
+    });
+    const ranked = await rankSearchRecords(this.prisma, search, sessions, session => searchText(session.provider, session.userAgent, session.id === user.sessionId ? 'current this device' : 'other device'));
+    return ranked.map((session) => ({ ...session, current: session.id === user.sessionId }));
   }
 
   async revokeOwnSession(user: RequestUser, sessionId: string) {

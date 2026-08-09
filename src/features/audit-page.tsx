@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ShieldCheck } from "lucide-react";
 import { apiDownload, apiList, apiPage, apiRequest, hasActiveSuperAdminRole, hasPermission, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 type AuditEvent = {
   id: string;
@@ -47,6 +48,7 @@ const queryKey = (session: BackendSession, name: string, ...parts: unknown[]) =>
 
 export function AuditHistoryPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
   const client = useQueryClient();
+  const { search } = usePageSearch();
   const [filters, setFilters] = useState({ search: "", outcome: "", action: "", resourceType: "", dateFrom: "", dateTo: "" });
   const [pagination, setPagination] = useState({ page: 1, limit: 15 });
   const [exportFormat, setExportFormat] = useState<"CSV" | "PDF" | null>(null);
@@ -54,12 +56,14 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
   const [policyDraft, setPolicyDraft] = useState<{ enabled: boolean; retentionDays: number; reason: string } | null>(null);
   const [holdDraft, setHoldDraft] = useState({ name: "", reason: "", resourceType: "", resourceId: "", endsAt: "" });
   const [release, setRelease] = useState<{ hold: LegalHold; reason: string } | null>(null);
-  const params = auditParams(filters, pagination);
+  useEffect(() => setPagination(previous => ({ ...previous, page: 1 })), [search]);
+  const params = auditParams({ ...filters, search }, pagination);
 
   const events = useQuery({
     queryKey: queryKey(session, "audit-events", params.toString()),
     queryFn: () => apiPage<AuditEvent, PaginationMeta>(`/audit/events?${params}`),
   });
+  usePageSearchStatus("audit-events", { count: events.data?.meta?.total, loading: events.isFetching, error: events.error?.message });
   const chain = useQuery({
     queryKey: queryKey(session, "audit-chain"),
     queryFn: () => apiRequest<{ valid: boolean; eventCount: number; brokenAtSequence?: string }>("/audit/events/verify-chain"),
@@ -159,7 +163,6 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
         </div>}
       </div>
       <div className="form-grid compact audit-filters">
-        <label>Search<input type="search" value={filters.search} onChange={event => updateFilter("search", event.target.value)} /></label>
         <label>Outcome<select value={filters.outcome} onChange={event => updateFilter("outcome", event.target.value)}><option value="">All</option><option>SUCCESS</option><option>DENIED</option><option>FAILED</option></select></label>
         <label>Action<input value={filters.action} onChange={event => updateFilter("action", event.target.value.toUpperCase())} /></label>
         <label>Resource type<input value={filters.resourceType} onChange={event => updateFilter("resourceType", event.target.value)} /></label>

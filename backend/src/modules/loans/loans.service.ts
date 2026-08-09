@@ -12,6 +12,7 @@ import {
 import { nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateLoanDto, LoanOverrideDto, ManualRepaymentDto, QueryLoansDto } from './dto/loan.dto';
@@ -61,17 +62,17 @@ export class LoansService {
     const filters: Prisma.EmployeeLoanWhereInput[] = [this.accessWhere(user)];
     if (query.employeeId) filters.push({ employeeId: query.employeeId });
     if (query.status) filters.push({ status: query.status });
-    const { page, limit, ...args } = listArgs(query, {
+    const result = await hybridListRecords(this.prisma, this.prisma.employeeLoan, query, {
       allowedSortFields: ['createdAt', 'principal', 'disbursementDate', 'status'],
       defaultSortBy: 'createdAt',
       where: { deletedAt: null, AND: filters },
       include: includeLoan,
+      searchDocument: (loan: any) => searchText(
+        loan.employee.employeeCode, loan.employee.firstName, loan.employee.lastName, loan.employee.departmentId,
+        loan.type, loan.reference, loan.notes, loan.status, `${loan.startYear}-${String(loan.startMonth).padStart(2, '0')}`,
+      ),
     });
-    const [data, total] = await Promise.all([
-      this.prisma.employeeLoan.findMany(args),
-      this.prisma.employeeLoan.count({ where: args.where }),
-    ]);
-    return { data: data.map((loan) => this.withBalance(loan)), meta: paginationMeta(total, page, limit) };
+    return { ...result, data: result.data.map((loan) => this.withBalance(loan)) };
   }
 
   async find(id: string, user: RequestUser) {

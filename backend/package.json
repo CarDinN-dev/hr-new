@@ -9,6 +9,7 @@
     "test:security": "npm run build && node --test scripts/security-regression.js",
     "test:rbac": "npm run build && node --test scripts/rbac-regression.js",
     "test:integration": "npm run build && node --test scripts/integration-regression.js",
+    "test:hybrid-search": "npm run build && node --test scripts/hybrid-search-regression.js",
     "test:financial": "npm run build && node scripts/financial-regression.js",
     "test:leave": "npm run build && node --test scripts/leave-regression.js",
     "test:document-scanning": "npm run build && node --test scripts/document-malware-scanner-regression.js",

@@ -1,19 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileText } from "lucide-react";
 import { apiDownload, apiPage, hasAnyPermission, hasPermission, type BackendSession } from "../api";
 import { displayMoney, displayTitle, saveDownload, workflowKey } from "./workflow-utils";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 type PaginationMeta = { total: number; page: number; limit: number; totalPages: number };
 type EmployeeDocument = { id: string; documentType: string; fileName: string; documentNumber: string; createdAt: string; scanStatus: string; employee: { employeeCode: string; firstName: string; lastName: string } };
 type Payslip = { id: string; year: number; month: number; grossPay: string; deductions: string; taxAmount: string; netPay: string; employee: { employeeCode: string; firstName: string; lastName: string } };
 
 export function DocumentsLibraryPanel({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
+  const { search } = usePageSearch();
   const [documentsPage, setDocumentsPage] = useState(1);
   const [payslipsPage, setPayslipsPage] = useState(1);
   const canReadPayslips = hasAnyPermission(session, "payroll.self.read_payslip", "payroll.payslip.read_all");
-  const documents = useQuery({ queryKey: workflowKey(session, "documents-library", documentsPage), queryFn: () => apiPage<EmployeeDocument, PaginationMeta>(`/documents?page=${documentsPage}&limit=15`) });
-  const payslips = useQuery({ queryKey: workflowKey(session, "documents-payslips", payslipsPage), queryFn: () => apiPage<Payslip, PaginationMeta>(`${hasPermission(session, "payroll.payslip.read_all") ? "/payroll/payslips" : "/payroll/payslips/me"}?page=${payslipsPage}&limit=15`), enabled: canReadPayslips });
+  useEffect(() => { setDocumentsPage(1); setPayslipsPage(1); }, [search]);
+  const documents = useQuery({ queryKey: [...workflowKey(session, "documents-library", documentsPage), search], queryFn: () => apiPage<EmployeeDocument, PaginationMeta>(`/documents?page=${documentsPage}&limit=15${search ? `&search=${encodeURIComponent(search)}` : ""}`) });
+  const payslips = useQuery({ queryKey: [...workflowKey(session, "documents-payslips", payslipsPage), search], queryFn: () => apiPage<Payslip, PaginationMeta>(`${hasPermission(session, "payroll.payslip.read_all") ? "/payroll/payslips" : "/payroll/payslips/me"}?page=${payslipsPage}&limit=15${search ? `&search=${encodeURIComponent(search)}` : ""}`), enabled: canReadPayslips });
+  usePageSearchStatus("documents-library", { count: documents.data?.meta?.total, loading: documents.isFetching, error: documents.error?.message });
+  usePageSearchStatus("document-payslips", { count: payslips.data?.meta?.total, loading: payslips.isFetching, error: payslips.error?.message });
   async function downloadDocument(id: string) { const file = await apiDownload(`/documents/${id}/content`); saveDownload(file.blob, file.fileName); }
   async function downloadPayslip(id: string) { const file = await apiDownload(`/payroll/payslips/${id}/download`); saveDownload(file.blob, file.fileName); }
 

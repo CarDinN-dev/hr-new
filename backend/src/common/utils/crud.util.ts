@@ -17,6 +17,7 @@ type ListOptions = {
   where?: Record<string, unknown>;
   include?: Record<string, unknown>;
   select?: Record<string, unknown>;
+  orderBy?: unknown;
   softDelete?: boolean;
 };
 
@@ -57,7 +58,7 @@ export function listArgs(query: PaginationQueryDto, options: ListOptions = {}): 
     where,
     skip,
     take: limit,
-    orderBy: { [sortBy]: query.sortOrder || 'desc' },
+    orderBy: options.orderBy ?? { [sortBy]: query.sortOrder || 'desc' },
     include: options.select ? undefined : options.include,
     select: options.select,
     page,

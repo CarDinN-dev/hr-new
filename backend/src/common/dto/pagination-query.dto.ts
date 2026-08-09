@@ -1,13 +1,27 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 function paginationNumber(value: unknown) {
   if (!Array.isArray(value)) return Number(value);
   return value.length > 0 && value.every((item) => item === value[0]) ? Number(value[0]) : Number.NaN;
 }
 
-export class PaginationQueryDto {
+export class SearchQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  search?: string;
+}
+
+export class PaginationQueryDto extends SearchQueryDto {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()
   @Transform(({ value }) => paginationNumber(value))
@@ -22,12 +36,6 @@ export class PaginationQueryDto {
   @Min(1)
   @Max(100)
   limit = 20;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  search?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

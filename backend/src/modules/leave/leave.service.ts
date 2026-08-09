@@ -7,7 +7,8 @@ import {
 import { createHash, randomUUID } from 'crypto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { hasActiveSuperAdminRole } from '../../common/authorization';
-import { listArgs, listRecords, paginationMeta } from '../../common/utils/crud.util';
+import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
@@ -108,8 +109,9 @@ export class LeaveService {
   }
 
   listTypes(query: QueryLeaveTypesDto) {
-    return listRecords(this.prisma.leaveType, query, {
-      searchFields: ['name', 'code', 'description'], allowedSortFields: ['createdAt', 'name', 'code', 'annualAllowanceDays'], defaultSortBy: 'createdAt',
+    return hybridListRecords(this.prisma, this.prisma.leaveType, query, {
+      allowedSortFields: ['createdAt', 'name', 'code', 'annualAllowanceDays'], defaultSortBy: 'createdAt',
+      searchDocument: (type) => searchText(type.name, type.code, type.description),
     });
   }
 
@@ -859,9 +861,17 @@ export class LeaveService {
     if (query.status) filters.push({ status: query.status });
     if (query.dateFrom) filters.push({ endDate: { gte: query.dateFrom } });
     if (query.dateTo) filters.push({ startDate: { lte: query.dateTo } });
-    const { page, limit, ...args } = listArgs(query, { allowedSortFields: ['createdAt', 'startDate', 'endDate', 'totalDays', 'status'], defaultSortBy: 'createdAt', where: { AND: filters }, include: leaveRequestInclude });
-    const [data, total] = await Promise.all([this.prisma.leaveRequest.findMany(args), this.prisma.leaveRequest.count({ where: args.where })]);
-    return { data: data as unknown as LeaveRequestView[], meta: paginationMeta(total, page, limit) };
+    const result = await hybridListRecords(this.prisma, this.prisma.leaveRequest, query, {
+      allowedSortFields: ['createdAt', 'startDate', 'endDate', 'totalDays', 'status'], defaultSortBy: 'createdAt',
+      where: { AND: filters }, include: leaveRequestInclude,
+      searchDocument: (request: any) => searchText(
+        request.employee.employeeCode, request.employee.firstName, request.employee.lastName, request.employee.email,
+        request.leaveType.name, request.leaveType.code, request.reason,
+        request.startDate?.toISOString?.().slice(0, 10), request.endDate?.toISOString?.().slice(0, 10),
+        request.status, request.currentStage, request.steps?.map((step: any) => step.stage),
+      ),
+    });
+    return result as { data: LeaveRequestView[]; meta: ReturnType<typeof paginationMeta> };
   }
 
   private async requestAccessWhere(user: RequestUser): Promise<Prisma.LeaveRequestWhereInput> {

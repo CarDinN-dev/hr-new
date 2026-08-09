@@ -4,6 +4,9 @@ import { Paperclip, ShieldCheck } from "lucide-react";
 import { apiList, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { displayDate, displayTitle, idempotencyHeaders, workflowKey } from "./workflow-utils";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
+
+const searched = (path: string, search: string) => search ? `${path}${path.includes("?") ? "&" : "?"}search=${encodeURIComponent(search)}` : path;
 
 type LeaveAttachment = { id: string; fileName: string; fileUrl: string; contentType: string; sizeBytes: number; scanStatus: string; scannedAt?: string | null; createdAt: string };
 export type LeaveRecord = {
@@ -56,7 +59,9 @@ function requestBody(form: { employeeId?: string; leaveTypeId: string; startDate
 }
 
 export function MyLeaveStatusPanel({ session, onOpenLeave }: { session: BackendSession; onOpenLeave: () => void }) {
-  const requests = useQuery({ queryKey: workflowKey(session, "my-leave-status"), queryFn: () => apiList<LeaveRecord>("/leave/mine"), enabled: Boolean(session.employeeId) && hasPermission(session, "leave.self.read") });
+  const { search } = usePageSearch();
+  const requests = useQuery({ queryKey: [...workflowKey(session, "my-leave-status"), search], queryFn: () => apiList<LeaveRecord>(searched("/leave/mine", search)), enabled: Boolean(session.employeeId) && hasPermission(session, "leave.self.read") });
+  usePageSearchStatus("my-leave", { count: requests.data?.length, loading: requests.isFetching, error: requests.error?.message });
   if (!hasPermission(session, "leave.self.read")) return null;
   const current = requests.data?.find(request => !finalStatuses.includes(request.status)) ?? requests.data?.[0];
   return <section className="panel span-2"><div className="panel-head"><div><h3>Current leave application</h3><span>Your latest active request, or most recent completed request.</span></div><button type="button" onClick={onOpenLeave}>View Leave</button></div>
@@ -66,14 +71,17 @@ export function MyLeaveStatusPanel({ session, onOpenLeave }: { session: BackendS
 
 export function LeaveWorkflowPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
   const client = useQueryClient();
+  const { search } = usePageSearch();
   const isSuperAdmin = hasActiveSuperAdminRole(session);
   const canSubmitForEmployee = hasPermission(session, "leave.hr.manage");
   const canHrOverride = hasPermission(session, "leave.hr.override");
   const canSuperOverride = hasPermission(session, "leave.override");
   const broad = hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
   const canInbox = hasAnyPermission(session, "leave.team.approve_line_manager", "leave.management.approve_manager", "leave.hr.approve", "leave.executive.approve_cpo", "leave.executive.approve_coo", "leave.executive.self_approve_coo");
-  const records = useQuery({ queryKey: workflowKey(session, "leave-records", broad), queryFn: () => apiList<LeaveRecord>(broad ? "/leave/requests" : "/leave/mine") });
-  const inbox = useQuery({ queryKey: workflowKey(session, "leave-inbox"), queryFn: () => apiList<LeaveRecord>("/leave/inbox"), enabled: canInbox });
+  const records = useQuery({ queryKey: [...workflowKey(session, "leave-records", broad), search], queryFn: () => apiList<LeaveRecord>(searched(broad ? "/leave/requests" : "/leave/mine", search)) });
+  const inbox = useQuery({ queryKey: [...workflowKey(session, "leave-inbox"), search], queryFn: () => apiList<LeaveRecord>(searched("/leave/inbox", search)), enabled: canInbox });
+  usePageSearchStatus("leave-records", { count: records.data?.length, loading: records.isFetching, error: records.error?.message });
+  usePageSearchStatus("leave-inbox", { count: inbox.data?.length, loading: inbox.isFetching, error: inbox.error?.message });
   const leaveTypes = useQuery({ queryKey: workflowKey(session, "leave-types"), queryFn: () => apiList<LeaveTypeRecord>("/leave/types") });
   const employees = useQuery({ queryKey: workflowKey(session, "leave-employees"), queryFn: () => apiList<LeaveEmployee>("/employees?limit=1000"), enabled: canSubmitForEmployee });
   const [form, setForm] = useState({ employeeId: "", leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false, reason: "" });

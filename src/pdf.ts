@@ -11,6 +11,7 @@ type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
 export type GeneratedPdf = { filename: string; dataUrl: string; sizeBytes: number };
 
 const page = { width: 210, height: 297, margin: 14 };
+const defaultPdfPhone = "+974 4443 4140";
 const brand = {
   ink: [24, 31, 43] as [number, number, number],
   red: [217, 39, 62] as [number, number, number],
@@ -312,7 +313,7 @@ function drawRoleHierarchyChrome(doc: jsPDF, settings: HrSettings, current: numb
   doc.setLineWidth(0.2);
   doc.line(14, 196, 283, 196);
   doc.setFontSize(6.2);
-  doc.text(`${settings.company.address}  |  ${settings.company.email}  |  +974 4443 4140`, 14, 201);
+  doc.text(`${settings.company.address}  |  ${settings.company.email}  |  ${pdfPhone(settings)}`, 14, 201);
   doc.text(`Confidential  |  Page ${current} of ${pages}`, 283, 201, { align: "right" });
 }
 
@@ -450,7 +451,7 @@ function finish(doc: jsPDF, settings: HrSettings, filename: string): GeneratedPd
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.setTextColor(...brand.muted);
-    doc.text(`${settings.company.address}  |  ${settings.company.email}  |  ${settings.company.phone}`, page.margin, 287);
+    doc.text(`${settings.company.address}  |  ${settings.company.email}  |  ${pdfPhone(settings)}`, page.margin, 287);
     doc.text(`Confidential  |  Page ${current} of ${pages}`, 196, 287, { align: "right" });
   }
   const dataUrl = doc.output("datauristring");
@@ -461,19 +462,11 @@ function finish(doc: jsPDF, settings: HrSettings, filename: string): GeneratedPd
 function drawPageChrome(doc: jsPDF, settings: HrSettings, current: number, pages: number) {
   doc.setFillColor(250, 250, 251);
   doc.rect(0, 0, page.width, 25, "F");
-  doc.setFillColor(...brand.red);
-  doc.circle(page.margin + 2, 10, 2.2, "F");
-  doc.circle(page.margin + 6, 7.6, 1.45, "F");
-  doc.circle(page.margin + 6.4, 12.7, 1.7, "F");
-  doc.circle(page.margin + 9.7, 10.2, 1.2, "F");
-  doc.setTextColor(...brand.ink);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("MEDTECH", page.margin + 14, 10.5);
+  doc.addImage(brandMark, "PNG", page.margin, 3, 20, 16);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.4);
   doc.setTextColor(...brand.muted);
-  doc.text(settings.company.legalName.toUpperCase(), page.margin + 14, 16);
+  doc.text(settings.company.legalName.toUpperCase(), page.margin + 24, 12.5);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(6.7);
   doc.text("HUMAN RESOURCES", page.width - page.margin, 10.5, { align: "right" });
@@ -483,6 +476,10 @@ function drawPageChrome(doc: jsPDF, settings: HrSettings, current: number, pages
   doc.setLineWidth(0.7);
   doc.line(0, 25, page.width, 25);
   doc.setLineWidth(0.2);
+}
+
+function pdfPhone(settings: HrSettings) {
+  return settings.company.phone.trim() || defaultPdfPhone;
 }
 
 function employeeIdentity(doc: jsPDF, y: number, employee: EmployeeRecord) {

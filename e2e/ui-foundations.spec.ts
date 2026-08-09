@@ -65,6 +65,10 @@ test("mobile dashboard, wide tables and shared dialog retain usable geometry", a
   const dialog = page.getByRole("dialog");
   await expect(dialog).toHaveJSProperty("tagName", "DIALOG");
   await expect(dialog).toHaveAttribute("aria-labelledby", /.+/);
+  await expect(page.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC001");
+  const employeeEditor = await page.locator(".modal:has(> .employee-editor)").boundingBox();
+  expect(employeeEditor).not.toBeNull();
+  expect(employeeEditor!.x + employeeEditor!.width).toBeLessThanOrEqual(390);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(page.locator("dialog")).toHaveCount(0);
@@ -90,7 +94,7 @@ test("search input text clears its leading icon", async ({ page }) => {
   expect(await search.evaluate(element => parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(36);
 });
 
-test("employee profile uses the wide dialog without leaving the viewport", async ({ page }) => {
+test("employee add, edit, and profile dialogs use the wide layout without leaving the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await installUiApi(page, [{
     id: "employee-1", employeeCode: "MTC005", firstName: "Dima Osama Ahmad", lastName: "Alhawi",
@@ -100,6 +104,16 @@ test("employee profile uses the wide dialog without leaving the viewport", async
   }], ["employee.hr.update", "payroll.read_compensation", "report.export"]);
   await page.goto("/employees");
   await expect(page.locator("article").filter({ hasText: "Dima Osama Ahmad Alhawi" })).toContainText("+974 5000 1234");
+
+  await page.getByRole("button", { name: "Add employee" }).click();
+  const addPanel = page.locator(".modal:has(> .employee-editor)");
+  const addDesktop = await addPanel.boundingBox();
+  expect(addDesktop).not.toBeNull();
+  expect(addDesktop!.width).toBeGreaterThanOrEqual(900);
+  expect(addDesktop!.width).toBeLessThanOrEqual(920);
+  await expect(addPanel.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC006");
+  await addPanel.getByRole("button", { name: "Cancel" }).click();
+
   await page.getByRole("button", { name: /Dima Osama Ahmad Alhawi/ }).click();
 
   const panel = page.locator(".modal:has(> .employee-profile)");
@@ -113,8 +127,16 @@ test("employee profile uses the wide dialog without leaving the viewport", async
   await expect(panel.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Done" })).toBeVisible();
 
+  await panel.getByRole("button", { name: "Edit", exact: true }).click();
+  const editPanel = page.locator(".modal:has(> .employee-editor)");
+  const editDesktop = await editPanel.boundingBox();
+  expect(editDesktop).not.toBeNull();
+  expect(editDesktop!.width).toBeGreaterThanOrEqual(900);
+  expect(editDesktop!.width).toBeLessThanOrEqual(920);
+  await expect(editPanel.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC005");
+
   await page.setViewportSize({ width: 390, height: 844 });
-  const mobile = await panel.boundingBox();
+  const mobile = await editPanel.boundingBox();
   expect(mobile).not.toBeNull();
   expect(mobile!.x).toBeGreaterThanOrEqual(0);
   expect(mobile!.x + mobile!.width).toBeLessThanOrEqual(390);

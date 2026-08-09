@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
@@ -79,8 +80,8 @@ export class AuthController {
   @ApiBearerAuth()
   @Permissions('session.self.read')
   @Get('sessions')
-  sessions(@CurrentUser() user: RequestUser) {
-    return this.authService.listOwnSessions(user);
+  sessions(@CurrentUser() user: RequestUser, @Query() query: PaginationQueryDto) {
+    return this.authService.listOwnSessions(user, query.search);
   }
 
   @ApiBearerAuth()

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { AccessScopeType, AuditAction, DocumentScanStatus, DocumentVisibility, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { QueryDocumentsDto } from './dto/query-documents.dto';
@@ -161,19 +161,16 @@ export class DocumentsService {
     if (query.visibility) filters.push({ visibility: query.visibility });
     if (query.expiringBefore) filters.push({ expiryDate: { lte: query.expiringBefore } });
 
-    const { page, limit, ...args } = listArgs(query, {
-      searchFields: ['documentType', 'fileName'],
+    return hybridListRecords(this.prisma, this.prisma.employeeDocument, query, {
       allowedSortFields: ['createdAt', 'documentType', 'fileName', 'expiryDate', 'visibility'],
       defaultSortBy: 'createdAt',
       where: { AND: filters },
       select: documentSelect,
+      searchDocument: (document: any) => searchText(
+        document.employee.employeeCode, document.employee.firstName, document.employee.lastName, document.employee.email,
+        document.fileName, document.documentType, document.documentNumber,
+      ),
     });
-
-    const [data, total] = await Promise.all([
-      this.prisma.employeeDocument.findMany(args),
-      this.prisma.employeeDocument.count({ where: args.where }),
-    ]);
-    return { data, meta: paginationMeta(total, page, limit) };
   }
 
   async findById(id: string, user: RequestUser) {

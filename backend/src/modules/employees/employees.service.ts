@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { AccessScopeType, AuditAction, EmploymentStatus, Gender, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { ImportEmployeeMasterDataDto, ImportEmployeeMasterDataRowDto } from './dto/import-employee-master-data.dto';
@@ -27,6 +28,14 @@ const employeeSummarySelect = {
   },
   lineManager: {
     select: managerSummarySelect,
+  },
+  user: {
+    select: {
+      roles: {
+        where: { revokedAt: null, role: { isActive: true } },
+        select: { role: { select: { code: true, displayName: true } } },
+      },
+    },
   },
 } satisfies Prisma.EmployeeSelect;
 
@@ -144,27 +153,26 @@ export class EmployeesService {
     if (query.lineManagerId) filters.push({ lineManagerId: query.lineManagerId });
     if (query.employmentStatus) filters.push({ employmentStatus: query.employmentStatus });
 
-    const { page, limit, ...args } = listArgs(query, {
-      searchFields: ['employeeCode', 'firstName', 'lastName', 'email', 'phone'],
+    const result = await hybridListRecords(this.prisma, this.prisma.employee, query, {
       allowedSortFields: ['createdAt', 'employeeCode', 'firstName', 'lastName', 'hireDate', ...(user.permissions.includes('payroll.read_compensation') ? ['salary'] : [])],
       defaultSortBy: 'createdAt',
       where: { AND: filters },
       select: this.projection(user, false),
+      searchDocument: (employee: any) => searchText(
+        employee.employeeCode, employee.firstName, employee.lastName, employee.email, employee.phone,
+        employee.department?.name, employee.department?.code, employee.position?.title, employee.position?.code,
+        employee.employmentStatus,
+        employee.user?.roles?.map((assignment: any) => [assignment.role.code, assignment.role.displayName]).flat(),
+        employee.manager && [employee.manager.employeeCode, employee.manager.firstName, employee.manager.lastName],
+        employee.lineManager && [employee.lineManager.employeeCode, employee.lineManager.firstName, employee.lineManager.lastName],
+      ),
     });
-
-    const [data, total] = await Promise.all([
-      this.prisma.employee.findMany(args),
-      this.prisma.employee.count({ where: args.where }),
-    ]);
 
     if (this.includesSensitiveFields(user)) {
       await this.audit.record(this.prisma, user, { action: AuditAction.ACCESS, entityType: 'Employee', summary: 'Sensitive employee records viewed' });
     }
 
-    return {
-      data,
-      meta: paginationMeta(total, page, limit),
-    };
+    return result;
   }
 
   async upcomingBirthdays() {

@@ -488,7 +488,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
 
   const recruitmentJob = await api('/recruitment/jobs', {
     method: 'POST', body: {
-      title: 'Integration PDF Specialist', departmentId: testDepartment.id, openings: 1,
+      title: 'Integration PDF Specialist', departmentId: testDepartment.id, openings: 2,
       postedOn: '2099-01-01', description: 'Recruitment PDF transport regression',
     },
   }, sessions.HR);
@@ -521,6 +521,51 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     assert.equal(pdf.buffer.subarray(0, 4).toString(), '%PDF');
     assertA4(pdf.buffer, 4);
   }
+
+  const additionalRecruitmentCandidates = [];
+  for (const suffix of ['Second', 'Overflow']) {
+    let candidate = await api('/recruitment/candidates', {
+      method: 'POST', body: {
+        jobId: recruitmentJob.data.id, name: `${suffix} Recruitment Candidate`, email: `${suffix.toLowerCase()}.recruitment@example.invalid`, appliedOn: '2099-01-03',
+      },
+    }, sessions.HR);
+    assert.equal(candidate.status, 201, JSON.stringify(candidate.payload));
+    for (const stage of ['SCREENING', 'INTERVIEW', 'OFFER']) {
+      candidate = await api(`/recruitment/candidates/${candidate.data.id}/stage`, {
+        method: 'PATCH', body: { stage, expectedVersion: candidate.data.version },
+      }, sessions.HR);
+      assert.equal(candidate.status, 200, JSON.stringify(candidate.payload));
+    }
+    additionalRecruitmentCandidates.push(candidate);
+  }
+
+  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'HIRED', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  assert.equal((await prisma.recruitmentJob.findUniqueOrThrow({ where: { id: recruitmentJob.data.id } })).status, 'OPEN');
+
+  let secondRecruitmentCandidate = await api(`/recruitment/candidates/${additionalRecruitmentCandidates[0].data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'HIRED', expectedVersion: additionalRecruitmentCandidates[0].data.version },
+  }, sessions.HR);
+  assert.equal(secondRecruitmentCandidate.status, 200, JSON.stringify(secondRecruitmentCandidate.payload));
+  assert.equal((await prisma.recruitmentJob.findUniqueOrThrow({ where: { id: recruitmentJob.data.id } })).status, 'CLOSED');
+
+  const overflowHire = await api(`/recruitment/candidates/${additionalRecruitmentCandidates[1].data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'HIRED', expectedVersion: additionalRecruitmentCandidates[1].data.version },
+  }, sessions.HR);
+  assert.equal(overflowHire.status, 400, JSON.stringify(overflowHire.payload));
+
+  secondRecruitmentCandidate = await api(`/recruitment/candidates/${secondRecruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'HIRED', employeeId: sessions.EMPLOYEE.user.employeeId, expectedVersion: secondRecruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(secondRecruitmentCandidate.status, 200, JSON.stringify(secondRecruitmentCandidate.payload));
+  assert.equal(secondRecruitmentCandidate.data.employeeId, sessions.EMPLOYEE.user.employeeId);
+
+  assert.equal((await api(`/recruitment/jobs/${recruitmentJob.data.id}`, { method: 'PATCH', body: { status: 'OPEN' } }, sessions.HR)).status, 400);
+  const reopenedRecruitmentJob = await api(`/recruitment/jobs/${recruitmentJob.data.id}`, { method: 'PATCH', body: { openings: 3, status: 'OPEN' } }, sessions.HR);
+  assert.equal(reopenedRecruitmentJob.status, 200, JSON.stringify(reopenedRecruitmentJob.payload));
+  assert.equal((await api(`/recruitment/jobs/${recruitmentJob.data.id}`, { method: 'PATCH', body: { openings: 1 } }, sessions.HR)).status, 400);
 
   const absent = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-02', status: 'ABSENT' } }, sessions.HR);
   const halfDay = await api('/attendance', { method: 'POST', body: { employeeId: sessions.EMPLOYEE.user.employeeId, attendanceDate: '2098-06-03', status: 'HALF_DAY' } }, sessions.HR);

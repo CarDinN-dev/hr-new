@@ -1,8 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Building2, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Download, Maximize2, Minus, Move, Pencil, Plus, RotateCcw, Search, ShieldCheck, Users, X } from "lucide-react";
-import { hasPermission, type BackendSession } from "../api";
+import { apiList, hasPermission, type BackendSession } from "../api";
 import type { EmployeeRecord } from "../data";
 import { buildCompanyRoleHierarchy, type RoleHierarchyBranch, type RoleHierarchyDepartment, type RoleHierarchyMember } from "../roleHierarchy";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 export type OrganizationalRole = "HR" | "MANAGER" | "LINE_MANAGER" | "EMPLOYEE";
 type ReportingRelation = "LINE_MANAGER" | "MANAGER" | null;
@@ -112,6 +114,15 @@ export function buildOrganizationHierarchy(employees: EmployeeRecord[]) {
 }
 
 export function HierarchyPage({ session, employees, onAddNode, onUpdateReporting, onExportRoleHierarchy }: { session: BackendSession; employees: EmployeeRecord[]; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onUpdateReporting: (employeeId: string, reporting: { lineManagerId: string | null; managerId: string | null }) => Promise<void>; onExportRoleHierarchy: () => void }) {
+  const { search, active } = usePageSearch();
+  const searchResults = useQuery({
+    queryKey: ["hierarchy-search", session.sessionId, session.authorizationVersion, search],
+    queryFn: () => apiList<{ id: string }>(`/employees?search=${encodeURIComponent(search)}`),
+    enabled: active,
+  });
+  const searchIds = new Set(searchResults.data?.map(employee => employee.id));
+  usePageSearchStatus("hierarchy", { count: searchResults.data?.length, loading: searchResults.isFetching, error: searchResults.error?.message });
+  const visibleEmployees = active ? employees.filter(employee => searchIds.has(employee.id)) : employees;
   const [activeTab, setActiveTab] = useState<"organization" | "roles">("organization");
   const [reportingEmployee, setReportingEmployee] = useState<EmployeeRecord | null>(null);
   const tabRefs = useRef(new Map<"organization" | "roles", HTMLButtonElement>());
@@ -132,22 +143,22 @@ export function HierarchyPage({ session, employees, onAddNode, onUpdateReporting
     </div>
     {activeTab === "organization" && <div className="panel" role="tabpanel" id="organization-hierarchy-panel" aria-labelledby="organization-hierarchy-tab">
       <div className="panel-head"><div><h3>Organizational hierarchy</h3><span>Follow the reporting chain from executives to each employee.</span></div></div>
-      <OrganizationChart employees={employees} canCreate={hasPermission(session, "employee.hr.create")} canEdit={hasPermission(session, "employee.hr.update")} onAddNode={onAddNode} onEditReporting={setReportingEmployee} />
+      <OrganizationChart employees={visibleEmployees} canCreate={hasPermission(session, "employee.hr.create")} canEdit={hasPermission(session, "employee.hr.update")} onAddNode={onAddNode} onEditReporting={setReportingEmployee} />
       <p className="muted hierarchy-access-note">This chart manages employee reporting lines. Login access remains controlled by roles in System.</p>
     </div>}
     {activeTab === "organization" && reportingEmployee && <ReportingEditor employee={reportingEmployee} employees={employees} onCancel={() => setReportingEmployee(null)} onSave={async reporting => { await onUpdateReporting(reportingEmployee.id, reporting); setReportingEmployee(null); }} />}
     {activeTab === "roles" && <div className="panel role-hierarchy-print-surface" role="tabpanel" id="role-hierarchy-panel" aria-labelledby="role-hierarchy-tab">
       <div className="panel-head"><div><h3>Role hierarchy</h3><span>Explore reporting responsibility by department.</span></div></div>
-      <DepartmentRoleHierarchy employees={employees} onExportPdf={onExportRoleHierarchy} />
+      <DepartmentRoleHierarchy employees={visibleEmployees} onExportPdf={onExportRoleHierarchy} />
     </div>}
   </section>;
 }
 
 function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditReporting }: { employees: EmployeeRecord[]; canCreate: boolean; canEdit: boolean; onAddNode: (role: OrganizationalRole, parent?: EmployeeRecord) => void; onEditReporting: (employee: EmployeeRecord) => void }) {
   const hierarchy = buildOrganizationHierarchy(employees);
-  const [search, setSearch] = useState("");
   const [collapsedIds, setCollapsedIds] = useState<Set<string> | null>(null);
-  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const search = "";
+  const normalizedSearch = "";
   const allNodes = flattenOrganizationHierarchy(hierarchy.roots);
   const branchIds = allNodes.filter(({ node }) => node.children.length).map(({ node }) => node.employee.id);
   const defaultCollapsed = new Set(allNodes.filter(({ node }) => node.children.length && !["COO", "CPO", "HR"].includes(node.roleLabel)).map(({ node }) => node.employee.id));
@@ -170,7 +181,6 @@ function OrganizationChart({ employees, canCreate, canEdit, onAddNode, onEditRep
       <span className={hierarchy.issues.length ? "has-issues" : ""}><strong>{hierarchy.issues.length}</strong> unresolved</span>
     </div>
     <div className="organization-toolbar">
-      <label className="organization-search"><span className="sr-only">Find an employee</span><Search size={17} aria-hidden="true" /><input type="search" value={search} placeholder="Find an employee or code" onChange={event => setSearch(event.target.value)} /></label>
       <span className="organization-match-count" aria-live="polite">{normalizedSearch ? `${matches} match${matches === 1 ? "" : "es"}` : `${allNodes.length} employees`}</span>
       <div className="organization-tree-actions">
         <button type="button" onClick={() => setCollapsedIds(new Set())}>Expand all</button>
@@ -775,10 +785,8 @@ export function DepartmentRoleHierarchy({ employees, onExportPdf }: { employees:
       <span className={unassignedPeople ? "warning" : ""}><strong>{unassignedPeople}</strong> need assignment</span>
     </div>
     <div className="company-role-toolbar">
-      <div className="company-role-search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="Find a department, reporting role, or employee" value={search} placeholder="Find department, manager, or employee" onChange={event => onSearchChange(event.target.value)} />{query && <button type="button" aria-label="Clear role hierarchy search" onClick={clearSearch}><X size={15} aria-hidden="true" /></button>}</div>
       <label className="company-role-department-jump"><span className="sr-only">Jump to department</span><select value={focusedDepartmentId ?? ""} onChange={event => focusDepartment(event.target.value || null)}><option value="">Company overview</option><optgroup label="Reports directly to COO">{coo.departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</optgroup><optgroup label="Reports through CPO">{cpo.departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</optgroup>{hierarchy.unassignedDepartments.length > 0 && <optgroup label="Needs reporting assignment">{hierarchy.unassignedDepartments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</optgroup>}</select></label>
       <span className="company-role-match-count" aria-live="polite">{query ? `${searchMatches.length} matching ${searchMatches.length === 1 ? "person" : "people"}${executiveMatches ? " · executive match" : ""}` : focusedMeta ? `Focused on ${focusedMeta.department.name}` : `${hierarchy.departmentCount} departments`}</span>
-      {query && searchMatches.length > 0 && <div className="company-role-search-navigation" role="group" aria-label="Search result navigation"><button type="button" aria-label="Previous role hierarchy result" onClick={() => showSearchMatch(searchMatches, searchMatchIndex - 1)}><ChevronLeft size={16} aria-hidden="true" /></button><span>{searchMatchIndex + 1} of {searchMatches.length}</span><button type="button" aria-label="Next role hierarchy result" onClick={() => showSearchMatch(searchMatches, searchMatchIndex + 1)}><ChevronRight size={16} aria-hidden="true" /></button></div>}
       <div className="company-role-actions">{focusedDepartmentId && <button type="button" onClick={() => focusDepartment(null)}><ArrowLeft size={16} aria-hidden="true" /> Overview</button>}<button type="button" onClick={expandAll}>Expand all</button><button type="button" onClick={collapseAll}>Collapse all</button><button type="button" className="primary" onClick={onExportPdf}><Download size={16} aria-hidden="true" /> Export PDF</button></div>
     </div>
     {selectedBreadcrumb.length > 0 && <nav className="company-role-breadcrumb" aria-label="Selected reporting path">{selectedBreadcrumb.map((label, index) => <span key={`${label}-${index}`}>{index > 0 && <ChevronRight size={13} aria-hidden="true" />}{label}</span>)}</nav>}

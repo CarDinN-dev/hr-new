@@ -5,15 +5,17 @@ import { Dialog } from "../dialog";
 import type { LeaveRecord } from "./leave-workflow";
 import type { PayrollRun } from "./payroll-workflow";
 import { displayDate, displayTitle, idempotencyHeaders, workflowKey } from "./workflow-utils";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 type Certificate = { id: string; requestType: string; status: string; version: number; subject: { firstName: string; lastName: string } };
 type ApprovalInbox = { leave: LeaveRecord[]; certificates: Certificate[]; payroll: PayrollRun[] };
 type ReasonAction = { type: "leave-reject" | "leave-return" | "certificate-reject"; id: string; version: number; label: string; reason: string };
 
 export function ApprovalInboxPanel({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
+  const { search } = usePageSearch();
   const client = useQueryClient();
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
-  const inbox = useQuery({ queryKey: workflowKey(session, "approval-inbox"), queryFn: () => apiRequest<ApprovalInbox>("/approvals/inbox") });
+  const inbox = useQuery({ queryKey: [...workflowKey(session, "approval-inbox"), search], queryFn: () => apiRequest<ApprovalInbox>(`/approvals/inbox${search ? `?search=${encodeURIComponent(search)}` : ""}`) });
   const refresh = () => Promise.all([
     client.invalidateQueries({ queryKey: workflowKey(session, "approval-inbox") }),
     client.invalidateQueries({ queryKey: workflowKey(session, "leave-inbox") }),
@@ -25,6 +27,7 @@ export function ApprovalInboxPanel({ session, notify }: { session: BackendSessio
     onSuccess: async () => { await refresh(); setReasonAction(null); notify("Approval item updated."); },
   });
   const count = (inbox.data?.leave.length ?? 0) + (inbox.data?.certificates.length ?? 0) + (inbox.data?.payroll.length ?? 0);
+  usePageSearchStatus("approval-inbox", { count, loading: inbox.isFetching, error: inbox.error?.message });
   function confirmReason() {
     if (!reasonAction) return;
     const path = reasonAction.type === "leave-reject" ? `/leave/${reasonAction.id}/reject` : reasonAction.type === "leave-return" ? `/leave/${reasonAction.id}/return` : `/service-requests/${reasonAction.id}/reject`;

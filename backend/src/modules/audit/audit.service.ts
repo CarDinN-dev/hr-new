@@ -4,7 +4,7 @@ import { AccessScopeType, AuditAction, AuditExportFormat, AuditOutcome, Prisma }
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { jsPDF } from 'jspdf';
 import { RequestUser } from '../../common/types/request-user.type';
-import { paginationMeta } from '../../common/utils/crud.util';
+import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DocumentStorageService } from '../documents/document-storage.service';
@@ -154,16 +154,20 @@ export class AuditService {
   }
 
   async list(query: QueryAuditDto, user: RequestUser) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const where = this.scopedWhere(this.exportWhere(query), user, 'audit.read');
-    const allowedSort = new Set(['occurredAtUtc', 'action', 'outcome', 'module', 'resourceType', 'sequence']);
-    const sortBy = query.sortBy && allowedSort.has(query.sortBy) ? query.sortBy : 'occurredAtUtc';
-    const [data, total] = await Promise.all([
-      this.prisma.auditEvent.findMany({ where, include: { actor: { select: { id: true, email: true } }, changes: true }, orderBy: { [sortBy]: query.sortOrder ?? 'desc' }, skip: (page - 1) * limit, take: limit }),
-      this.prisma.auditEvent.count({ where }),
-    ]);
-    return { data: data.map((event) => ({ ...event, sequence: event.sequence.toString() })), meta: paginationMeta(total, page, limit) };
+    const where = this.scopedWhere(this.exportWhere({ ...query, search: undefined }), user, 'audit.read');
+    const result = await hybridListRecords(this.prisma, this.prisma.auditEvent, query, {
+      allowedSortFields: ['occurredAtUtc', 'action', 'outcome', 'module', 'resourceType', 'sequence'],
+      defaultSortBy: 'occurredAtUtc', where,
+      include: { actor: { select: { id: true, email: true } }, changes: true }, softDelete: false,
+      searchDocument: (event: any) => searchText(
+        event.actorNameSnapshot, event.actorEmailSnapshot, event.actorRoleCodesSnapshot,
+        event.module, event.action, event.outcome, event.resourceType, event.resourceId,
+        event.permissionCode, event.requestId, event.correlationId, event.workflowId,
+        event.workflowStage, event.workflowStatus, event.payrollPeriod, event.requestType,
+        event.reason, event.changedFields,
+      ),
+    });
+    return { ...result, data: result.data.map((event) => ({ ...event, sequence: event.sequence.toString() })) };
   }
 
   async findById(id: string, user: RequestUser) {

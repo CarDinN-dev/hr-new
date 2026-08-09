@@ -4,6 +4,9 @@ import { Download } from "lucide-react";
 import { apiDownload, apiList, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { displayMoney, displayTitle, idempotencyHeaders, saveDownload, workflowKey } from "./workflow-utils";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
+
+const searched = (path: string, search: string) => search ? `${path}${path.includes("?") ? "&" : "?"}search=${encodeURIComponent(search)}` : path;
 
 export type PayrollRun = { id: string; year: number; month: number; revision: number; runType?: string; purpose?: string | null; status: string; version: number; generatedByUserId: string; paymentBatchReference?: string | null; payrolls?: Payslip[]; _count?: { payrolls: number } };
 type Payslip = { id: string; employeeId: string; year: number; month: number; baseSalary: string; allowances: string; bonuses: string; deductions: string; taxAmount: string; grossPay: string; netPay: string; employee: { employeeCode: string; firstName: string; lastName: string; department?: { id: string; name: string } | null }; payrollRun?: { status: string; revision: number } };
@@ -14,7 +17,9 @@ type PayrollPreflight = { ready: boolean; runType: string; policy: { prorationBa
 type PayrollAdjustment = { id: string; employeeId: string; year: number; month: number; direction: string; amount: string; taxable: boolean; description: string; reason: string; appliedPayrollId?: string | null };
 
 export function MyPayslipsPanel({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
-  const payslips = useQuery({ queryKey: workflowKey(session, "my-payslips-self"), queryFn: () => apiList<Payslip>("/payroll/payslips/me"), enabled: Boolean(session.employeeId) && hasPermission(session, "payroll.self.read_payslip") });
+  const { search } = usePageSearch();
+  const payslips = useQuery({ queryKey: [...workflowKey(session, "my-payslips-self"), search], queryFn: () => apiList<Payslip>(searched("/payroll/payslips/me", search)), enabled: Boolean(session.employeeId) && hasPermission(session, "payroll.self.read_payslip") });
+  usePageSearchStatus("my-payslips", { count: payslips.data?.length, loading: payslips.isFetching, error: payslips.error?.message });
   async function download(id: string) { const file = await apiDownload(`/payroll/payslips/${id}/download`); saveDownload(file.blob, file.fileName); }
   if (!hasPermission(session, "payroll.self.read_payslip")) return null;
   if (!session.employeeId) return <section className="panel span-2"><div className="panel-head"><div><h3>My payslips</h3><span>Published, current payslips are available here.</span></div></div><div className="empty">No published payslips yet.</div></section>;
@@ -23,6 +28,7 @@ export function MyPayslipsPanel({ session, notify }: { session: BackendSession; 
 
 export function PayrollWorkflowPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
   const client = useQueryClient();
+  const { search } = usePageSearch();
   const requiresStepUp = !hasActiveSuperAdminRole(session);
   const now = new Date();
   const [period, setPeriod] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
@@ -37,14 +43,17 @@ export function PayrollWorkflowPage({ session, notify }: { session: BackendSessi
   const [departmentId, setDepartmentId] = useState("");
   const [adjustment, setAdjustment] = useState({ employeeId: "", direction: "EARNING" as "EARNING" | "DEDUCTION", amount: "", taxable: false, description: "", reason: "" });
   const canReadRuns = hasAnyPermission(session, "payroll.read", "payroll.audit.read");
-  const runs = useQuery({ queryKey: workflowKey(session, "payroll-runs"), queryFn: () => apiList<PayrollRun>("/payroll/runs"), enabled: canReadRuns });
+  const runs = useQuery({ queryKey: [...workflowKey(session, "payroll-runs"), search], queryFn: () => apiList<PayrollRun>(searched("/payroll/runs", search)), enabled: canReadRuns });
   const employees = useQuery({ queryKey: workflowKey(session, "payroll-employees"), queryFn: () => apiList<PayrollEmployee>("/employees?limit=1000"), enabled: hasPermission(session, "payroll.generate") });
   const activePeriodRun = runs.data?.find(run => run.year === period.year && run.month === period.month && run.status !== "CANCELLED" && (run.runType ?? "REGULAR") === runType);
   const preflightPath = `/payroll/preflight?year=${period.year}&month=${period.month}&runType=${runType}${runType === "OFF_CYCLE" && offCycleEmployeeId ? `&employeeId=${encodeURIComponent(offCycleEmployeeId)}` : ""}${runType === "OFF_CYCLE" && offCyclePurpose.trim() ? `&purpose=${encodeURIComponent(offCyclePurpose.trim())}` : ""}`;
   const preflight = useQuery({ queryKey: [...workflowKey(session, "payroll-preflight"), period.year, period.month, runType, offCycleEmployeeId, offCyclePurpose], queryFn: () => apiRequest<PayrollPreflight>(preflightPath), enabled: hasPermission(session, "payroll.generate") && !activePeriodRun && (runType === "REGULAR" || Boolean(offCycleEmployeeId && offCyclePurpose.trim().length >= 3)) });
-  const payslips = useQuery({ queryKey: workflowKey(session, "payroll-payslips"), queryFn: () => apiList<Payslip>(hasPermission(session, "payroll.payslip.read_all") ? "/payroll/payslips" : "/payroll/payslips/me"), enabled: hasAnyPermission(session, "payroll.payslip.read_all", "payroll.self.read_payslip") });
+  const payslips = useQuery({ queryKey: [...workflowKey(session, "payroll-payslips"), search], queryFn: () => apiList<Payslip>(searched(hasPermission(session, "payroll.payslip.read_all") ? "/payroll/payslips" : "/payroll/payslips/me", search)), enabled: hasAnyPermission(session, "payroll.payslip.read_all", "payroll.self.read_payslip") });
   const departments = useQuery({ queryKey: workflowKey(session, "payroll-departments"), queryFn: () => apiList<PayrollDepartment>("/payroll/departments"), enabled: hasPermission(session, "payroll.export") });
-  const adjustments = useQuery({ queryKey: workflowKey(session, "payroll-adjustments"), queryFn: () => apiList<PayrollAdjustment>("/payroll/adjustments?limit=100"), enabled: hasPermission(session, "payroll.read") });
+  const adjustments = useQuery({ queryKey: [...workflowKey(session, "payroll-adjustments"), search], queryFn: () => apiList<PayrollAdjustment>(searched("/payroll/adjustments?limit=100", search)), enabled: hasPermission(session, "payroll.read") });
+  usePageSearchStatus("payroll-runs", { count: runs.data?.length, loading: runs.isFetching, error: runs.error?.message });
+  usePageSearchStatus("payroll-payslips", { count: payslips.data?.length, loading: payslips.isFetching, error: payslips.error?.message });
+  usePageSearchStatus("payroll-adjustments", { count: adjustments.data?.length, loading: adjustments.isFetching, error: adjustments.error?.message });
   const refresh = () => Promise.all([
     client.invalidateQueries({ queryKey: workflowKey(session, "payroll-runs") }),
     client.invalidateQueries({ queryKey: workflowKey(session, "payroll-payslips") }),

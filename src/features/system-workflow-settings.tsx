@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiList, apiRequest, hasAnyPermission, hasPermission, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
+import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 type SystemUser = { id: string; email: string; isActive: boolean };
 type WorkflowPolicy = {
@@ -29,6 +30,7 @@ type PolicyDraft = { policy: WorkflowPolicy; mode: WorkflowPolicy["mode"]; prima
 const key = (session: BackendSession, value: string) => [value, session.sessionId, session.authorizationVersion] as const;
 
 export function SystemWorkflowSettings({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
+  const { search } = usePageSearch();
   const client = useQueryClient();
   const canRead = hasAnyPermission(session, "workflow.policy.read", "workflow.delegation.read");
   const [policyDraft, setPolicyDraft] = useState<PolicyDraft | null>(null);
@@ -41,15 +43,17 @@ export function SystemWorkflowSettings({ session, notify }: { session: BackendSe
     enabled: canRead,
   });
   const policies = useQuery({
-    queryKey: key(session, "workflow-policies"),
-    queryFn: () => apiList<WorkflowPolicy>("/system/workflow-policy"),
+    queryKey: [...key(session, "workflow-policies"), search],
+    queryFn: () => apiList<WorkflowPolicy>(`/system/workflow-policy${search ? `?search=${encodeURIComponent(search)}` : ""}`),
     enabled: hasPermission(session, "workflow.policy.read"),
   });
   const delegations = useQuery({
-    queryKey: key(session, "workflow-delegations"),
-    queryFn: () => apiList<WorkflowDelegation>("/system/delegations"),
+    queryKey: [...key(session, "workflow-delegations"), search],
+    queryFn: () => apiList<WorkflowDelegation>(`/system/delegations${search ? `?search=${encodeURIComponent(search)}` : ""}`),
     enabled: hasPermission(session, "workflow.delegation.read"),
   });
+  usePageSearchStatus("workflow-policies", { count: policies.data?.length, loading: policies.isFetching, error: policies.error?.message });
+  usePageSearchStatus("workflow-delegations", { count: delegations.data?.length, loading: delegations.isFetching, error: delegations.error?.message });
   const refresh = () => Promise.all([
     client.invalidateQueries({ queryKey: key(session, "workflow-policies") }),
     client.invalidateQueries({ queryKey: key(session, "workflow-delegations") }),
