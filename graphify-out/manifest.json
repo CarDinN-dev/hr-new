@@ -925,8 +925,8 @@
     "semantic_hash": ""
   },
   "e2e/system-page.spec.ts": {
-    "mtime": 1786313630.4014626,
-    "ast_hash": "bf47349b9016f91174a39ef834ebcf5f",
+    "mtime": 1786319610.169885,
+    "ast_hash": "2a7f378d7505347ec0276ab1c7f7ced1",
     "semantic_hash": ""
   },
   "ops/backup.sh": {
@@ -1415,8 +1415,8 @@
     "semantic_hash": ""
   },
   "src/features/hierarchy-page.tsx": {
-    "mtime": 1786313623.1929674,
-    "ast_hash": "4643be5a1b210ffb5b81bf68e27ac612",
+    "mtime": 1786319487.6684806,
+    "ast_hash": "8b3b2e027bd0a27bf1a7e5b98f9f88f1",
     "semantic_hash": ""
   },
   "backend/prisma/migrations/20260728000000_custom_role_inheritance/migration.sql": {

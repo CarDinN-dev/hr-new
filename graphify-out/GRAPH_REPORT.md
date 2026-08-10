@@ -1,16 +1,16 @@
 # Graph Report - HR NEw  (2026-08-10)
 
 ## Corpus Check
-- 290 files · ~346,141 words
+- 290 files · ~346,658 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2442 nodes · 6000 edges · 130 communities (111 shown, 19 thin omitted)
+- 2443 nodes · 6001 edges · 146 communities (120 shown, 26 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 26 edges (avg confidence: 0.56)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `133ce04b`
+- Built from commit: `74fa3304`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -67,9 +67,12 @@
 - [[_COMMUNITY_rbac-regression.js|rbac-regression.js]]
 - [[_COMMUNITY_main.ts|main.ts]]
 - [[_COMMUNITY_audit.service.ts|audit.service.ts]]
+- [[_COMMUNITY_leave.service.ts|leave.service.ts]]
+- [[_COMMUNITY_.transaction|.transaction]]
 - [[_COMMUNITY_audit-page.tsx|audit-page.tsx]]
 - [[_COMMUNITY_production.sh|production.sh]]
 - [[_COMMUNITY_leave-workflow.tsx|leave-workflow.tsx]]
+- [[_COMMUNITY_attendanceSheet.ts|attendanceSheet.ts]]
 - [[_COMMUNITY_package.json|package.json]]
 - [[_COMMUNITY_public.decorator.ts|public.decorator.ts]]
 - [[_COMMUNITY_system.service.ts|system.service.ts]]
@@ -80,8 +83,10 @@
 - [[_COMMUNITY_microsoft-provisioning-regression.js|microsoft-provisioning-regression.js]]
 - [[_COMMUNITY_system-user-linking-regression.js|system-user-linking-regression.js]]
 - [[_COMMUNITY_system-page.spec.ts|system-page.spec.ts]]
+- [[_COMMUNITY_SystemController|SystemController]]
 - [[_COMMUNITY_sync-rbac.js|sync-rbac.js]]
 - [[_COMMUNITY_document-malware-scanner-regression.js|document-malware-scanner-regression.js]]
+- [[_COMMUNITY_leave-balances.controller.ts|leave-balances.controller.ts]]
 - [[_COMMUNITY_start-tunnel.sh|start-tunnel.sh]]
 - [[_COMMUNITY_prune-audit-events.js|prune-audit-events.js]]
 - [[_COMMUNITY_seed-test-personas.js|seed-test-personas.js]]
@@ -92,6 +97,7 @@
 - [[_COMMUNITY_create-payroll.dto.ts|create-payroll.dto.ts]]
 - [[_COMMUNITY_leave-workflow.spec.ts|leave-workflow.spec.ts]]
 - [[_COMMUNITY_job-positions.service.ts|job-positions.service.ts]]
+- [[_COMMUNITY_OperationsController|OperationsController]]
 - [[_COMMUNITY_nest-cli.json|nest-cli.json]]
 - [[_COMMUNITY_salary-records.controller.ts|salary-records.controller.ts]]
 - [[_COMMUNITY_stop-tunnel.sh|stop-tunnel.sh]]
@@ -100,14 +106,17 @@
 - [[_COMMUNITY_health-monitor.sh|health-monitor.sh]]
 - [[_COMMUNITY_MedTech HR ERP — Service-Level Agreement|MedTech HR ERP — Service-Level Agreement]]
 - [[_COMMUNITY_operations.service.ts|operations.service.ts]]
+- [[_COMMUNITY_readBiff8Rows|readBiff8Rows]]
 - [[_COMMUNITY_.leaveTransaction|.leaveTransaction]]
 - [[_COMMUNITY_permissions.guard.ts|permissions.guard.ts]]
 - [[_COMMUNITY_HR ERP Threat Model|HR ERP Threat Model]]
 - [[_COMMUNITY_MedTech HR ERP handover|MedTech HR ERP handover]]
 - [[_COMMUNITY_leave-workflow.tsx|leave-workflow.tsx]]
 - [[_COMMUNITY_dependencies|dependencies]]
+- [[_COMMUNITY_devDependencies|devDependencies]]
 - [[_COMMUNITY_MedTech HR ERP — Current Operations Cost Model|MedTech HR ERP — Current Operations Cost Model]]
 - [[_COMMUNITY_HR ERP Backend|HR ERP Backend]]
+- [[_COMMUNITY_scripts|scripts]]
 - [[_COMMUNITY_graphify reference extra exports and benchmark|graphify reference: extra exports and benchmark]]
 - [[_COMMUNITY_QueryLeaveRequestsDto|QueryLeaveRequestsDto]]
 - [[_COMMUNITY_Q Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX|Q: Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX]]
@@ -131,10 +140,18 @@
 - [[_COMMUNITY_CLOUD_RESOURCE_INVENTORY|CLOUD_RESOURCE_INVENTORY.md]]
 - [[_COMMUNITY_PerformanceReviewsService|PerformanceReviewsService]]
 - [[_COMMUNITY_leave-regression.js|leave-regression.js]]
+- [[_COMMUNITY_testState.ts|testState.ts]]
+- [[_COMMUNITY_.createTrip|.createTrip]]
 - [[_COMMUNITY_TransitionExpenseDto|TransitionExpenseDto]]
+- [[_COMMUNITY_search.controller.ts|search.controller.ts]]
+- [[_COMMUNITY_package.json|package.json]]
 - [[_COMMUNITY_recruitment-documents.spec.ts|recruitment-documents.spec.ts]]
+- [[_COMMUNITY_CreateEosDto|CreateEosDto]]
 - [[_COMMUNITY_.workflowPlan|.workflowPlan]]
 - [[_COMMUNITY_approvals.module.ts|approvals.module.ts]]
+- [[_COMMUNITY_TransitionExpenseDto|TransitionExpenseDto]]
+- [[_COMMUNITY_TransitionTripDto|TransitionTripDto]]
+- [[_COMMUNITY_ReplaceRoleInheritanceDto|ReplaceRoleInheritanceDto]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `RequestUser` - 511 edges
@@ -163,7 +180,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (130 total, 19 thin omitted)
+## Communities (146 total, 26 thin omitted)
 
 ### Community 0 - "operations.service.ts"
 Cohesion: 0.07
@@ -175,7 +192,7 @@ Nodes (19): key(), PolicyDraft, SystemUser, SystemWorkflowSettings(), WorkflowDe
 
 ### Community 2 - "main.tsx"
 Cohesion: 0.03
-Nodes (53): defaultState(), employeeProfileSections, InterviewAssessment, navItems, OfferDetails, dataUrlBlob(), openDataUrl(), initials() (+45 more)
+Nodes (50): employeeProfileSections, InterviewAssessment, navItems, OfferDetails, candidatePipeline(), initials(), accountInitials(), AccountMenu() (+42 more)
 
 ### Community 3 - "AuthService"
 Cohesion: 0.13
@@ -190,8 +207,12 @@ Cohesion: 0.10
 Nodes (8): AttendanceController, AttendanceModule, attendanceInclude, AttendanceService, CheckAttendanceDto, CreateAttendanceDto, QueryAttendanceDto, UpdateAttendanceDto
 
 ### Community 8 - "LeaveWorkflowController"
-Cohesion: 0.09
-Nodes (7): CreateLeaveRequestDto, LeaveDecisionDto, LeaveReasonDecisionDto, OverrideLeaveDto, ReassignLeaveStepDto, UpdateLeaveRequestDto, LeaveWorkflowController
+Cohesion: 0.07
+Nodes (6): RequestUser, AuditController, LeaveDecisionDto, LeaveReasonDecisionDto, LeaveWorkflowController, SalaryRecordsController
+
+### Community 9 - "PrismaService"
+Cohesion: 0.13
+Nodes (7): SuperAdminOnly(), AuditService, CreateAuditExportDto, CreateLegalHoldDto, QueryAuditDto, ReleaseLegalHoldDto, UpdateAuditPolicyDto
 
 ### Community 10 - "ServiceRequestsService"
 Cohesion: 0.10
@@ -202,12 +223,12 @@ Cohesion: 0.27
 Nodes (20): addPage(), BRAND, bullets(), callout(), checklistTable(), chrome(), ensure(), files (+12 more)
 
 ### Community 12 - "PayrollService"
-Cohesion: 0.10
-Nodes (4): PayrollReasonTransitionDto, PayrollTransitionDto, payrollLogo(), PayrollService
+Cohesion: 0.09
+Nodes (3): GeneratePayrollDto, payrollLogo(), PayrollService
 
 ### Community 14 - "employeeSheet.ts"
-Cohesion: 0.06
-Nodes (53): applyAttendanceRows(), biffRecords(), dayOfMonth(), isEmployeeCode(), isLegacyWorkbook(), normalizeDate(), normalizedHeader(), normalizeStatus() (+45 more)
+Cohesion: 0.08
+Nodes (35): createEmptyEmployee(), employeeImportColumns, moneyField(), normalizeEmployee(), splitEmployeeName(), statusOptions, hireCandidateAsEmployee(), nextEmployeeCode() (+27 more)
 
 ### Community 15 - "pdf.ts"
 Cohesion: 0.11
@@ -216,10 +237,6 @@ Nodes (42): PdfTemplate, pdfTemplates, reportTemplates, employeeName(), formatDa
 ### Community 16 - "LoansService"
 Cohesion: 0.40
 Nodes (4): Answer, Outcome, Q: Explain to me the current leave application system for user roles., Source Nodes
-
-### Community 17 - "prisma.service.ts"
-Cohesion: 0.07
-Nodes (10): CreateCandidateDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto, TransitionCandidateDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto (+2 more)
 
 ### Community 18 - "security-regression.js"
 Cohesion: 0.06
@@ -232,43 +249,43 @@ Nodes (28): {
 }, { ANY_PERMISSIONS_KEY, PAYROLL_ROLES_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY }, assert, { AttendanceService }, audit, { AuditController }, { AuthorizationService }, { AuthService, sessionTokenFromRequest } (+20 more)
 
 ### Community 19 - "request-user.type.ts"
-Cohesion: 0.10
-Nodes (11): PaginationQueryDto, listArgs(), ListOptions, listRecords(), paginationMeta(), PrismaDelegate, QueryDocumentsDto, QueryLeaveBalancesDto (+3 more)
+Cohesion: 0.21
+Nodes (3): NotificationsController, NotificationsModule, NotificationsService
 
 ### Community 20 - "PaginationQueryDto"
-Cohesion: 0.06
-Nodes (5): RequestUser, AuditController, LeaveBalancesController, PayrollController, SalaryRecordsController
+Cohesion: 0.14
+Nodes (3): PayrollReasonTransitionDto, PayrollTransitionDto, PayrollController
 
 ### Community 21 - "AnnouncementsService"
 Cohesion: 0.15
 Nodes (7): AnnouncementsController, AnnouncementsModule, announcementInclude, AnnouncementsService, CreateAnnouncementDto, QueryAnnouncementsDto, UpdateAnnouncementDto
 
 ### Community 22 - "employment-contracts.controller.ts"
-Cohesion: 0.14
-Nodes (7): CreateEmploymentContractDto, QueryEmploymentContractsDto, UpdateEmploymentContractDto, EmploymentContractsController, EmploymentContractsModule, contractInclude, EmploymentContractsService
+Cohesion: 0.10
+Nodes (11): listArgs(), ListOptions, listRecords(), paginationMeta(), PrismaDelegate, CreateEmploymentContractDto, UpdateEmploymentContractDto, EmploymentContractsController (+3 more)
 
 ### Community 24 - "api.ts"
 Cohesion: 0.10
 Nodes (28): apiBaseUrl, apiDownload(), ApiEnvelope, ApiError, apiList(), apiPage(), apiRequest(), BackendDepartment (+20 more)
 
 ### Community 25 - "attendanceSheet.ts"
-Cohesion: 0.12
-Nodes (20): SuperAdminOnly(), PermissionOverrideContext, HybridListOptions, hybridListRecords(), rankSearchCandidates(), SearchableRecord, SearchDelegate, searchText() (+12 more)
+Cohesion: 0.16
+Nodes (15): PermissionOverrideContext, HybridListOptions, hybridListRecords(), rankSearchCandidates(), SearchableRecord, SearchDelegate, searchText(), stripControlCharacters() (+7 more)
 
 ### Community 26 - "departments.service.ts"
-Cohesion: 0.17
-Nodes (6): CreateJobPositionDto, QueryJobPositionsDto, UpdateJobPositionDto, JobPositionsController, JobPositionsService, positionInclude
+Cohesion: 0.16
+Nodes (7): CreateJobPositionDto, QueryJobPositionsDto, UpdateJobPositionDto, JobPositionsController, JobPositionsModule, JobPositionsService, positionInclude
 
 ### Community 27 - "permissions.guard.ts"
-Cohesion: 0.10
-Nodes (13): AnyPermission(), Permissions(), SystemAdministratorOnly(), CreateEosDto, InterviewAssessmentDto, OfferDetailsDto, OrganizationSettingsInput, TransitionEosDto (+5 more)
+Cohesion: 0.16
+Nodes (6): CreateRecruitmentJobDto, InterviewAssessmentDto, OfferDetailsDto, OrganizationSettingsInput, TransitionEosDto, UpdateRecruitmentJobDto
 
 ### Community 28 - "normalizedSync.ts"
 Cohesion: 0.18
 Nodes (26): attendanceKeys(), attendanceStatus(), BackendRecord, byId(), compact(), employeeBankPayload(), employeeDetailsPayload(), employeePayload() (+18 more)
 
 ### Community 29 - "domain.test.ts"
-Cohesion: 0.15
+Cohesion: 0.11
 Nodes (16): PayrollRoles(), CreateSalaryRecordDto, MarkPayrollPaidDto, ReconcilePayrollPaymentsDto, CreatePayrollAdjustmentDto, QueryPayrollAdjustmentsDto, ReconcilePayrollPaymentItemDto, UpdateSalaryRecordDto (+8 more)
 
 ### Community 30 - "scripts"
@@ -276,8 +293,8 @@ Cohesion: 0.07
 Nodes (27): scripts, audit:prune, build, format, import:console-state, import:console-state:dry-run, lint, prisma:deploy (+19 more)
 
 ### Community 31 - "app.module.ts"
-Cohesion: 0.08
-Nodes (17): Public(), RequestIdMiddleware, HealthController, AuditModule, CsrfGuard, JwtAuthGuard, AuthorizationModule, DocumentsModule (+9 more)
+Cohesion: 0.10
+Nodes (14): RequestIdMiddleware, AuditModule, AuthModule, CsrfGuard, JwtAuthGuard, AuthorizationModule, DocumentsModule, LeaveModule (+6 more)
 
 ### Community 32 - "integration-regression.js"
 Cohesion: 0.08
@@ -288,8 +305,8 @@ Cohesion: 0.10
 Nodes (21): dependencies, bcrypt, class-transformer, class-validator, @google-cloud/storage, helmet, jspdf, @nestjs/common (+13 more)
 
 ### Community 34 - "formatMoney"
-Cohesion: 0.08
-Nodes (3): AuditService, AuthorizationService, PrismaService
+Cohesion: 0.11
+Nodes (3): activeAssignmentWhere(), AuthorizationService, PrismaService
 
 ### Community 35 - "devDependencies"
 Cohesion: 0.10
@@ -308,12 +325,12 @@ Cohesion: 0.10
 Nodes (19): compilerOptions, allowSyntheticDefaultImports, baseUrl, declaration, emitDecoratorMetadata, esModuleInterop, experimentalDecorators, forceConsistentCasingInFileNames (+11 more)
 
 ### Community 39 - "EmployeesController"
-Cohesion: 0.21
-Nodes (8): main(), money(), MoneyInput, moneyString(), nonNegativeMoney(), percentageMoney(), sumMoney(), ZERO_MONEY
+Cohesion: 0.12
+Nodes (6): ReplaceRolePermissionsDto, RevokePermissionOverrideDto, RevokeSystemSessionDto, RevokeWorkflowDelegationDto, SystemMutationDto, UpdateRoleDto
 
 ### Community 40 - "payrollExports.ts"
-Cohesion: 0.14
-Nodes (20): activeEmployees(), attendanceDaySummary(), attendanceStats(), createPayroll(), markAllAttendance(), unpaidLeaveDays(), Attendance(), compactDate() (+12 more)
+Cohesion: 0.17
+Nodes (14): markAllAttendance(), compactDate(), compactTime(), csvCell(), money(), payrollLoanDetails(), payrollSheetHtml(), payrollSlipsForDepartment() (+6 more)
 
 ### Community 41 - "Detailed findings"
 Cohesion: 0.07
@@ -324,8 +341,8 @@ Cohesion: 0.11
 Nodes (18): compilerOptions, allowJs, allowSyntheticDefaultImports, esModuleInterop, forceConsistentCasingInFileNames, isolatedModules, jsx, lib (+10 more)
 
 ### Community 43 - "DocumentStorageService"
-Cohesion: 0.33
-Nodes (5): assert, { AttendanceStatus, LoanRepaymentMode, LoanStatus, Prisma }, { LoansService }, { money, percentageMoney, sumMoney }, { PayrollService }
+Cohesion: 0.17
+Nodes (7): CurrentUser, AnyPermission(), Permissions(), SystemAdministratorOnly(), DocumentsController, UpdateDocumentDto, UploadDocumentDto
 
 ### Community 44 - "What You Must Do When Invoked"
 Cohesion: 0.08
@@ -340,8 +357,8 @@ Cohesion: 0.22
 Nodes (12): apply, { createHash, randomUUID }, date(), decimal(), employeeData(), enumValue(), number(), present() (+4 more)
 
 ### Community 47 - "EmployeeScopedQueryDto"
-Cohesion: 0.15
-Nodes (11): AuthModule, IssuedSession, sessionTokenFromRequest(), SessionUser, LoginDto, StepUpDto, Transaction, JwtStrategy (+3 more)
+Cohesion: 0.14
+Nodes (10): IssuedSession, sessionTokenFromRequest(), SessionUser, LoginDto, StepUpDto, Transaction, JwtStrategy, JwtPayload (+2 more)
 
 ### Community 48 - "devDependencies"
 Cohesion: 0.40
@@ -352,12 +369,20 @@ Cohesion: 0.14
 Nodes (10): assert, backendSource, catalog, { expandedPermissions, validateCatalog }, frontendSource, fs, mandatoryRoles, path (+2 more)
 
 ### Community 50 - "main.ts"
-Cohesion: 0.14
-Nodes (7): CreateLoanDto, LoanOverrideDto, ManualRepaymentDto, QueryLoansDto, LoansController, includeLoan, LoansService
+Cohesion: 0.08
+Nodes (20): assert, { AttendanceStatus, LoanRepaymentMode, LoanStatus, Prisma }, { LoansService }, main(), { money, percentageMoney, sumMoney }, { PayrollService }, money(), MoneyInput (+12 more)
 
 ### Community 51 - "audit.service.ts"
-Cohesion: 0.11
-Nodes (21): AssignUserRolesDto, ChangeUserStatusDto, CreatePermissionOverrideDto, CreateRoleDto, CreateSystemUserDto, CreateWorkflowDelegationDto, QuerySystemSessionsDto, QuerySystemUsersDto (+13 more)
+Cohesion: 0.20
+Nodes (12): AssignUserRolesDto, CreatePermissionOverrideDto, CreateRoleDto, CreateSystemUserDto, CreateWorkflowDelegationDto, QuerySystemSessionsDto, QuerySystemUsersDto, SystemFilterSearchQueryDto (+4 more)
+
+### Community 52 - "leave.service.ts"
+Cohesion: 0.16
+Nodes (13): documentUploadOptions, CreateLeaveRequestDto, OverrideLeaveDto, ReassignLeaveStepDto, UpdateLeaveRequestDto, activePendingStatuses, leavePolicyCodes, LeaveRequestView (+5 more)
+
+### Community 53 - ".transaction"
+Cohesion: 0.16
+Nodes (3): CreateCandidateDto, TransitionCandidateDto, UpdateOrganizationSettingsDto
 
 ### Community 55 - "audit-page.tsx"
 Cohesion: 0.07
@@ -371,6 +396,10 @@ Nodes (7): backup(), deploy(), load_runtime_env(), preflight(), restore_drill(),
 Cohesion: 0.12
 Nodes (20): startMicrosoftStepUp(), Dialog(), DialogProps, ApprovalInbox, Certificate, ReasonAction, LeaveRecord, PayrollAdjustment (+12 more)
 
+### Community 58 - "attendanceSheet.ts"
+Cohesion: 0.22
+Nodes (13): applyAttendanceRows(), dayOfMonth(), isEmployeeCode(), normalizeDate(), normalizedHeader(), normalizeStatus(), parseAttendanceSheet(), parseAttendanceWorkbookRows() (+5 more)
+
 ### Community 59 - "package.json"
 Cohesion: 0.20
 Nodes (9): description, license, name, overrides, uuid, prisma, seed, private (+1 more)
@@ -379,21 +408,17 @@ Nodes (9): description, license, name, overrides, uuid, prisma, seed, private (+
 Cohesion: 0.16
 Nodes (7): DepartmentsController, DepartmentsModule, departmentInclude, DepartmentsService, CreateDepartmentDto, QueryDepartmentsDto, UpdateDepartmentDto
 
-### Community 61 - "system.service.ts"
-Cohesion: 0.16
-Nodes (18): useAuthorization(), candidatePipeline(), dateToISO(), expenseTotals(), formatMoney(), todayISO(), tripTotal(), BusinessTrips() (+10 more)
-
 ### Community 62 - ".transaction"
-Cohesion: 0.11
-Nodes (15): CurrentUser, CreateLeaveBalanceDto, CreateLeaveTypeDto, QueryLeaveTypesDto, UpdateLeaveBalanceDto, UpdateLeaveTypeDto, activePendingStatuses, leavePolicyCodes (+7 more)
+Cohesion: 0.22
+Nodes (4): CreateLeaveTypeDto, QueryLeaveTypesDto, UpdateLeaveTypeDto, LeaveTypesController
 
 ### Community 63 - "devDependencies"
 Cohesion: 0.22
 Nodes (6): GraphCollection, GraphRoleAssignment, GraphUser, MicrosoftDirectoryProvisioningService, MicrosoftProvisioningResult, TokenResponse
 
 ### Community 64 - "employeeSalary"
-Cohesion: 0.16
-Nodes (24): addPeriodMonths(), companyLoanDeductionCap(), employeeSalary(), eosSummary(), finalizePayrollSlip(), leaveBalanceSummary(), leaveDaysInMonth(), leaveDaysInYear() (+16 more)
+Cohesion: 0.10
+Nodes (41): useAuthorization(), activeEmployees(), addPeriodMonths(), attendanceDaySummary(), attendanceStats(), companyLoanDeductionCap(), createPayroll(), dateToISO() (+33 more)
 
 ### Community 65 - "seed.js"
 Cohesion: 0.39
@@ -413,6 +438,10 @@ Nodes (6): actor, assert, { ConfigService }, { EmployeesService }, { SystemServi
 Cohesion: 0.25
 Nodes (7): installSystemApi(), loginAndOpenSystem(), Permission, permissions, Role, roles, User
 
+### Community 69 - "SystemController"
+Cohesion: 0.28
+Nodes (5): PaginationQueryDto, QueryDocumentsDto, QueryEmploymentContractsDto, QueryLeaveBalancesDto, QuerySalaryRecordsDto
+
 ### Community 70 - "sync-rbac.js"
 Cohesion: 0.32
 Nodes (6): catalog, expandedPermissions(), main(), { Prisma, PrismaClient }, syncRbac(), validateCatalog()
@@ -424,6 +453,10 @@ Nodes (7): assert, config(), {
 }, { DocumentScanStatus }, {
   DocumentsService,
 }, scannerFixture(), test
+
+### Community 72 - "leave-balances.controller.ts"
+Cohesion: 0.26
+Nodes (3): CreateLeaveBalanceDto, UpdateLeaveBalanceDto, LeaveBalancesController
 
 ### Community 73 - "start-tunnel.sh"
 Cohesion: 0.43
@@ -455,7 +488,7 @@ Nodes (3): employee, leave, leaveTypes
 
 ### Community 82 - "job-positions.service.ts"
 Cohesion: 0.07
-Nodes (54): AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, candidateStages, createEmptyEmployee(), DocumentLog, EmployeeExpense (+46 more)
+Nodes (49): AttendanceApproval, AttendanceCode, BusinessTrip, CandidateStage, candidateStages, DocumentLog, EmployeeExpense, EmployeeLoan (+41 more)
 
 ### Community 84 - "nest-cli.json"
 Cohesion: 0.50
@@ -472,6 +505,14 @@ Nodes (17): 10. Dependencies and exclusions, 11. Source basis and review, 1. Pur
 ### Community 98 - "operations.service.ts"
 Cohesion: 0.22
 Nodes (22): assetDirectory, CandidateDocumentData, cell(), cellText(), date(), document(), interviewAssessmentPdf(), interviewHeader() (+14 more)
+
+### Community 99 - "readBiff8Rows"
+Cohesion: 0.33
+Nodes (11): biffRecords(), numberText(), parseBiff8AttendanceRows(), readBiff8Rows(), readBiffString(), readCharacters(), readRk(), readSharedStrings() (+3 more)
+
+### Community 100 - ".leaveTransaction"
+Cohesion: 0.11
+Nodes (4): SearchQueryDto, rankSearchRecords(), activeAssignmentWhere(), SystemService
 
 ### Community 101 - "permissions.guard.ts"
 Cohesion: 0.30
@@ -490,8 +531,12 @@ Cohesion: 0.19
 Nodes (22): hasActiveSuperAdminRole(), hasAnyPermission(), hasPermission(), ApprovalInboxPanel(), DocumentsLibraryPanel(), EmployeeDocument, PaginationMeta, Payslip (+14 more)
 
 ### Community 105 - "dependencies"
-Cohesion: 0.06
-Nodes (34): dependencies, cfb, jspdf, jspdf-autotable, lucide-react, react, react-dom, read-excel-file (+26 more)
+Cohesion: 0.17
+Nodes (12): dependencies, cfb, jspdf, jspdf-autotable, lucide-react, react, react-dom, read-excel-file (+4 more)
+
+### Community 106 - "devDependencies"
+Cohesion: 0.20
+Nodes (10): devDependencies, jsdom, @playwright/test, @types/node, @types/react, @types/react-dom, typescript, vite (+2 more)
 
 ### Community 107 - "MedTech HR ERP — Current Operations Cost Model"
 Cohesion: 0.20
@@ -501,6 +546,10 @@ Nodes (9): 1. What this model measures, 2. Verified current footprint, 3. Fixed 
 Cohesion: 0.22
 Nodes (8): Core Routes, Docker, Environment, HR ERP Backend, Prisma, Quick Start, Security Notes, Stack
 
+### Community 109 - "scripts"
+Cohesion: 0.20
+Nodes (10): scripts, build, dev, docker:build, preview, test, test:system-ui, tunnel:start (+2 more)
+
 ### Community 110 - "graphify reference: extra exports and benchmark"
 Cohesion: 0.22
 Nodes (8): graphify reference: extra exports and benchmark, Step 6b - Wiki (only if --wiki flag), Step 7 - Neo4j export (only if --neo4j or --neo4j-push flag), Step 7a - FalkorDB export (only if --falkordb or --falkordb-push flag), Step 7b - SVG export (only if --svg flag), Step 7c - GraphML export (only if --graphml flag), Step 7d - MCP server (only if --mcp flag), Step 8 - Token reduction benchmark (only if total_words > 5000)
@@ -508,10 +557,6 @@ Nodes (8): graphify reference: extra exports and benchmark, Step 6b - Wiki (only
 ### Community 112 - "Q: Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
 Cohesion: 0.40
 Nodes (4): Answer, Outcome, Q: Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX, Source Nodes
-
-### Community 113 - "DocumentsController"
-Cohesion: 0.13
-Nodes (7): documentUploadOptions, DocumentsController, documentInclude, DocumentsService, CreateDocumentDto, UpdateDocumentDto, UploadDocumentDto
 
 ### Community 114 - "hybrid-search-regression.js"
 Cohesion: 0.18
@@ -569,6 +614,18 @@ Nodes (7): CreatePerformanceReviewDto, QueryPerformanceReviewsDto, UpdatePerform
 Cohesion: 0.25
 Nodes (6): assert, decimal(), { DocumentScanStatus, Gender, LeaveRequestStatus, Prisma }, { LeaveService }, leaveType(), test
 
+### Community 133 - "testState.ts"
+Cohesion: 0.33
+Nodes (7): defaultState(), dataUrlBlob(), openDataUrl(), hydrateState(), loadState(), testEmployee(), testState()
+
+### Community 136 - "search.controller.ts"
+Cohesion: 0.33
+Nodes (3): SearchController, sections, SectionsSearchQuery
+
+### Community 137 - "package.json"
+Cohesion: 0.40
+Nodes (4): name, private, type, version
+
 ### Community 138 - "recruitment-documents.spec.ts"
 Cohesion: 0.33
 Nodes (3): candidates, job, session
@@ -578,13 +635,13 @@ Cohesion: 0.14
 Nodes (12): codeOf(), days(), Decision, DecisionAction, EligibleAssignee, finalStatuses, halfDayDisabled(), LeaveAttachment (+4 more)
 
 ### Community 141 - "approvals.module.ts"
-Cohesion: 0.39
+Cohesion: 0.38
 Nodes (3): ApprovalsController, ApprovalsModule, ApprovalsService
 
 ## Knowledge Gaps
 - **621 isolated node(s):** `$schema`, `collection`, `sourceRoot`, `name`, `version` (+616 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **19 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **26 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Work-memory lessons
 
@@ -594,12 +651,12 @@ Nodes (3): ApprovalsController, ApprovalsModule, ApprovalsService
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `RequestUser` connect `PaginationQueryDto` to `operations.service.ts`, `PerformanceReviewsService`, `EmployeesService`, `domain.ts`, `AttendanceService`, `RequestUser`, `LeaveWorkflowController`, `PrismaService`, `ServiceRequestsService`, `TransitionExpenseDto`, `PayrollService`, `approvals.module.ts`, `LeaveService`, `prisma.service.ts`, `request-user.type.ts`, `AnnouncementsService`, `employment-contracts.controller.ts`, `performance-reviews.service.ts`, `attendanceSheet.ts`, `departments.service.ts`, `permissions.guard.ts`, `domain.test.ts`, `app.module.ts`, `formatMoney`, `EmployeeScopedQueryDto`, `main.ts`, `audit.service.ts`, `public.decorator.ts`, `.transaction`, `SystemController`, `.leaveTransaction`, `permissions.guard.ts`, `QueryLeaveRequestsDto`, `DocumentsController`?**
-  _High betweenness centrality (0.343) - this node is a cross-community bridge._
+- **Why does `RequestUser` connect `LeaveWorkflowController` to `operations.service.ts`, `PerformanceReviewsService`, `EmployeesService`, `domain.ts`, `AttendanceService`, `RequestUser`, `.createTrip`, `PrismaService`, `ServiceRequestsService`, `CreateEosDto`, `PayrollService`, `approvals.module.ts`, `LeaveService`, `TransitionExpenseDto`, `TransitionTripDto`, `prisma.service.ts`, `ReplaceRoleInheritanceDto`, `request-user.type.ts`, `PaginationQueryDto`, `AnnouncementsService`, `employment-contracts.controller.ts`, `performance-reviews.service.ts`, `attendanceSheet.ts`, `departments.service.ts`, `permissions.guard.ts`, `domain.test.ts`, `app.module.ts`, `formatMoney`, `EmployeesController`, `DocumentStorageService`, `EmployeeScopedQueryDto`, `main.ts`, `audit.service.ts`, `leave.service.ts`, `.transaction`, `public.decorator.ts`, `system.service.ts`, `.transaction`, `leave-balances.controller.ts`, `OperationsController`, `.leaveTransaction`, `permissions.guard.ts`, `QueryLeaveRequestsDto`, `DocumentsController`?**
+  _High betweenness centrality (0.347) - this node is a cross-community bridge._
 - **Why does `safe()` connect `pdf.ts` to `PayrollService`?**
-  _High betweenness centrality (0.223) - this node is a cross-community bridge._
-- **Why does `PayrollService` connect `PayrollService` to `formatMoney`, `domain.ts`, `EmployeesController`, `PrismaService`, `request-user.type.ts`, `PaginationQueryDto`, `performance-reviews.service.ts`, `domain.test.ts`, `app.module.ts`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+  _High betweenness centrality (0.228) - this node is a cross-community bridge._
+- **Why does `PayrollService` connect `PayrollService` to `domain.ts`, `LeaveWorkflowController`, `main.ts`, `PaginationQueryDto`, `employment-contracts.controller.ts`, `performance-reviews.service.ts`, `domain.test.ts`, `app.module.ts`?**
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
 - **What connects `$schema`, `collection`, `sourceRoot` to the rest of the system?**
   _621 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `operations.service.ts` be split into smaller, more focused modules?**
@@ -607,4 +664,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `SystemService` be split into smaller, more focused modules?**
   _Cohesion score 0.1471861471861472 - nodes in this community are weakly interconnected._
 - **Should `main.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.03099099099099099 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.03064182194616977 - nodes in this community are weakly interconnected._

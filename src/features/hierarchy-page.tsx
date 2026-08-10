@@ -319,6 +319,10 @@ type RoleHierarchyDepartmentMeta = {
 
 type RoleHierarchySearchMatch = { employeeId: string; nodeId: string; branch?: RoleHierarchyBranch };
 
+function roleHierarchyIsCompact() {
+  return window.matchMedia("(max-width: 760px)").matches;
+}
+
 export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, searching, onClearSearch, onExportPdf }: { employees: EmployeeRecord[]; search: string; rankedMatchIds: string[]; searching: boolean; onClearSearch: () => void; onExportPdf: () => void }) {
   const hierarchy = useMemo(() => buildCompanyRoleHierarchy(employees), [employees]);
   const coo = hierarchy.executives.find(executive => executive.code === "COO")!;
@@ -360,6 +364,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef(new Map<string, HTMLElement>());
+  const pendingAnchorRef = useRef<{ id: string; left: number; top: number } | null>(null);
   const searchOriginDepartmentId = useRef<string | null>(null);
   const previousSearch = useRef("");
   const query = search.trim();
@@ -434,8 +439,16 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     const viewport = viewportRef.current;
     const canvas = canvasRef.current;
     if (!viewport || !canvas) return;
+    const anchor = pendingAnchorRef.current;
+    const anchoredNode = anchor ? nodeRefs.current.get(anchor.id) : undefined;
+    if (anchor && anchoredNode) {
+      const after = anchoredNode.getBoundingClientRect();
+      const viewportRect = viewport.getBoundingClientRect();
+      viewport.scrollLeft += after.left - viewportRect.left - anchor.left;
+      viewport.scrollTop += after.top - viewportRect.top - anchor.top;
+      pendingAnchorRef.current = null;
+    }
     let frame = 0;
-    let focusFrame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -458,33 +471,18 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
         }));
       });
     };
-    const centerFocused = () => {
-      cancelAnimationFrame(focusFrame);
-      focusFrame = requestAnimationFrame(() => {
-        const focused = nodeRefs.current.get(focusId);
-        if (!focused) return;
-        const viewportRect = viewport.getBoundingClientRect();
-        const focusedRect = focused.getBoundingClientRect();
-        const left = viewport.scrollLeft + focusedRect.left + focusedRect.width / 2 - viewportRect.left - viewport.clientWidth / 2;
-        const top = viewport.scrollTop + focusedRect.top + focusedRect.height / 2 - viewportRect.top - viewport.clientHeight / 2;
-        viewport.scrollTo({ left: Math.max(0, left), top: Math.max(0, top), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-      });
-    };
-    const refresh = () => { measure(); centerFocused(); };
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(refresh);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(viewport);
     observer?.observe(canvas);
     nodeRefs.current.forEach(node => observer?.observe(node));
-    window.addEventListener("resize", refresh);
+    window.addEventListener("resize", measure);
     measure();
-    centerFocused();
     return () => {
       cancelAnimationFrame(frame);
-      cancelAnimationFrame(focusFrame);
       observer?.disconnect();
-      window.removeEventListener("resize", refresh);
+      window.removeEventListener("resize", measure);
     };
-  }, [signature, focusId]);
+  }, [signature]);
 
   const setNodeRef = (id: string) => (node: HTMLElement | null) => {
     if (node) nodeRefs.current.set(id, node);
@@ -528,10 +526,10 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     zoomRef.current = 1;
     setZoom(1);
     setFocusId(companyCooId);
-    requestAnimationFrame(() => centerNode(companyCooId));
+    requestAnimationFrame(() => requestAnimationFrame(() => centerNode(companyCooId)));
   };
   const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || (event.target as Element).closest("button, input, select, a, .company-role-canvas-controls")) return;
+    if (roleHierarchyIsCompact() || event.button !== 0 || (event.target as Element).closest("button, input, select, a, .company-role-canvas-controls")) return;
     const viewport = event.currentTarget;
     panRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
     try { viewport.setPointerCapture(event.pointerId); } catch { /* Pointer capture is unavailable for synthetic/legacy pointer events. */ }
@@ -551,7 +549,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     setIsPanning(false);
   };
   const onCanvasKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget) return;
+    if (roleHierarchyIsCompact() || event.target !== event.currentTarget) return;
     const viewport = event.currentTarget;
     if (event.key === "+" || event.key === "=") changeZoom(zoomRef.current + companyRoleZoomStep);
     else if (event.key === "-") changeZoom(zoomRef.current - companyRoleZoomStep);
@@ -564,7 +562,32 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
   const selectAndCenter = (id: string) => {
     setSelectedId(id);
     setFocusId(id);
-    requestAnimationFrame(() => centerNode(id));
+    requestAnimationFrame(() => requestAnimationFrame(() => centerNode(id)));
+  };
+  const selectNode = (id: string) => {
+    setSelectedId(id);
+    setFocusId(id);
+  };
+  const focusNodeWithoutScroll = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+  };
+  const preserveNodePosition = (id: string, update: () => void) => {
+    const viewport = viewportRef.current;
+    const before = nodeRefs.current.get(id)?.getBoundingClientRect();
+    const viewportRect = viewport?.getBoundingClientRect();
+    const anchor = viewport && viewportRect && before && !roleHierarchyIsCompact() ? { id, left: before.left - viewportRect.left, top: before.top - viewportRect.top } : null;
+    if (anchor) pendingAnchorRef.current = anchor;
+    update();
+    if (!viewport || !anchor) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const after = nodeRefs.current.get(id)?.getBoundingClientRect();
+      if (!after) return;
+      const currentViewport = viewport.getBoundingClientRect();
+      viewport.scrollLeft += after.left - currentViewport.left - anchor.left;
+      viewport.scrollTop += after.top - currentViewport.top - anchor.top;
+      pendingAnchorRef.current = null;
+    }));
   };
   const openAncestors = (id: string) => {
     const branchIds = new Set<string>();
@@ -582,17 +605,17 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     setExpandedBranchIds(new Set());
   };
   const toggleExecutive = (id: string) => {
-    selectAndCenter(id);
-    setExpandedExecutiveIds(current => {
+    selectNode(id);
+    preserveNodePosition(id, () => setExpandedExecutiveIds(current => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
-    });
+    }));
   };
   const toggleDepartment = (department: RoleHierarchyDepartment) => {
-    selectAndCenter(department.id);
-    setExpandedDepartmentIds(current => {
+    selectNode(department.id);
+    preserveNodePosition(department.id, () => setExpandedDepartmentIds(current => {
       const next = new Set(current);
       if (next.has(department.id)) {
         next.delete(department.id);
@@ -600,17 +623,17 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
         setExpandedBranchIds(openBranches => new Set([...openBranches].filter(id => !branchIds.has(id))));
       } else next.add(department.id);
       return next;
-    });
+    }));
   };
   const toggleBranch = (branch: RoleHierarchyBranch) => {
     if (!branch.children.length) return;
-    selectAndCenter(branch.id);
-    setExpandedBranchIds(current => {
+    selectNode(branch.id);
+    preserveNodePosition(branch.id, () => setExpandedBranchIds(current => {
       const next = new Set(current);
       if (next.has(branch.id)) next.delete(branch.id);
       else next.add(branch.id);
       return next;
-    });
+    }));
   };
   const focusDepartment = (departmentId: string | null) => {
     const nextMeta = departmentId ? departmentMeta.find(item => item.department.id === departmentId) : undefined;
@@ -720,7 +743,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     const item = hierarchy.executives.find(executive => executive.code === code)!;
     const highlighted = selectedPathIds.has(item.id) || selectedDirectReportIds.has(item.id);
     const searchMatched = Boolean(query) && item.members.some(member => matchIds.has(member.id));
-    return <button ref={setNodeRef(item.id)} type="button" className={`company-role-leadership company-role-leadership-${code.toLocaleLowerCase()}${expanded ? " expanded" : ""}${searchMatched ? " search-match" : ""}${selectedId === item.id ? " selected" : ""}${selectedId && !highlighted ? " path-muted" : ""}${highlighted ? " path-active" : ""}`} aria-expanded={expanded} aria-controls={controls} onClick={onClick}>
+    return <button ref={setNodeRef(item.id)} type="button" className={`company-role-leadership company-role-leadership-${code.toLocaleLowerCase()}${expanded ? " expanded" : ""}${searchMatched ? " search-match" : ""}${selectedId === item.id ? " selected" : ""}${selectedId && !highlighted ? " path-muted" : ""}${highlighted ? " path-active" : ""}`} aria-expanded={expanded} aria-controls={controls} onMouseDown={focusNodeWithoutScroll} onClick={onClick}>
       <span className="company-role-leadership-heading"><span><ShieldCheck size={18} aria-hidden="true" /> {code}</span><ChevronRight className="company-role-chevron" size={18} aria-hidden="true" /></span>
       <span className="company-role-executive"><small>EXECUTIVE LEADERSHIP</small><strong>{item.label}</strong><span>{item.members.length ? item.members.map(member => member.name).join(", ") : "Position not assigned"}</span><span>{item.departments.length} owned department{item.departments.length === 1 ? "" : "s"}</span></span>
     </button>;
@@ -740,11 +763,9 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     const roleBadges = branch.reportingRoles.length ? branch.reportingRoles : ["EMPLOYEE" as const];
     const reportsTo = reportsToLabel(branch);
     const contents = <><span className="company-role-node-icon"><Users size={17} aria-hidden="true" /></span><span className="company-role-card-copy"><strong>{branch.member.name}</strong><span className="company-role-role-badges">{roleBadges.map(role => <b className={`company-role-role-badge company-role-role-badge-${role.toLocaleLowerCase()}`} key={role}>{role === "LINE_MANAGER" ? "Line Manager" : role === "MANAGER" ? "Manager" : "Employee"}</b>)}</span><small>{branch.member.employeeCode} · {branch.member.designation}</small><span className="company-role-reports-to"><span>Reports to</span><b>{reportsTo}</b></span></span>{(branch.member.status === "On Leave" || expandable) && <span className="company-role-card-trailing">{branch.member.status === "On Leave" && <em>On leave</em>}{expandable && <span className="company-role-report-count">{branch.children.length}</span>}{expandable && <ChevronRight className="company-role-chevron" size={16} aria-hidden="true" />}</span>}</>;
-    return <div className={`company-role-card-shell company-role-card-shell-${branch.code.toLocaleLowerCase()}`} key={branch.id}>
-      {expandable
-        ? <button ref={setNodeRef(branch.id)} type="button" className={`company-role-card company-role-card-${branch.code.toLocaleLowerCase()}${expanded ? " expanded" : ""}${query && matchIds.has(branch.member.id) ? " search-match" : ""}${selectedId === branch.id ? " selected" : ""}${selectedId && !highlighted ? " path-muted" : ""}${highlighted ? " path-active" : ""}`} aria-expanded={expanded} aria-controls={`${branch.id}-children`} aria-label={`${branch.member.name}, ${branch.label}, ${branch.member.employeeCode}, ${branch.member.designation}, reports to ${reportsTo}, ${branch.children.length} direct report${branch.children.length === 1 ? "" : "s"}`} onClick={() => toggleBranch(branch)}>{contents}</button>
-        : <div ref={setNodeRef(branch.id)} className={`company-role-card company-role-card-${branch.code.toLocaleLowerCase()} company-role-card-leaf${query && matchIds.has(branch.member.id) ? " search-match" : ""}${selectedId === branch.id ? " selected" : ""}${selectedId && !highlighted ? " path-muted" : ""}${highlighted ? " path-active" : ""}`} role="listitem">{contents}</div>}
-      {expanded && <div id={`${branch.id}-children`} className="company-role-branch-children">
+    return <div className={`company-role-card-shell company-role-card-shell-${branch.code.toLocaleLowerCase()}`} role="listitem" key={branch.id}>
+      <button ref={setNodeRef(branch.id)} type="button" className={`company-role-card company-role-card-${branch.code.toLocaleLowerCase()}${expandable ? "" : " company-role-card-leaf"}${expanded ? " expanded" : ""}${query && matchIds.has(branch.member.id) ? " search-match" : ""}${selectedId === branch.id ? " selected" : ""}${selectedId && !highlighted ? " path-muted" : ""}${highlighted ? " path-active" : ""}`} aria-expanded={expandable ? expanded : undefined} aria-controls={expandable ? `${branch.id}-children` : undefined} aria-pressed={expandable ? undefined : selectedId === branch.id} aria-label={`${branch.member.name}, ${branch.label}, ${branch.member.employeeCode}, ${branch.member.designation}, reports to ${reportsTo}${expandable ? `, ${branch.children.length} direct report${branch.children.length === 1 ? "" : "s"}` : ""}`} onMouseDown={focusNodeWithoutScroll} onClick={() => expandable ? toggleBranch(branch) : selectNode(branch.id)}>{contents}</button>
+      {expanded && <div id={`${branch.id}-children`} className="company-role-branch-children" role="list" aria-label={`Direct reports to ${branch.member.name}`}>
         {branch.children.map(renderBranch)}
       </div>}
     </div>;
@@ -756,7 +777,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     const highlighted = selectedPathIds.has(department.id) || selectedDirectReportIds.has(department.id);
     return <section className="company-role-department-branch" aria-labelledby={`${department.id}-name`} key={department.id}>
       <div className={`company-role-department-shell${selectedId && !highlighted ? " path-muted" : ""}${highlighted ? " path-active" : ""}`}>
-        <button ref={setNodeRef(department.id)} type="button" className={`company-role-department${expanded ? " expanded" : ""}${selectedId === department.id ? " selected" : ""}`} aria-expanded={expanded} aria-controls={`${department.id}-branches`} onClick={() => toggleDepartment(department)}>
+        <button ref={setNodeRef(department.id)} type="button" className={`company-role-department${expanded ? " expanded" : ""}${selectedId === department.id ? " selected" : ""}`} aria-expanded={expanded} aria-controls={`${department.id}-branches`} onMouseDown={focusNodeWithoutScroll} onClick={() => toggleDepartment(department)}>
           <span className="company-role-node-icon"><Building2 size={18} aria-hidden="true" /></span><span><strong id={`${department.id}-name`}>{department.name}</strong><small>{department.memberCount} {department.memberCount === 1 ? "person" : "people"} · {department.branches.length} direct report{department.branches.length === 1 ? "" : "s"}</small><small>{meta.owner === "UNASSIGNED" ? "Needs assignment" : `Reports to ${meta.owner}`}</small></span><ChevronRight className="company-role-chevron" size={17} aria-hidden="true" />
         </button>
         {focusedDepartmentId !== department.id && <button type="button" className="company-role-department-focus" aria-label={`Focus ${department.name} department`} onClick={() => focusDepartment(department.id)}><Crosshair size={14} aria-hidden="true" /> Focus</button>}
@@ -789,7 +810,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     <div className="company-role-legend"><span><i className="leadership" /> Executive</span><span><i className="department" /> Department</span><span><i className="manager" /> Manager</span><span><i className="line-manager" /> Line Manager</span><span><i className="employee" /> Employee</span><span><i className="selected-path" /> Selected path</span><span className="company-role-connector-key"><i /> Supervisor to direct report</span></div>
     <p className="sr-only" id="company-role-canvas-help">Drag empty canvas space to move. Use the controls or plus and minus keys to zoom, arrow keys to pan, F to fit, and zero to reset.</p>
     <div className={`role-flowchart-viewport company-role-viewport${isPanning ? " is-panning" : ""}`} ref={viewportRef} tabIndex={0} role="region" aria-label="Interactive role hierarchy canvas" aria-describedby="company-role-canvas-help" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onKeyDown={onCanvasKeyDown} onWheel={event => {
-      if (!event.ctrlKey && !event.metaKey) return;
+      if (roleHierarchyIsCompact() || (!event.ctrlKey && !event.metaKey)) return;
       event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
       changeZoom(zoomRef.current + (event.deltaY < 0 ? companyRoleZoomStep : -companyRoleZoomStep), event.clientX - rect.left, event.clientY - rect.top);
@@ -819,7 +840,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
           {visibleCooDepartments.length > 0 && <div className="company-role-owned-lane"><span className="company-role-lane-label">Reports directly to COO</span><div className="company-role-departments" role="group" aria-label="COO departments">{visibleCooDepartments.map(renderDepartment)}</div></div>}
         </div>}</>}
         {hierarchy.unassignedDepartments.length > 0 && (!focusedMeta || focusedMeta.owner === "UNASSIGNED") && <div className="company-role-unassigned-subtree">
-          <button ref={setNodeRef("company-unassigned")} type="button" className={`company-role-unassigned${unassignedExpanded || query || focusedMeta?.owner === "UNASSIGNED" ? " expanded" : ""}${selectedId === "company-unassigned" ? " selected" : ""}${selectedPathIds.has("company-unassigned") ? " path-active" : ""}${selectedId && !selectedPathIds.has("company-unassigned") ? " path-muted" : ""}`} aria-expanded={Boolean(query) || unassignedExpanded || focusedMeta?.owner === "UNASSIGNED"} aria-controls="company-role-unassigned-departments" onClick={() => { selectAndCenter("company-unassigned"); setUnassignedExpanded(current => !current); }}><span><Users size={17} aria-hidden="true" /><strong>Needs reporting assignment</strong></span><small>{unassignedPeople} people without a valid active reporting reference</small><ChevronRight className="company-role-chevron" size={17} aria-hidden="true" /></button>
+          <button ref={setNodeRef("company-unassigned")} type="button" className={`company-role-unassigned${unassignedExpanded || query || focusedMeta?.owner === "UNASSIGNED" ? " expanded" : ""}${selectedId === "company-unassigned" ? " selected" : ""}${selectedPathIds.has("company-unassigned") ? " path-active" : ""}${selectedId && !selectedPathIds.has("company-unassigned") ? " path-muted" : ""}`} aria-expanded={Boolean(query) || unassignedExpanded || focusedMeta?.owner === "UNASSIGNED"} aria-controls="company-role-unassigned-departments" onMouseDown={focusNodeWithoutScroll} onClick={() => { selectNode("company-unassigned"); preserveNodePosition("company-unassigned", () => setUnassignedExpanded(current => !current)); }}><span><Users size={17} aria-hidden="true" /><strong>Needs reporting assignment</strong></span><small>{unassignedPeople} people without a valid active reporting reference</small><ChevronRight className="company-role-chevron" size={17} aria-hidden="true" /></button>
           {(query || unassignedExpanded || focusedMeta?.owner === "UNASSIGNED") && <div id="company-role-unassigned-departments" className="company-role-departments" role="group" aria-label="Unassigned reporting departments">{visibleUnassignedDepartments.map(renderDepartment)}</div>}
         </div>}
         {hierarchy.activeEmployees.length === hierarchy.executives.reduce((total, executive) => total + executive.members.length, 0) && <div className="role-flowchart-empty">No active employees are available below executive leadership.</div>}

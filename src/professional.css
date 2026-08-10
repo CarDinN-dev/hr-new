@@ -1374,13 +1374,13 @@ td button {
   border: 1px solid var(--pro-border);
   border-radius: 14px;
   overflow: auto;
+  overflow-anchor: none;
   background:
     radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--pro-border-strong) 42%, transparent) 1px, transparent 1.2px),
     var(--pro-surface-subtle);
   background-size: 20px 20px;
   cursor: grab;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
   scrollbar-gutter: stable;
 }
 
@@ -1667,6 +1667,7 @@ td button {
   justify-items: center;
   align-content: start;
   gap: 34px;
+  width: max-content;
   min-width: 244px;
   animation: role-branch-reveal 180ms ease-out both;
 }
@@ -1750,28 +1751,35 @@ td button {
 }
 
 .company-role-cards {
-  display: grid;
-  justify-items: center;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   gap: 34px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
 }
 
 .company-role-card-shell {
   display: grid;
+  justify-items: center;
   gap: 7px;
-  width: 218px;
+  width: max-content;
+  min-width: 218px;
   animation: role-branch-reveal 180ms ease-out both;
 }
 
 .company-role-branch-children {
-  display: grid;
-  justify-items: center;
-  gap: 34px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18px;
+  width: max-content;
+  min-width: 100%;
   padding-top: 27px;
 }
 
 .company-role-branch-children .company-role-card-shell {
-  width: 202px;
+  min-width: 202px;
 }
 
 .company-role-card {
@@ -1779,7 +1787,7 @@ td button {
   grid-template-columns: 32px minmax(0, 1fr) 17px;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  width: 218px;
   min-height: 62px;
   padding: 9px;
   border: 1px solid color-mix(in srgb, var(--pro-success) 28%, var(--pro-border)) !important;
@@ -1789,12 +1797,15 @@ td button {
 }
 
 .company-role-card-leaf {
-  cursor: default;
+  cursor: pointer;
 }
 
 .company-role-card-leaf:hover {
-  box-shadow: var(--pro-shadow-sm) !important;
-  transform: none;
+  box-shadow: var(--pro-shadow) !important;
+}
+
+.company-role-branch-children .company-role-card {
+  width: 202px;
 }
 
 .company-role-card-trailing {
@@ -2090,33 +2101,42 @@ td button {
   }
 
   .company-role-viewport {
-    height: min(68vh, 620px);
+    height: auto;
+    min-height: 0;
     margin-inline: -4px;
     border-radius: 10px;
-    overflow: auto;
+    overflow: visible;
+    cursor: default;
+    overscroll-behavior: auto;
+    scrollbar-gutter: auto;
+  }
+
+  .company-role-stage {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0;
+    touch-action: auto;
   }
 
   .company-role-canvas {
+    position: relative;
+    inset: auto;
     width: 100%;
     min-width: 100% !important;
-    padding: 62px 14px 24px;
-  }
-
-  .company-role-stage[data-zoom="1"] {
-    width: 100% !important;
+    min-height: 0;
+    padding: 20px 14px 24px;
+    transform: none !important;
+    transition: none;
+    will-change: auto;
   }
 
   .company-role-canvas-controls {
-    max-width: calc(100% - 20px);
-    overflow-x: auto;
-  }
-
-  .company-role-pan-hint {
     display: none;
   }
 
   .company-role-executive-children,
-  .company-role-departments {
+  .company-role-departments,
+  .company-role-cards {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     justify-items: stretch;
@@ -2132,6 +2152,7 @@ td button {
   .company-role-department,
   .company-role-cards,
   .company-role-card-shell,
+  .company-role-card,
   .company-role-branch-children .company-role-card-shell {
     width: 100%;
     min-width: 0;
@@ -2147,10 +2168,23 @@ td button {
   }
 
   .company-role-branch-children {
+    display: grid;
     justify-items: stretch;
+    gap: 12px;
+    width: calc(100% - 14px);
+    min-width: 0;
     margin-left: 14px;
+    padding-top: 12px;
     padding-left: 12px;
     border-left: 1px solid var(--pro-border-strong);
+  }
+
+  .company-role-branch-children .company-role-card {
+    width: 100%;
+  }
+
+  .company-role-canvas .role-flowchart-connectors {
+    display: none;
   }
 
   .company-role-breadcrumb {
