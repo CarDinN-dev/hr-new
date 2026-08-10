@@ -1110,8 +1110,8 @@
     "semantic_hash": "5fccf9f367b51fefd0727409f545cf3e"
   },
   "src/main.tsx": {
-    "mtime": 1786282101.948956,
-    "ast_hash": "fe98d8c5e96c464827fde9093c517ca3",
+    "mtime": 1786362474.5707726,
+    "ast_hash": "6c281b1a04bc216e5bb78f3501ab4fc4",
     "semantic_hash": ""
   },
   "src/normalizedSync.ts": {

@@ -863,7 +863,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
       </section>
 
       <section className="two-col dashboard-secondary">
-        {showSection("birthdays", upcomingBirthdays.length > 0) && <div className="panel">
+        {showSection("birthdays", birthdays.isPending || birthdays.isError || upcomingBirthdays.length > 0) && <div className="panel">
           <div className="panel-head"><h3>Birthdays - next 30 days</h3><span>{upcomingBirthdays.length} upcoming</span></div>
           {birthdays.isPending ? <div className="empty">Loading birthdays…</div>
             : birthdays.isError ? <div className="empty">Birthdays could not be loaded.</div>
