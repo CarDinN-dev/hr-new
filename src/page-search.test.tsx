@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PageSearchBar, PageSearchProvider, usePageSearch } from "./page-search";
+import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch } from "./page-search";
 
 describe("page search", () => {
   let host: HTMLDivElement;
@@ -43,5 +43,14 @@ describe("page search", () => {
     const input = host.querySelector("input")!;
     expect(input.getAttribute("aria-label")).toBe("Search jobs and candidates");
     expect(input.maxLength).toBe(100);
+  });
+
+  it("keeps current order until ranked results arrive and restores it when search clears", () => {
+    const items = [{ id: "first" }, { id: "second" }];
+    const id = (item: { id: string }) => item.id;
+    expect(rankedPageSearchItems(items, undefined, true, id, id).map(id)).toEqual(["first", "second"]);
+    expect(rankedPageSearchItems(items, [{ id: "second" }, { id: "first" }], true, id, id).map(id)).toEqual(["second", "first"]);
+    expect(rankedPageSearchItems(items, [], true, id, id)).toEqual([]);
+    expect(rankedPageSearchItems(items, [{ id: "second" }], false, id, id).map(id)).toEqual(["first", "second"]);
   });
 });

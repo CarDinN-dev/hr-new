@@ -12,10 +12,6 @@ const sections = {
     ['leave-approvals', 'Leave approvals pending requests workflow'],
     ['birthdays', 'Upcoming birthdays employees'],
     ['recent-joiners', 'Recent joiners new employees'],
-    ['recruitment', 'Recruitment open roles candidates'],
-    ['payroll', 'Payroll current period runs'],
-    ['attendance', 'Attendance daily status'],
-    ['compliance', 'Compliance documents expiry'],
   ],
   reports: [
     ['employee_directory', 'Employee Directory full staff employment contact and status'],

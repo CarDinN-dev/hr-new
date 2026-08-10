@@ -1,11 +1,18 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { PrismaClient } = require('@prisma/client');
+const { Prisma, PrismaClient } = require('@prisma/client');
 const { plainToInstance } = require('class-transformer');
 const { validateSync } = require('class-validator');
 const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto');
 const { QuerySystemSessionsDto, QuerySystemUsersDto } = require('../dist/modules/system/dto/system.dto');
 const { hybridListRecords, rankSearchCandidates } = require('../dist/common/utils/hybrid-search.util');
+const { LoansService } = require('../dist/modules/loans/loans.service');
+const { AuditService } = require('../dist/modules/audit/audit.service');
+const { SearchController } = require('../dist/search.controller');
+
+function candidatesFrom(sql) {
+  return JSON.parse(sql.values.find(value => typeof value === 'string' && value.startsWith('[{')));
+}
 
 test('search input is trimmed and constrained to 2-100 characters', () => {
   const valid = plainToInstance(PaginationQueryDto, { search: '  Alice Smith  ' });
@@ -82,6 +89,50 @@ test('additional search intersects authorized matches before pagination and pres
   assert.deepEqual(searches, ['alice', 'smith']);
   assert.deepEqual(result.data.map(record => record.id), ['scope-1']);
   assert.deepEqual(result.meta, { total: 1, page: 1, limit: 1, totalPages: 1 });
+});
+
+test('loan search uses department name and code instead of its UUID', async () => {
+  let candidates;
+  const loan = {
+    id: 'loan-1', principal: new Prisma.Decimal(1000), repayments: [], employeeId: 'employee-1',
+    employee: { id: 'employee-1', employeeCode: 'MTC001', firstName: 'Alice', lastName: 'Smith', department: { id: 'department-id', name: 'Finance', code: 'FIN' } },
+    type: 'Advance', reference: 'REF-1', notes: 'Relocation', status: 'ACTIVE', startYear: 2026, startMonth: 8,
+  };
+  const prisma = {
+    employeeLoan: { findMany: async () => [loan] },
+    $queryRaw: async sql => { candidates = candidatesFrom(sql); return [{ id: loan.id, score: 1 }]; },
+  };
+  const authorization = { scopeRule: () => ({ unrestricted: true, includeIds: [], excludeIds: [] }) };
+  await new LoansService(prisma, {}, authorization).list({ page: 1, limit: 20, search: 'Finance' }, { employeeId: null });
+  assert.match(candidates[0].document, /Finance/);
+  assert.match(candidates[0].document, /FIN/);
+  assert.doesNotMatch(candidates[0].document, /department-id/);
+});
+
+test('audit search document includes the event summary', async () => {
+  let candidates;
+  const event = {
+    id: 'audit-1', sequence: 1n, summary: 'Unique employee import completed', reason: 'Approved',
+    actorNameSnapshot: 'Search Admin', actorEmailSnapshot: 'admin@example.invalid', actorRoleCodesSnapshot: ['SUPER_ADMIN'],
+    module: 'employees', action: 'IMPORT', outcome: 'SUCCESS', resourceType: 'Employee', resourceId: 'employee-1',
+    permissionCode: 'employee.hr.create', requestId: 'request-1', correlationId: null, workflowId: null,
+    workflowStage: null, workflowStatus: null, payrollPeriod: null, requestType: null, changedFields: [],
+  };
+  const prisma = {
+    auditEvent: { findMany: async () => [event] },
+    $queryRaw: async sql => { candidates = candidatesFrom(sql); return [{ id: event.id, score: 1 }]; },
+  };
+  const authorization = { scopeRule: () => ({ unrestricted: true, includeIds: [], excludeIds: [] }) };
+  const config = { get: () => 'test-secret', getOrThrow: () => 'test-secret' };
+  await new AuditService(prisma, config, {}, authorization).list({ page: 1, limit: 20, search: 'Unique employee import' }, {});
+  assert.match(candidates[0].document, /Unique employee import completed/);
+});
+
+test('dashboard section search exposes only rendered filterable panels', async () => {
+  let candidates;
+  const controller = new SearchController({ $queryRaw: async sql => { candidates = candidatesFrom(sql); return []; } });
+  await controller.searchSections({ page: 'dashboard', search: 'payroll' });
+  assert.deepEqual(candidates.map(candidate => candidate.id), ['headcount', 'leave-approvals', 'birthdays', 'recent-joiners']);
 });
 
 const integrationUrl = process.env.INTEGRATION_DATABASE_URL;

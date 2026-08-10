@@ -85,12 +85,30 @@ export function usePageSearch() {
   return context;
 }
 
-export function usePageSearchStatus(key: string, status: { count?: number; loading?: boolean; error?: string }) {
+export function usePageSearchStatus(key: string, status: { count?: number; loading?: boolean; error?: string }, enabled = true) {
   const { active, report } = usePageSearch();
   useEffect(() => {
-    report(key, active ? status : undefined);
+    report(key, active && enabled ? status : undefined);
     return () => report(key);
-  }, [active, key, report, status.count, status.loading, status.error]);
+  }, [active, enabled, key, report, status.count, status.loading, status.error]);
+}
+
+export function rankedPageSearchItems<T, R>(
+  items: readonly T[],
+  results: readonly R[] | undefined,
+  active: boolean,
+  itemId: (item: T) => string,
+  resultId: (result: R) => string,
+) {
+  if (!active || results === undefined) return [...items];
+  const rank = new Map<string, number>();
+  results.forEach((result, index) => {
+    const id = resultId(result);
+    if (!rank.has(id)) rank.set(id, index);
+  });
+  return items
+    .filter(item => rank.has(itemId(item)))
+    .sort((left, right) => rank.get(itemId(left))! - rank.get(itemId(right))!);
 }
 
 export function PageSearchBar({ page }: { page: NavItem }) {

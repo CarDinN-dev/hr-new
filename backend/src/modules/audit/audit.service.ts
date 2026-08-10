@@ -164,7 +164,7 @@ export class AuditService {
         event.module, event.action, event.outcome, event.resourceType, event.resourceId,
         event.permissionCode, event.requestId, event.correlationId, event.workflowId,
         event.workflowStage, event.workflowStatus, event.payrollPeriod, event.requestType,
-        event.reason, event.changedFields,
+        event.summary, event.reason, event.changedFields,
       ),
     });
     return { ...result, data: result.data.map((event) => ({ ...event, sequence: event.sequence.toString() })) };

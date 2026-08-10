@@ -15,7 +15,7 @@ export function ApprovalInboxPanel({ session, notify }: { session: BackendSessio
   const { search } = usePageSearch();
   const client = useQueryClient();
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
-  const inbox = useQuery({ queryKey: [...workflowKey(session, "approval-inbox"), search], queryFn: () => apiRequest<ApprovalInbox>(`/approvals/inbox${search ? `?search=${encodeURIComponent(search)}` : ""}`) });
+  const inbox = useQuery({ queryKey: [...workflowKey(session, "approval-inbox"), search], queryFn: () => apiRequest<ApprovalInbox>(`/approvals/inbox${search ? `?search=${encodeURIComponent(search)}` : ""}`), placeholderData: previous => previous });
   const refresh = () => Promise.all([
     client.invalidateQueries({ queryKey: workflowKey(session, "approval-inbox") }),
     client.invalidateQueries({ queryKey: workflowKey(session, "leave-inbox") }),

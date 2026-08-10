@@ -22,17 +22,35 @@ const employees = [
   { id: "employee-2", employeeCode: "MTC002", firstName: "Bob", lastName: "Jones", email: "bob@example.invalid", phone: "+974 5555 0002", hireDate: "2025-02-10", employmentStatus: "ACTIVE", department: { id: "dept-tech", code: "TECH", name: "Technology" }, position: { code: "ENG", title: "Engineer" } },
 ];
 
-async function installApi(page: Page) {
+type ApiOptions = {
+  searchedEmployees?: Array<(typeof employees)[number]>;
+  attendance?: Array<Record<string, unknown>>;
+  searchedAttendance?: Array<Record<string, unknown>>;
+  approvals?: { leave: unknown[]; certificates: unknown[]; payroll: unknown[] };
+  searchedApprovals?: { leave: unknown[]; certificates: unknown[]; payroll: unknown[] };
+  holdEmployeeSearch?: boolean;
+  holdApprovalSearch?: boolean;
+};
+
+async function installApi(page: Page, options: ApiOptions = {}) {
+  let releaseEmployeeSearch = () => {};
+  let releaseApprovalSearch = () => {};
+  const employeeSearchGate = new Promise<void>(resolve => { releaseEmployeeSearch = resolve; });
+  const approvalSearchGate = new Promise<void>(resolve => { releaseApprovalSearch = resolve; });
   await page.addInitScript(value => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify(value)), session);
-  await page.route("**/api/v1/**", route => {
+  await page.route("**/api/v1/**", async route => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/employees" && url.searchParams.get("search") && options.holdEmployeeSearch) await employeeSearchGate;
+    if (url.pathname === "/api/v1/approvals/inbox" && url.searchParams.get("search") && options.holdApprovalSearch) await approvalSearchGate;
     const data = url.pathname === "/api/v1/search/sections" ? { data: [] }
-      : url.pathname === "/api/v1/approvals/inbox" ? { leave: [], certificates: [], payroll: [] }
+      : url.pathname === "/api/v1/approvals/inbox" ? (url.searchParams.get("search") ? options.searchedApprovals : options.approvals) ?? { leave: [], certificates: [], payroll: [] }
       : url.pathname === "/api/v1/payroll/preflight" ? { ready: true, runType: "REGULAR", policy: { prorationBasis: "FIXED_30", requireBankDetails: true, requireAttendance: false, varianceThreshold: "10" }, summary: { employees: 0, errors: 0, warnings: 0, grossPay: "0", deductions: "0", netPay: "0", adjustments: 0 }, issues: [] }
-      : url.pathname === "/api/v1/employees" ? (url.searchParams.get("search") ? employees.slice(0, 1) : employees)
+      : url.pathname === "/api/v1/employees" ? (url.searchParams.get("search") ? options.searchedEmployees ?? employees.slice(0, 1) : employees)
+      : url.pathname === "/api/v1/attendance" ? (url.searchParams.get("search") ? options.searchedAttendance ?? [] : options.attendance ?? [])
       : [];
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data, meta: { total: 0, page: 1, limit: 100, totalPages: 1 } }) });
   });
+  return { releaseEmployeeSearch, releaseApprovalSearch };
 }
 
 test("every sidebar page exposes one page-specific search control", async ({ page }) => {
@@ -71,6 +89,87 @@ test("search is debounced, mapped to the page endpoint, clearable and reset by n
   await input.fill("Finance");
   await page.goto(navPaths.Attendance);
   await expect(page.getByRole("searchbox")).toHaveValue("");
+});
+
+test("state-backed lists keep their content while loading, preserve database rank, and restore normal order after clear", async ({ page }) => {
+  const api = await installApi(page, { searchedEmployees: [employees[1], employees[0]], holdEmployeeSearch: true });
+  await page.goto(navPaths.Employees);
+  const searched = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "people";
+  });
+  await page.getByRole("searchbox").fill("people");
+  await searched;
+  await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Bob Jones/ })).toBeVisible();
+  api.releaseEmployeeSearch();
+  await expect.poll(async () => page.locator(".employee-card-main").evaluateAll(elements => elements.map(element => element.textContent?.trim() || "")))
+    .toEqual([expect.stringContaining("Bob Jones"), expect.stringContaining("Alice Smith")]);
+  await page.getByRole("button", { name: "Clear search employees" }).click();
+  await expect.poll(async () => page.locator(".employee-card-main").evaluateAll(elements => elements.map(element => element.textContent?.trim() || "")))
+    .toEqual([expect.stringContaining("Alice Smith"), expect.stringContaining("Bob Jones")]);
+});
+
+test("Team keeps its full-scope metric while filtering people", async ({ page }) => {
+  const api = await installApi(page, {
+    searchedEmployees: [employees[0]],
+    approvals: { leave: [], certificates: [{ id: "certificate-1", requestType: "EMPLOYMENT_LETTER", status: "PENDING", version: 1, subject: { firstName: "Alice", lastName: "Smith" } }], payroll: [] },
+    searchedApprovals: { leave: [], certificates: [], payroll: [] },
+    holdApprovalSearch: true,
+  });
+  await page.goto(navPaths.Team);
+  await expect(page.getByText(/Certificate.*Employment Letter/)).toBeVisible();
+  const searched = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "Alice";
+  });
+  await page.getByRole("searchbox").fill("Alice");
+  await searched;
+  const metric = page.locator(".metric").filter({ hasText: "PEOPLE IN SCOPE" });
+  await expect(metric.locator("strong")).toHaveText("2");
+  const table = page.getByRole("region", { name: "People in scope" });
+  await expect(table).toContainText("Alice Smith");
+  await expect(table).not.toContainText("Bob Jones");
+  await expect(page.getByText(/Certificate.*Employment Letter/)).toBeVisible();
+  api.releaseApprovalSearch();
+  await expect(page.getByText("No approvals waiting.")).toBeVisible();
+});
+
+test("Attendance combines marked attendance and unmarked employee identity matches with existing filters", async ({ page }) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const bobAttendance = { id: "attendance-1", employeeId: "employee-2", attendanceDate: `${today}T00:00:00.000Z`, status: "PRESENT", approvalStatus: "APPROVED" };
+  await installApi(page, { searchedEmployees: [employees[0]], attendance: [bobAttendance], searchedAttendance: [bobAttendance] });
+  await page.goto(navPaths.Attendance);
+  const attendanceRequest = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/attendance" && url.searchParams.get("search") === "employee";
+  });
+  const employeeRequest = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "employee";
+  });
+  await page.getByRole("searchbox").fill("employee");
+  await Promise.all([attendanceRequest, employeeRequest]);
+  const board = page.locator(".attendance-board");
+  await expect(board).toContainText("Alice Smith");
+  await expect(board).toContainText("Bob Jones");
+  await page.getByLabel("Status filter").selectOption("Unmarked");
+  await expect(board).toContainText("Alice Smith");
+  await expect(board).not.toContainText("Bob Jones");
+  await page.getByLabel("Status filter").selectOption("Present");
+  await expect(board).toContainText("Bob Jones");
+  await expect(board).not.toContainText("Alice Smith");
+  await page.getByLabel("Department filter").selectOption("Technology");
+  await expect(board).toContainText("Bob Jones");
+  const next = new Date(`${today}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const nextDate = next.toISOString().slice(0, 10);
+  const dateSearch = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/v1/attendance" && url.searchParams.get("search") === "employee" && url.searchParams.get("dateFrom") === nextDate;
+  });
+  await page.getByLabel("Attendance date").fill(nextDate);
+  await dateSearch;
 });
 
 test("record-page filters remain available and combine with header search", async ({ page }) => {

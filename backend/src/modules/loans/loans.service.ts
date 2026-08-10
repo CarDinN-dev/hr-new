@@ -19,7 +19,7 @@ import { CreateLoanDto, LoanOverrideDto, ManualRepaymentDto, QueryLoansDto } fro
 import { AuthorizationService } from '../authorization/authorization.service';
 
 const includeLoan = {
-  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, departmentId: true } },
+  employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, department: { select: { code: true, name: true } } } },
   overrides: { orderBy: [{ year: 'desc' as const }, { month: 'desc' as const }] },
   repayments: { where: { status: LoanRepaymentStatus.POSTED }, orderBy: { postedAt: 'desc' as const } },
 };
@@ -68,7 +68,7 @@ export class LoansService {
       where: { deletedAt: null, AND: filters },
       include: includeLoan,
       searchDocument: (loan: any) => searchText(
-        loan.employee.employeeCode, loan.employee.firstName, loan.employee.lastName, loan.employee.departmentId,
+        loan.employee.employeeCode, loan.employee.firstName, loan.employee.lastName, loan.employee.department?.name, loan.employee.department?.code,
         loan.type, loan.reference, loan.notes, loan.status, `${loan.startYear}-${String(loan.startMonth).padStart(2, '0')}`,
       ),
     });

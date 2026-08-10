@@ -123,7 +123,7 @@ import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
-import { PageSearchBar, PageSearchProvider, usePageSearch, usePageSearchStatus } from "./page-search";
+import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
 import "./styles.css";
 import "./professional.css";
 
@@ -174,14 +174,15 @@ function pageSearchPath(path: string, search: string) {
   return `${path}${separator}search=${encodeURIComponent(search)}`;
 }
 
-function usePageSearchList<T>(key: string, path: string, enabled = true) {
+function usePageSearchList<T>(key: string, path: string, enabled = true, reportStatus = true) {
   const { search, active } = usePageSearch();
   const query = useQuery({
-    queryKey: ["page-search", key, search],
+    queryKey: ["page-search", key, path, search],
     queryFn: () => apiList<T>(pageSearchPath(path, search)),
     enabled: active && enabled,
+    placeholderData: previous => previous,
   });
-  usePageSearchStatus(key, { count: query.data?.length, loading: query.isFetching, error: query.error?.message });
+  usePageSearchStatus(key, { count: query.data?.length, loading: query.isFetching, error: query.error?.message }, reportStatus);
   return query;
 }
 
@@ -745,10 +746,9 @@ function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { s
 function TeamPage({ state, session, notify }: { state: HrState; session: BackendSession; notify: (message: string) => void }) {
   const { active: searchActive } = usePageSearch();
   const matches = usePageSearchList<{ id: string }>("team-employees", "/employees");
-  const matchIds = new Set(matches.data?.map(item => item.id));
-  const employees = searchActive ? state.employees.filter(employee => matchIds.has(employee.id)) : state.employees;
+  const employees = rankedPageSearchItems(state.employees, matches.data, searchActive, employee => employee.id, match => match.id);
   return <div className="dashboard-grid">
-    <Metric label="PEOPLE IN SCOPE" value={employees.length} hint="Direct reports and managed departments" />
+    <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
     <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
       <DataTable label="People in scope" empty="No team members match this search." columns={["Employee", "Department", "Status", "Joined"]} rows={employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
     </section>
@@ -766,9 +766,8 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const { search, active: searchActive } = usePageSearch();
   const sectionSearch = useSectionSearch("dashboard");
   const employeeSearch = usePageSearchList<{ id: string }>("dashboard-employees", "/employees");
-  const employeeMatchIds = new Set(employeeSearch.data?.map(item => item.id));
   const active = activeEmployees(state.employees);
-  const matchingActive = searchActive ? active.filter(employee => employeeMatchIds.has(employee.id)) : active;
+  const matchingActive = rankedPageSearchItems(active, employeeSearch.data, searchActive, employee => employee.id, match => match.id);
   const today = state.attendance[todayISO()] || {};
   const fallbackAttendance = attendanceDaySummary(state.employees, today);
   const todayValue = todayISO();
@@ -787,7 +786,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const byStatus = attendanceSummary?.byStatus;
   const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendanceSummary.totalRecords) } : fallbackAttendance;
   const pendingLeave = (leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
-  const visiblePendingLeave = (searchActive ? searchedLeaveRecords.data ?? [] : leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
+  const visiblePendingLeave = (searchActive && searchedLeaveRecords.data !== undefined ? searchedLeaveRecords.data : leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
   const currentPayroll = payrollRuns.data ?? [];
   const expiringDocs = state.employees.filter(employee => daysUntil(employee.fields["QID Expiry Date"]) <= 60 || daysUntil(employee.fields["Passport Expiry Date"]) <= 60);
   const openJobs = state.jobs.filter(job => job.status === "Open" && !recruitmentJobVacancies(job, state.candidates).isFilled);
@@ -799,9 +798,14 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
     count: matchingActive.filter(employee => employee.fields.Department === department).length
   })).filter(item => item.count > 0);
   const maxHeadcount = Math.max(1, ...headcount.map(item => item.count));
-  const upcomingBirthdays = (birthdays.data ?? []).filter(item => !searchActive || employeeMatchIds.has(item.id));
-  const recentJoiners = [...state.employees].filter(employee => !searchActive || employeeMatchIds.has(employee.id))
-    .sort((a, b) => (b.fields["Joining Date"] || "").localeCompare(a.fields["Joining Date"] || ""))
+  const upcomingBirthdays = rankedPageSearchItems(birthdays.data ?? [], employeeSearch.data, searchActive, item => item.id, match => match.id);
+  const recentJoiners = rankedPageSearchItems(
+    [...state.employees].sort((a, b) => (b.fields["Joining Date"] || "").localeCompare(a.fields["Joining Date"] || "")),
+    employeeSearch.data,
+    searchActive,
+    employee => employee.id,
+    match => match.id,
+  )
     .slice(0, 6);
   const showSection = (id: string, hasMatches: boolean) => !searchActive || sectionSearch.query.isPending || hasMatches || sectionSearch.ids.has(id);
 
@@ -935,17 +939,19 @@ function pageDescription(nav: NavItem) {
 function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
   const { active: searchActive } = usePageSearch();
   const searchResults = usePageSearchList<{ id: string }>("employees", "/employees");
-  const searchIds = new Set(searchResults.data?.map(employee => employee.id));
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
   const activeCount = state.employees.filter(employee => employee.status === "Active").length;
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
-  const employees = useMemo(() => state.employees.filter(employee => {
-    return (!searchActive || searchIds.has(employee.id)) &&
-      (!department || employee.fields.Department === department) &&
-      (!status || employee.status === status);
-  }).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])), [state.employees, searchActive, searchResults.data, department, status]);
+  const employees = useMemo(() => rankedPageSearchItems(
+    state.employees.filter(employee => (!department || employee.fields.Department === department) && (!status || employee.status === status))
+      .sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])),
+    searchResults.data,
+    searchActive,
+    employee => employee.id,
+    match => match.id,
+  ), [state.employees, searchActive, searchResults.data, department, status]);
 
   function edit(employee?: EmployeeRecord) {
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
@@ -1287,6 +1293,7 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
 }
 
 function Attendance({ state, setState, savePdf, notify, canManage, canExport }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: (message: string) => void; canManage: boolean; canExport: boolean }) {
+  const authorization = useAuthorization();
   const now = new Date();
   const [date, setDate] = useState(todayISO);
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -1294,21 +1301,31 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
   const { active: searchActive } = usePageSearch();
-  const searchResults = usePageSearchList<{ employeeId: string }>("attendance", `/attendance?dateFrom=${date}&dateTo=${date}`);
-  const searchEmployeeIds = new Set(searchResults.data?.map(record => record.employeeId));
+  const canSearchEmployees = authorization.hasAnyPermission("employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
+  const attendanceSearch = usePageSearchList<{ employeeId: string }>("attendance-records", `/attendance?dateFrom=${date}&dateTo=${date}`, true, false);
+  const employeeSearch = usePageSearchList<{ id: string }>("attendance-employees", "/employees", canSearchEmployees, false);
+  const searchReady = attendanceSearch.data !== undefined && (!canSearchEmployees || employeeSearch.data !== undefined);
+  const rankedEmployeeIds = useMemo(() => [...new Set([
+    ...(attendanceSearch.data ?? []).map(record => record.employeeId),
+    ...(employeeSearch.data ?? []).map(employee => employee.id),
+  ])], [attendanceSearch.data, employeeSearch.data]);
+  usePageSearchStatus("attendance", {
+    count: searchReady ? rankedEmployeeIds.length : undefined,
+    loading: attendanceSearch.isFetching || employeeSearch.isFetching,
+    error: attendanceSearch.error?.message || employeeSearch.error?.message,
+  });
   const active = activeEmployees(state.employees).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"]));
   const day = state.attendance[date] || {};
   const stats = attendanceStats(state.employees, state.attendance, year, month);
   const statusLabels: Record<AttendanceCode, string> = { P: "Present", H: "Half-day", L: "Leave", A: "Absent" };
   const daySummary = attendanceDaySummary(state.employees, day);
   const departments = Array.from(new Set(active.map(employee => employee.fields.Department || "Unassigned"))).sort();
-  const visibleEmployees = active.filter(employee => {
+  const visibleEmployees = rankedPageSearchItems(active.filter(employee => {
     const code = day[employee.id];
     const label = code ? statusLabels[code] : "Unmarked";
     return (!department || (employee.fields.Department || "Unassigned") === department) &&
-      (!status || label === status) &&
-      (!searchActive || searchEmployeeIds.has(employee.id));
-  });
+      (!status || label === status);
+  }), searchReady ? rankedEmployeeIds : undefined, searchActive, employee => employee.id, id => id);
   const payrollImpact = active.reduce((sum, employee) => {
     const code = day[employee.id];
     return sum + (employeeSalary(employee).total / 30) * (code === "A" ? 1 : code === "H" ? 0.5 : 0);
@@ -1630,7 +1647,6 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
 }) {
   const { active: searchActive } = usePageSearch();
   const searchResults = usePageSearchList<{ id: string }>("loans", "/loans");
-  const searchIds = new Set(searchResults.data?.map(loan => loan.id));
   const [status, setStatus] = useState("");
   const [department, setDepartment] = useState("");
   const loans = state.loans ?? [];
@@ -1638,10 +1654,10 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
   const outstanding = loans.filter(loan => loan.status === "Active" || loan.status === "Paused").reduce((sum, loan) => sum + loanBalance(state, loan.id), 0);
   const now = new Date();
   const scheduled = activeEmployees(state.employees).reduce((sum, employee) => sum + payrollLoanDeductions(state, employee, now.getFullYear(), now.getMonth() + 1, employeeSalary(employee).total).reduce((total, item) => total + item.amount, 0), 0);
-  const visible = loans.filter(loan => {
+  const visible = rankedPageSearchItems(loans.filter(loan => {
     const employee = state.employees.find(item => item.id === loan.employeeId);
-    return (!searchActive || searchIds.has(loan.id)) && (!status || loan.status === status) && (!department || employee?.fields.Department === department);
-  });
+    return (!status || loan.status === status) && (!department || employee?.fields.Department === department);
+  }), searchResults.data, searchActive, loan => loan.id, match => match.id);
 
   function saveLoan(loan: EmployeeLoan) {
     setState(prev => ({ ...prev, loans: prev.loans.some(item => item.id === loan.id) ? prev.loans.map(item => item.id === loan.id ? loan : item) : [...prev.loans, loan] }));
@@ -1796,10 +1812,8 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const { active: searchActive } = usePageSearch();
   const jobSearch = usePageSearchList<{ id: string }>("recruitment-jobs", "/recruitment/jobs");
   const candidateSearch = usePageSearchList<{ id: string }>("recruitment-candidates", "/recruitment/candidates");
-  const jobSearchIds = new Set(jobSearch.data?.map(item => item.id));
-  const candidateSearchIds = new Set(candidateSearch.data?.map(item => item.id));
-  const visibleJobs = searchActive ? state.jobs.filter(job => jobSearchIds.has(job.id)) : state.jobs;
-  const visibleCandidates = searchActive ? state.candidates.filter(candidate => candidateSearchIds.has(candidate.id)) : state.candidates;
+  const visibleJobs = rankedPageSearchItems(state.jobs, jobSearch.data, searchActive, job => job.id, match => match.id);
+  const visibleCandidates = rankedPageSearchItems(state.candidates, candidateSearch.data, searchActive, candidate => candidate.id, match => match.id);
   const [editingJobId, setEditingJobId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [jobDept, setJobDept] = useState(state.settings.departments[0] || "");
@@ -2130,8 +2144,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   const canExport = authorization.hasAnyPermission("document.hr.manage", "report.export");
   const { active: searchActive } = usePageSearch();
   const eosSearch = usePageSearchList<{ id: string }>("eos", "/eos");
-  const eosSearchIds = new Set(eosSearch.data?.map(item => item.id));
-  const visibleEosRecords = searchActive ? state.eosRecords.filter(record => eosSearchIds.has(record.id)) : state.eosRecords;
+  const visibleEosRecords = rankedPageSearchItems(state.eosRecords, eosSearch.data, searchActive, record => record.id, match => match.id);
   const employees = state.employees;
   const [employeeId, setEmployeeId] = useState(activeEmployees(employees)[0]?.id || employees[0]?.id || "");
   const [asOf, setAsOf] = useState(todayISO());
