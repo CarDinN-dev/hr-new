@@ -123,6 +123,7 @@ import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
+import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
 import "./styles.css";
 import "./professional.css";
@@ -227,6 +228,10 @@ async function withPdf<T>(action: (pdf: typeof import("./pdf")) => T) {
 
 function templateName(id: PdfTemplate) {
   return pdfTemplates.find(item => item.id === id)?.label ?? reportTemplates.find(item => item.id === id)?.label ?? id;
+}
+
+function employeePickerOptions(employees: readonly EmployeeRecord[]): EmployeePickerOption[] {
+  return employees.map(employee => ({ id: employee.id, label: `${employee.fields["Employee Code"]} — ${employeeName(employee)}` }));
 }
 
 function confirmDelete(label: string) {
@@ -1525,7 +1530,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
     {canCreate && <div className="panel">
       <div className="panel-head"><div><h3>Business Trips</h3><span>Requests, costs and advances.</span></div></div>
       <div className="form-grid compact">
-        <label>Employee<select id="trip-employee" name="trip-employee" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{eligibleEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
+        <label>Employee<EmployeePicker id="trip-employee" name="trip-employee" value={employeeId} onChange={setEmployeeId} options={employeePickerOptions(eligibleEmployees)} /></label>
         <label>Destination<input id="trip-destination" name="trip-destination" value={destination} onChange={event => setDestination(event.target.value)} placeholder="Doha, Riyadh, Dubai..." /></label>
         <label>From<input id="trip-from" name="trip-from" type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
         <label>To<input id="trip-to" name="trip-to" type="date" value={to} onChange={event => setTo(event.target.value)} /></label>
@@ -1605,7 +1610,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
     {canCreate && <div className="panel">
       <div className="panel-head"><div><h3>Employee Expenses</h3><span>Submit and process employee expenses.</span></div></div>
       <div className="form-grid compact">
-        <label>Employee<select id="expense-employee" name="expense-employee" value={employeeId} onChange={event => { setEmployeeId(event.target.value); setTripId(""); }}>{eligibleEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
+        <label>Employee<EmployeePicker id="expense-employee" name="expense-employee" value={employeeId} onChange={nextEmployeeId => { setEmployeeId(nextEmployeeId); setTripId(""); }} options={employeePickerOptions(eligibleEmployees)} /></label>
         <label>Trip<select id="expense-trip" name="expense-trip" value={tripId} onChange={event => setTripId(event.target.value)}><option value="">No trip link</option>{employeeTrips.map(trip => <option key={trip.id} value={trip.id}>{trip.destination} - {formatDate(trip.from)}</option>)}</select></label>
         <label>Category<select id="expense-category" name="expense-category" value={category} onChange={event => setCategory(event.target.value)}><option>Travel</option><option>Hotel</option><option>Meal</option><option>Medical</option><option>Fuel</option><option>Other</option></select></label>
         <label>Date<input id="expense-date" name="expense-date" type="date" value={date} onChange={event => setDate(event.target.value)} /></label>
@@ -1736,7 +1741,7 @@ function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?:
   }
 
   return <div><h2>{loan ? "Edit loan" : "Add loan"}</h2><div className="form-grid compact">
-    <label>Employee<select value={draft.employeeId} disabled={!!loan} onChange={event => setDraft(prev => ({ ...prev, employeeId: event.target.value }))}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.fields["Employee Code"]} - {employeeName(employee)}</option>)}</select></label>
+    <label>Employee<EmployeePicker value={draft.employeeId} disabled={!!loan} onChange={employeeId => setDraft(prev => ({ ...prev, employeeId }))} options={employeePickerOptions(employees)} /></label>
     <label>Loan type<select value={draft.type} onChange={event => setDraft(prev => ({ ...prev, type: event.target.value }))}><option>Salary advance</option><option>Personal loan</option><option>Emergency loan</option><option>Other</option></select></label>
     <label>Principal amount<input type="number" min="0.01" step="0.01" disabled={!!loan && loan.status !== "Draft"} value={draft.principal || ""} onChange={event => setDraft(prev => ({ ...prev, principal: Number(event.target.value) || 0 }))} /></label>
     <label>Disbursement date<input type="date" value={draft.disbursementDate} onChange={event => setDraft(prev => ({ ...prev, disbursementDate: event.target.value }))} /></label>
@@ -2182,7 +2187,7 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
         <article><span>Settlement</span><strong>{formatMoney(summary.leaveEncashment - summary.lopDeduction, state.settings.company.currency)}</strong><p>Leave encashment minus LOP deductions.</p></article>
       </div>}
       {canManage && <div className="document-grid">
-        <label>Employee<select id="eos-employee" name="eos-employee" value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{employees.map(item => <option key={item.id} value={item.id}>{item.fields["Employee Code"]} - {employeeName(item)}</option>)}</select></label>
+        <label>Employee<EmployeePicker id="eos-employee" name="eos-employee" value={employeeId} onChange={setEmployeeId} options={employeePickerOptions(employees)} /></label>
         <label>Settlement date<input id="eos-date" name="eos-date" type="date" value={asOf} onChange={event => setAsOf(event.target.value)} /></label>
         <label className="wide">Reason<textarea id="eos-reason" name="eos-reason" value={reason} onChange={event => setReason(event.target.value)} /></label>
         <button className="primary" disabled={!employee} onClick={createRecord}>Create settlement draft</button>
@@ -2245,14 +2250,14 @@ function Documents({ state, session, notify, savePdf }: { state: HrState; sessio
       {canGenerate && <div className="panel">
         <div className="panel-head"><div><h3>HR Documents & Letters</h3><span>Create HR letters and PDFs.</span></div></div>
         <div className="document-grid">
-          <label>Employee<select value={employeeId} onChange={event => setEmployeeId(event.target.value)}>{active.map(item => <option key={item.id} value={item.id}>{item.fields["Employee Code"]} - {employeeName(item)}</option>)}</select></label>
+          <label>Employee<EmployeePicker value={employeeId} onChange={setEmployeeId} options={employeePickerOptions(active)} /></label>
           <label>Template<select value={template} onChange={event => setTemplate(event.target.value as PdfTemplate)}>{pdfTemplates.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
           <label className="wide">Notes / purpose<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bank request, visa processing, warning details, settlement notes..." /></label>
           <button className="primary" onClick={generate}>Generate PDF</button>
         </div>
         {employee && ["final_settlement", "gratuity_statement", "clearance_certificate"].includes(template) && <SettlementPreview employee={employee} state={state} />}
       </div>}
-      <DocumentsLibraryPanel session={session} notify={notify} />
+      <DocumentsLibraryPanel session={session} notify={notify} employeeOptions={employeePickerOptions(state.employees)} />
       <ServiceRequestsPanel session={session} notify={notify} />
     </section>
   );

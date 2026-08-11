@@ -3008,6 +3008,93 @@ summary {
   transform: translateY(-1px);
 }
 
+.employee-picker {
+  position: relative;
+}
+
+.employee-picker input {
+  padding-right: 2.45rem;
+}
+
+.employee-picker:has(.employee-picker__clear) input {
+  padding-right: 4.25rem;
+}
+
+.employee-picker__toggle,
+.employee-picker__clear {
+  position: absolute;
+  top: 50%;
+  min-height: 0;
+  padding: 0.2rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.employee-picker__toggle {
+  right: 0.55rem;
+}
+
+.employee-picker__clear {
+  right: 1.85rem;
+  font-size: 1.2rem;
+}
+
+.employee-picker__toggle:hover:not(:disabled),
+.employee-picker__clear:hover:not(:disabled) {
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  transform: translateY(-50%);
+}
+
+.employee-picker__options {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  left: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(17, 29, 44, 0.2);
+}
+
+.employee-picker__options button {
+  width: 100%;
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  text-align: left;
+}
+
+.employee-picker__options button:hover,
+.employee-picker__options button.is-selected {
+  background: color-mix(in srgb, var(--red) 10%, var(--surface));
+  box-shadow: none;
+  transform: none;
+}
+
+.employee-picker__empty {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  color: var(--muted);
+}
+
+.document-employee-filter {
+  width: min(19rem, 100%);
+}
+
 .organization-node.search-match {
   border-color: color-mix(in srgb, var(--info) 72%, var(--line));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 14%, transparent), 0 10px 24px rgba(17, 29, 44, 0.08);

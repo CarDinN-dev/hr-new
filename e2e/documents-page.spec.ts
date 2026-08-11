@@ -29,6 +29,7 @@ test("Documents is the employee document home", async ({ page }) => {
   await expect(page.getByText("Certificates", { exact: true })).toHaveCount(0);
   await page.getByRole("link", { name: "Documents", exact: true }).click();
   await expect(page.getByText("Document library", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Filter documents by employee")).toBeVisible();
   await expect(page.getByText("Certificates", { exact: true })).toBeVisible();
   await expect(page.getByText("Document Templates", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Offer Letter", { exact: true })).toBeVisible();

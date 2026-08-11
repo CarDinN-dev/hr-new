@@ -51,7 +51,9 @@ test("HR submits for an employee and immediately approves without a password", a
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Leave" }).click();
 
-  await page.getByLabel("Employee").selectOption(employee.id);
+  await page.getByLabel("Employee").fill("Amina");
+  await expect(page.getByRole("option", { name: "EMP-002 — Amina Saleh" })).toBeVisible();
+  await page.getByRole("option", { name: "EMP-002 — Amina Saleh" }).click();
   await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
   await page.getByLabel("Leave type").selectOption("sick");
   await expect(page.getByLabel("Attachment (required)")).toBeVisible();

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Paperclip, ShieldCheck } from "lucide-react";
 import { apiList, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
+import { EmployeePicker } from "../employee-picker";
 import { displayDate, displayTitle, idempotencyHeaders, workflowKey } from "./workflow-utils";
 import { usePageSearch, usePageSearchStatus } from "../page-search";
 
@@ -154,7 +155,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
       </div>
       <div className="panel"><div className="panel-head"><div><h3>Request leave</h3><span>Dates, paid days, and balance eligibility are calculated by the server.</span></div></div>
         <div className="form-grid compact">
-          {canSubmitForEmployee && <label>Employee<select aria-label="Employee" value={form.employeeId} onChange={event => setForm(previous => ({ ...previous, employeeId: event.target.value }))}><option value="">Select employee</option>{employees.data?.map(employee => <option value={employee.id} key={employee.id}>{employee.employeeCode} — {employee.firstName} {employee.lastName}</option>)}</select></label>}
+          {canSubmitForEmployee && <label>Employee<EmployeePicker value={form.employeeId} onChange={employeeId => setForm(previous => ({ ...previous, employeeId }))} options={employees.data?.map(employee => ({ id: employee.id, label: `${employee.employeeCode} — ${employee.firstName} ${employee.lastName}` })) ?? []} clearable /></label>}
           <label>Leave type<select value={selectedLeaveTypeId} onChange={event => { const type = leaveTypes.data?.find(item => item.id === event.target.value); setForm(previous => ({ ...previous, leaveTypeId: event.target.value, isHalfDay: halfDayDisabled(type) ? false : previous.isHalfDay })); setAttachment(null); }}>{leaveTypes.data?.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
           <label>From<input type="date" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value }))} /></label>
           <label>To<input type="date" value={form.endDate} onChange={event => setForm(previous => ({ ...previous, endDate: event.target.value }))} /></label>
