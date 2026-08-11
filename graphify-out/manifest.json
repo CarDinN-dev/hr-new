@@ -1445,8 +1445,8 @@
     "semantic_hash": ""
   },
   "e2e/ui-foundations.spec.ts": {
-    "mtime": 1786175943.37218,
-    "ast_hash": "8f66eba68c31e33ba25dc52fb3ea9561",
+    "mtime": 1786439535.67452,
+    "ast_hash": "445af7563d2283219e6cd48a937fa2fe",
     "semantic_hash": ""
   },
   "src/dialog.tsx": {

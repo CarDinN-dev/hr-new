@@ -5724,6 +5724,9 @@ button:focus-visible,
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
 }
 
 .icon-button,

@@ -22,11 +22,15 @@ const session = {
 
 async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = []) {
   await page.addInitScript(({ value, permissions }) => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, permissions: [...value.permissions, ...permissions] })), { value: session, permissions: extraPermissions });
-  await page.route("**/api/v1/**", route => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ success: true, data: new URL(route.request().url()).pathname === "/api/v1/employees" ? employees : [], meta: { total: 0, page: 1, limit: 100, totalPages: 1 } })
-  }));
+  await page.route("**/api/v1/**", route => {
+    const pathname = new URL(route.request().url()).pathname;
+    const data = pathname === "/api/v1/employees" ? employees : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }] : [];
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data, meta: { total: data.length, page: 1, limit: 100, totalPages: 1, unread: pathname === "/api/v1/notifications" ? 1 : undefined } })
+    });
+  });
 }
 
 test("every application route renders with a specific document title", async ({ page }) => {
@@ -87,11 +91,43 @@ test("unknown URLs show an explicit not-found page", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
 });
 
-test("search input text clears its leading icon", async ({ page }) => {
-  await installUiApi(page);
-  await page.goto("/employees");
-  const search = page.getByLabel("Search employees");
-  expect(await search.evaluate(element => parseFloat(getComputedStyle(element).paddingLeft))).toBeGreaterThanOrEqual(36);
+test("notification actions stay right-aligned and the popover remains visible beside responsive search", async ({ page }) => {
+  await installUiApi(page, [], ["notification.self.read", "notification.self.manage"]);
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 900, height: 768 }, { width: 390, height: 844 }]) {
+    await test.step(`${viewport.width}x${viewport.height}`, async () => {
+      await page.setViewportSize(viewport);
+      await page.goto("/");
+
+      const trigger = page.getByRole("button", { name: /Notifications/ });
+      const [topbar, search, actions] = await Promise.all([
+        page.locator(".topbar").boundingBox(),
+        page.getByRole("search").boundingBox(),
+        page.locator(".topbar-actions").boundingBox()
+      ]);
+      expect(topbar).not.toBeNull();
+      expect(search).not.toBeNull();
+      expect(actions).not.toBeNull();
+      expect(topbar!.x + topbar!.width - actions!.x - actions!.width).toBeLessThanOrEqual(48);
+      expect(actions!.x + actions!.width).toBeLessThanOrEqual(topbar!.x + topbar!.width);
+      if (viewport.width <= 900) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
+      else expect(Math.abs(actions!.y + actions!.height / 2 - search!.y - search!.height / 2)).toBeLessThanOrEqual(4);
+
+      await trigger.click();
+      const popover = page.getByRole("dialog", { name: "Notifications" });
+      await expect(popover).toContainText("Visible notification content");
+      const box = await popover.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+
+      await page.keyboard.press("Escape");
+      await expect(popover).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+    });
+  }
 });
 
 test("employee add, edit, and profile dialogs use the wide layout without leaving the viewport", async ({ page }) => {
