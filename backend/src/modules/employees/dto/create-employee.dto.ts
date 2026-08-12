@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EmploymentStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDate,
   IsEmail,
@@ -28,6 +28,7 @@ export class CreateEmployeeDto {
   lastName: string;
 
   @ApiProperty({ example: 'aisha.khan@example.com' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   @IsEmail()
   @MaxLength(254)
   email: string;

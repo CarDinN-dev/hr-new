@@ -39,6 +39,8 @@ const employeeSummarySelect = {
   },
 } satisfies Prisma.EmployeeSelect;
 
+const corporateEmailSuffix = '@med-tech.com';
+
 @Injectable()
 export class EmployeesService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly authorization: AuthorizationService) {}
@@ -53,13 +55,14 @@ export class EmployeesService {
         select: { id: true, employee: { select: { id: true } } },
       });
       if (matchingUser?.employee) throw new ConflictException('User is already linked to an employee');
+      const autoUser = matchingUser ?? await this.createCorporateUser(tx, email, user);
       const employee = await tx.employee.create({
-        data: { ...dto, email, userId: matchingUser?.id, salary: ZERO_MONEY },
+        data: { ...dto, email, userId: autoUser?.id, salary: ZERO_MONEY },
         select: this.projection(user, false),
       });
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Employee', entityId: employee.id, summary: 'Employee created' });
       return employee;
-    });
+    }).catch((error: unknown) => this.rethrowEmailConflict(error));
   }
 
   async importMasterData(dto: ImportEmployeeMasterDataDto, user: RequestUser) {
@@ -264,15 +267,17 @@ export class EmployeesService {
     await this.authorization.assertEmployeeScope(user, id, { all: 'employee.hr.update' });
     const employee = await this.ensureExists(id);
     await this.validateRelations(dto, id, employee);
+    const email = dto.email?.trim().toLowerCase();
     return this.prisma.$transaction(async (tx) => {
+      if (email) await this.syncCorporateUser(tx, id, employee.userId, email, user);
       const updated = await tx.employee.update({
         where: { id },
-        data: { ...dto, version: { increment: 1 } },
+        data: { ...dto, ...(email ? { email } : {}), version: { increment: 1 } },
         select: this.projection(user, id === user.employeeId, id),
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: id, summary: 'Employee updated' });
       return updated;
-    });
+    }).catch((error: unknown) => this.rethrowEmailConflict(error));
   }
 
   async remove(id: string, user: RequestUser) {
@@ -379,6 +384,44 @@ export class EmployeesService {
       throw new NotFoundException('Employee not found');
     }
     return employee;
+  }
+
+  private async syncCorporateUser(tx: Prisma.TransactionClient, employeeId: string, userId: string | null, email: string, actor: RequestUser) {
+    if (userId) {
+      const account = await tx.user.findFirst({ where: { id: userId, deletedAt: null }, select: { id: true, email: true, microsoftObjectId: true } });
+      if (!account) throw new ConflictException('Employee is linked to an unavailable user');
+      if (account.email === email) return;
+      const conflict = await tx.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, id: { not: userId } }, select: { id: true } });
+      if (conflict) throw new ConflictException('Email address is already in use');
+      await tx.user.update({ where: { id: userId }, data: { email, microsoftObjectId: null, authorizationVersion: { increment: 1 } } });
+      await tx.authSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      await this.audit.record(tx, actor, { action: AuditAction.UPDATE, resourceType: 'User', resourceId: userId, targetUserId: userId, summary: 'Linked login email updated', before: { email: account.email, microsoftObjectId: Boolean(account.microsoftObjectId) }, after: { email, microsoftIdentityCleared: Boolean(account.microsoftObjectId), sessionsRevoked: true } });
+      return;
+    }
+
+    if (!email.endsWith(corporateEmailSuffix)) return;
+    const existing = await tx.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, isActive: true, deletedAt: null }, select: { id: true, employee: { select: { id: true } } } });
+    if (existing?.employee) throw new ConflictException('User is already linked to an employee');
+    const account = existing ?? await this.createCorporateUser(tx, email, actor);
+    if (account) await tx.employee.update({ where: { id: employeeId }, data: { userId: account.id } });
+  }
+
+  private async createCorporateUser(tx: Prisma.TransactionClient, email: string, actor: RequestUser) {
+    if (!email.endsWith(corporateEmailSuffix) || !this.authorization.has(actor, 'user.manage')) return undefined;
+    const role = await tx.role.findFirst({ where: { code: 'EMPLOYEE', isActive: true }, select: { id: true } });
+    if (!role) throw new NotFoundException('Default Employee role is unavailable');
+    const account = await tx.user.create({ data: { email, localLoginEnabled: false, microsoftLoginEnabled: true } });
+    await tx.userRole.create({ data: { userId: account.id, roleId: role.id, assignedById: actor.id, reason: 'Corporate employee email' } });
+    await this.audit.record(tx, actor, { action: AuditAction.CREATE, resourceType: 'User', resourceId: account.id, targetUserId: account.id, summary: 'Employee login created from corporate email', after: { email, localLoginEnabled: false, microsoftLoginEnabled: true, roleCode: 'EMPLOYEE' } });
+    await tx.notification.create({ data: { userId: account.id, type: 'ACCOUNT_CREATED', title: 'Account created', message: 'Your HR account and Employee access were created.', resourceType: 'User', resourceId: account.id } });
+    return account;
+  }
+
+  private rethrowEmailConflict(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && String(error.meta?.target).toLowerCase().includes('email')) {
+      throw new ConflictException('Email address is already in use');
+    }
+    throw error;
   }
 
   private masterDataSalary(row: ImportEmployeeMasterDataRowDto, employeeCode: string) {

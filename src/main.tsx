@@ -1213,11 +1213,11 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
 
   function submit() {
     const email = draft.fields["E-Mail ID (Work)"].trim();
-    if (!draft.fields["Employee Code"].trim() || !draft.fields["Full Name"].trim() || (!employee && !/^\S+@\S+\.\S+$/.test(email))) {
-      notify("Employee code, full name, and login email are required.");
+    if (!draft.fields["Employee Code"].trim() || !draft.fields["Full Name"].trim() || !/^\S+@\S+\.\S+$/.test(email)) {
+      notify("Employee code, full name, and a valid work email are required.");
       return;
     }
-    save(draft);
+    save({ ...draft, fields: { ...draft.fields, "E-Mail ID (Work)": email } });
     notify(employee ? "Employee updated." : "Employee added.");
     close();
   }
@@ -2417,6 +2417,7 @@ type CommonProps = {
 };
 
 function fieldType(field: string) {
+  if (field === "E-Mail ID (Work)") return "email";
   if (/(date|expiry|joining|issue|confirmation|passing|esb)/i.test(field)) return "date";
   if (/(salary|allowance|amount|total|tickets|balance|cost|dependents|lop|basic|hra)/i.test(field)) return "number";
   return "text";

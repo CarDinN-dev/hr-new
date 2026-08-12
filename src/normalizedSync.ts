@@ -131,7 +131,7 @@ function employeePayload(employee: EmployeeRecord, departmentIds: Map<string, st
   if (managerLabel && !managerId) throw new Error(`Manager ${managerLabel} was not found.`);
   return compact({
     employeeCode: f["Employee Code"], firstName: f["First Name"], lastName: f["Last Name"],
-    email: f["E-Mail ID (Work)"] || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
+    email: f["E-Mail ID (Work)"].trim() || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
     hireDate: f["Joining Date"], employmentStatus: status, departmentId, positionId, lineManagerId, managerId
   });
 }

@@ -146,3 +146,76 @@ test('Employee creation links a matching user by normalized email', async () => 
   assert.equal(calls[0].data.email, 'employee@example.com');
   assert.equal(calls[0].data.userId, 'user-1');
 });
+
+function employeeUpdateService({ userId = null, permissions = ['employee.hr.update', 'user.manage'], linkedUser } = {}) {
+  const calls = { employee: [], users: [], roles: [], userRoles: [], sessions: [], notifications: [] };
+  const employee = { id: 'employee-1', userId, departmentId: null, positionId: null, email: 'old@med-tech.com' };
+  const prisma = {
+    employee: { findFirst: async () => employee },
+    department: { findFirst: async () => null },
+    jobPosition: { findFirst: async () => null },
+    $transaction: async (operation) => operation({
+      employee: { update: async (args) => { calls.employee.push(args); return { id: args.where.id, ...args.data }; } },
+      user: {
+        findFirst: async (args) => {
+          if (typeof args.where.id === 'string') return linkedUser ?? null;
+          if (args.where.email?.equals === 'renamed@med-tech.com' && linkedUser) return null;
+          return null;
+        },
+        create: async (args) => { calls.users.push(args); return { id: 'user-1', email: args.data.email }; },
+        update: async (args) => { calls.users.push(args); return { id: args.where.id, ...args.data }; },
+      },
+      role: { findFirst: async () => ({ id: 'employee-role' }) },
+      userRole: { create: async (args) => { calls.userRoles.push(args); return args; } },
+      authSession: { updateMany: async (args) => { calls.sessions.push(args); return { count: 1 }; } },
+      notification: { create: async (args) => { calls.notifications.push(args); return args; } },
+    }),
+  };
+  const authorization = {
+    assertEmployeeScope: async () => undefined,
+    has: (_actor, permission) => permissions.includes(permission),
+    scopeRule: () => ({ unrestricted: true, excludeIds: [], includeIds: [] }),
+    permissionAllowedForScope: () => true,
+  };
+  return { service: new EmployeesService(prisma, { record: async () => undefined }, authorization), calls, actor: { ...actor, permissions } };
+}
+
+test('Corporate employee email creates a linked Microsoft-only Employee account', async () => {
+  const { service, calls, actor: updateActor } = employeeUpdateService();
+
+  await service.update('employee-1', { email: ' shipping@med-tech.com ' }, updateActor);
+
+  assert.deepEqual(calls.users, [{ data: { email: 'shipping@med-tech.com', localLoginEnabled: false, microsoftLoginEnabled: true } }]);
+  assert.deepEqual(calls.userRoles, [{ data: { userId: 'user-1', roleId: 'employee-role', assignedById: 'actor-1', reason: 'Corporate employee email' } }]);
+  assert.deepEqual(calls.employee, [
+    { where: { id: 'employee-1' }, data: { userId: 'user-1' } },
+    { where: { id: 'employee-1' }, data: { email: 'shipping@med-tech.com', version: { increment: 1 } }, select: calls.employee[1].select },
+  ]);
+  assert.equal(calls.sessions.length, 0);
+  assert.equal(calls.notifications.length, 1);
+});
+
+test('Linked employee email changes update the login and revoke sessions', async () => {
+  const { service, calls, actor: updateActor } = employeeUpdateService({
+    userId: 'user-1', linkedUser: { id: 'user-1', email: 'shipping@med-tech.com', microsoftObjectId: 'directory-id' },
+  });
+
+  await service.update('employee-1', { email: 'renamed@med-tech.com' }, updateActor);
+
+  assert.deepEqual(calls.users, [{ where: { id: 'user-1' }, data: { email: 'renamed@med-tech.com', microsoftObjectId: null, authorizationVersion: { increment: 1 } } }]);
+  assert.deepEqual(calls.sessions, [{ where: { userId: 'user-1', revokedAt: null }, data: { revokedAt: calls.sessions[0].data.revokedAt } }]);
+  assert.ok(calls.sessions[0].data.revokedAt instanceof Date);
+  assert.equal(calls.employee.length, 1);
+  assert.equal(calls.employee[0].data.email, 'renamed@med-tech.com');
+});
+
+test('Employee editors without user management save corporate emails without creating a login', async () => {
+  const { service, calls, actor: updateActor } = employeeUpdateService({ permissions: ['employee.hr.update'] });
+
+  await service.update('employee-1', { email: 'shipping@med-tech.com' }, updateActor);
+
+  assert.equal(calls.users.length, 0);
+  assert.equal(calls.userRoles.length, 0);
+  assert.equal(calls.employee.length, 1);
+  assert.equal(calls.employee[0].data.email, 'shipping@med-tech.com');
+});

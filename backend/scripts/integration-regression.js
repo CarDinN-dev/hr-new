@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { mkdir, rm } = require('node:fs/promises');
 const path = require('node:path');
 const test = require('node:test');
@@ -247,6 +247,43 @@ test('real Nest application enforces production RBAC and workflow invariants', {
       hireDate: '2026-01-01', roles: ['SUPER_ADMIN'],
     },
   }, sessions.HR)).status, 400);
+
+  const corporateEmployee = await api('/employees', {
+    method: 'POST', body: {
+      employeeCode: 'EMAIL-AUTO-1', firstName: 'Shipping', lastName: 'Access', email: ' shipping@med-tech.com ',
+      hireDate: '2026-01-01',
+    },
+  }, sessions.SUPER_ADMIN);
+  assert.equal(corporateEmployee.status, 201, JSON.stringify(corporateEmployee.payload));
+  assert.equal(corporateEmployee.data.email, 'shipping@med-tech.com');
+  const corporateUsers = await api('/system/users?filterSearch=shipping%40med-tech.com&limit=10', {}, sessions.SUPER_ADMIN);
+  assert.equal(corporateUsers.status, 200, JSON.stringify(corporateUsers.payload));
+  const corporateUser = corporateUsers.data.find((account) => account.email === 'shipping@med-tech.com');
+  assert.ok(corporateUser);
+  assert.equal(corporateUser.localLoginEnabled, false);
+  assert.equal(corporateUser.microsoftLoginEnabled, true);
+  assert.equal(corporateUser.employee.id, corporateEmployee.data.id);
+  assert.ok(corporateUser.roles.some((assignment) => assignment.role.code === 'EMPLOYEE'));
+  await prisma.user.update({ where: { id: corporateUser.id }, data: { microsoftObjectId: 'temporary-directory-object' } });
+  const activeSession = await prisma.authSession.create({ data: {
+    userId: corporateUser.id, tokenHash: createHash('sha256').update(`corporate-email:${corporateUser.id}`).digest('hex'), provider: 'microsoft',
+    authorizationVersion: corporateUser.authorizationVersion, expiresAt: new Date(Date.now() + 86_400_000),
+  } });
+  const renamedCorporateEmployee = await api(`/employees/${corporateEmployee.data.id}`, { method: 'PATCH', body: { email: 'renamed@med-tech.com' } }, sessions.SUPER_ADMIN);
+  assert.equal(renamedCorporateEmployee.status, 200, JSON.stringify(renamedCorporateEmployee.payload));
+  const renamedUser = await prisma.user.findUniqueOrThrow({ where: { id: corporateUser.id }, select: { email: true, microsoftObjectId: true, authorizationVersion: true } });
+  assert.equal(renamedUser.email, 'renamed@med-tech.com');
+  assert.equal(renamedUser.microsoftObjectId, null);
+  assert.equal(renamedUser.authorizationVersion, corporateUser.authorizationVersion + 1);
+  assert.ok((await prisma.authSession.findUniqueOrThrow({ where: { id: activeSession.id } })).revokedAt);
+  const hrCorporateEmployee = await api('/employees', {
+    method: 'POST', body: {
+      employeeCode: 'EMAIL-AUTO-2', firstName: 'HR', lastName: 'No Access', email: 'hr-no-access@med-tech.com',
+      hireDate: '2026-01-01',
+    },
+  }, sessions.HR);
+  assert.equal(hrCorporateEmployee.status, 201, JSON.stringify(hrCorporateEmployee.payload));
+  assert.equal(await prisma.user.count({ where: { email: 'hr-no-access@med-tech.com' } }), 0);
 
   const missingCsrf = await api('/auth/logout', { method: 'POST', csrf: false }, sessions.EMPLOYEE);
   assert.equal(missingCsrf.status, 403);
