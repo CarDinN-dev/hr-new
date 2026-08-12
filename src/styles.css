@@ -3020,8 +3020,8 @@ summary {
   padding-right: 4.25rem;
 }
 
-.employee-picker__toggle,
-.employee-picker__clear {
+.employee-picker .employee-picker__toggle,
+.employee-picker .employee-picker__clear {
   position: absolute;
   top: 50%;
   min-height: 0;
@@ -3043,8 +3043,8 @@ summary {
   font-size: 1.2rem;
 }
 
-.employee-picker__toggle:hover:not(:disabled),
-.employee-picker__clear:hover:not(:disabled) {
+.employee-picker .employee-picker__toggle:hover:not(:disabled),
+.employee-picker .employee-picker__clear:hover:not(:disabled) {
   border-color: transparent;
   box-shadow: none;
   color: var(--ink);
