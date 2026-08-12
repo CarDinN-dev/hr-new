@@ -114,6 +114,7 @@ import {
   type BackendSession
 } from "./api";
 import { AuthorizationProvider, canAccessRoute, useAuthorization } from "./authorization";
+import { importWithReleaseRetry } from "./dynamic-import";
 import { persistNormalizedStateDelta } from "./normalizedSync";
 import { newId } from "./id";
 import { preparePhoto } from "./photo";
@@ -150,10 +151,10 @@ const employeeFieldOptions: Record<string, readonly string[]> = {
   "Company Food": ["Yes", "No"],
   "Company Fuel Card": ["Yes", "No"]
 };
-const LoginScene = React.lazy(() => import("./LoginScene"));
-const SystemAccessPage = React.lazy(() => import("./features/system-access").then(module => ({ default: module.SystemAccessPage })));
-const HierarchyPage = React.lazy(() => import("./features/hierarchy-page").then(module => ({ default: module.HierarchyPage })));
-const AuditHistoryPage = React.lazy(() => import("./features/audit-page").then(module => ({ default: module.AuditHistoryPage })));
+const LoginScene = React.lazy(() => importWithReleaseRetry("login-scene", () => import("./LoginScene")));
+const SystemAccessPage = React.lazy(() => importWithReleaseRetry("system-access", () => import("./features/system-access").then(module => ({ default: module.SystemAccessPage }))));
+const HierarchyPage = React.lazy(() => importWithReleaseRetry("hierarchy-page", () => import("./features/hierarchy-page").then(module => ({ default: module.HierarchyPage }))));
+const AuditHistoryPage = React.lazy(() => importWithReleaseRetry("audit-page", () => import("./features/audit-page").then(module => ({ default: module.AuditHistoryPage }))));
 const appQueryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -223,7 +224,7 @@ const navIcon = {
 };
 
 async function withPdf<T>(action: (pdf: typeof import("./pdf")) => T) {
-  return action(await import("./pdf"));
+  return action(await importWithReleaseRetry("pdf", () => import("./pdf")));
 }
 
 function templateName(id: PdfTemplate) {
@@ -1054,7 +1055,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
   async function importEmployees(file?: File) {
     if (!file) return;
     try {
-      const { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } = await import("./employeeSheet");
+      const { applyEmployeeRows, parseEmployeeSheet, parseEmployeeWorkbook } = await importWithReleaseRetry("employee-sheet", () => import("./employeeSheet"));
       if (file.size > 10_000_000) throw new Error("Employee imports are limited to 10 MB.");
       const spreadsheet = /\.(xlsx|xlsm|xltx|xltm)$/i.test(file.name);
       const parsed = spreadsheet
@@ -1352,14 +1353,14 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
     .filter(group => group.employees.length);
 
   async function downloadAttendanceTemplate() {
-    const { attendanceTemplateHtml } = await import("./attendanceSheet");
+    const { attendanceTemplateHtml } = await importWithReleaseRetry("attendance-sheet", () => import("./attendanceSheet"));
     downloadBlob(new Blob([attendanceTemplateHtml()], { type: "application/vnd.ms-excel;charset=utf-8" }), `MedTech-Attendance-Import-Template-${todayISO()}.xls`);
   }
 
   async function importAttendance(file?: File) {
     if (!file) return;
     try {
-      const { applyAttendanceRows, parseAttendanceSheet, parseAttendanceWorkbook } = await import("./attendanceSheet");
+      const { applyAttendanceRows, parseAttendanceSheet, parseAttendanceWorkbook } = await importWithReleaseRetry("attendance-sheet", () => import("./attendanceSheet"));
       if (file.size > 10_000_000) throw new Error("Attendance imports are limited to 10 MB.");
       const rows = /\.xls$/i.test(file.name) ? await parseAttendanceWorkbook(file) : parseAttendanceSheet(await file.text());
       if (rows.length > 50_000) throw new Error("Attendance imports are limited to 50,000 rows at a time.");
