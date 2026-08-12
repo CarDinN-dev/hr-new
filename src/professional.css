@@ -750,9 +750,9 @@ td button {
 }
 
 .modal-close {
-  position: sticky;
-  top: 0;
-  float: right;
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
   z-index: 3;
   background: var(--pro-surface) !important;
 }
