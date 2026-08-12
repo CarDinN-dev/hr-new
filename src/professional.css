@@ -2330,11 +2330,63 @@ td button {
 
 @keyframes page-search-spin { to { transform: rotate(360deg); } }
 
+.employee-filters {
+  align-items: center;
+}
+
+.employee-filters .page-search {
+  flex: 1 1 18rem;
+  margin-left: 0;
+  width: auto;
+}
+
+.employee-filters select {
+  flex: 0 1 11rem;
+}
+
+.modal:has(> .employee-profile),
+.modal:has(> .employee-editor) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  height: min(90dvh, 900px);
+  overflow: hidden;
+}
+
+.employee-profile,
+.employee-editor {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.employee-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  scrollbar-gutter: stable;
+}
+
+.employee-modal-actions {
+  position: static !important;
+  z-index: auto;
+  margin: 1rem 0 0 !important;
+  padding: 1rem 0 0 !important;
+  border-top: 1px solid var(--pro-border);
+  background: transparent !important;
+  backdrop-filter: none;
+}
+
 @media (max-width: 900px) {
   .page-search {
     grid-column: 1 / -1;
     margin-left: 0;
     width: 100%;
+  }
+
+  .employee-filters .page-search {
+    flex-basis: 100%;
   }
 }
 

@@ -61,6 +61,10 @@ test("every sidebar page exposes one page-specific search control", async ({ pag
       await expect(page.getByRole("search")).toHaveCount(1);
       const input = page.getByRole("searchbox");
       await expect(input).toBeVisible();
+      if (name === "Employees") {
+        await expect(page.locator(".employee-filters").getByRole("search")).toHaveCount(1);
+        await expect(page.locator(".topbar").getByRole("search")).toHaveCount(0);
+      }
       await expect(input).toHaveAttribute("aria-label", /Search/i);
       await expect(input).toHaveAttribute("maxlength", "100");
       await input.focus();
@@ -172,9 +176,11 @@ test("Attendance combines marked attendance and unmarked employee identity match
   await dateSearch;
 });
 
-test("record-page filters remain available and combine with header search", async ({ page }) => {
+test("employee directory filters remain available and combine with directory search", async ({ page }) => {
   await installApi(page);
   await page.goto(navPaths.Employees);
+  await expect(page.locator(".employee-filters").getByRole("searchbox")).toBeVisible();
+  await expect(page.locator(".topbar").getByRole("searchbox")).toHaveCount(0);
   await expect(page.getByLabel("Filter employees by department")).toBeVisible();
   await expect(page.getByLabel("Filter employees by status")).toBeVisible();
   await page.getByLabel("Filter employees by department").selectOption("Finance");

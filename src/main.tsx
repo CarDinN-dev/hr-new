@@ -597,7 +597,7 @@ function App() {
             <h1>{nav}</h1>
             <p className="page-hint">{pageHint}</p>
           </div>
-          <PageSearchBar page={nav} />
+          {nav !== "Employees" && <PageSearchBar page={nav} />}
           <div className="topbar-actions">
             <NotificationsPanel session={backendSession} notify={notify} />
             <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
@@ -1001,6 +1001,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       </div>
       <div className="panel employee-directory-panel">
         <div className="filters employee-filters">
+          <PageSearchBar page="Employees" />
           <select aria-label="Filter employees by department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
           <select aria-label="Filter employees by status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map(item => <option key={item}>{item}</option>)}</select>
         </div>
@@ -1222,41 +1223,43 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
 
   return (
     <div className="employee-editor">
-      <h2>{employee ? "Edit employee" : "Add employee"}</h2>
-      <p className="muted">Complete the employee details below.</p>
-      <div className="employee-photo-editor">
-        <EmployeeAvatar employee={draft} />
-        <div>
-          <strong>Employee photo</strong>
-          <p>Saved with this employee record.</p>
-          <div className="inline-controls">
-            <label className="button-like"><ImagePlus size={16} /> {draft.photo ? "Replace photo" : "Add photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { void updateEmployeePhoto(event.target.files?.[0]); event.target.value = ""; }} /></label>
-            {draft.photo && <button type="button" onClick={() => setDraft(prev => ({ ...prev, photo: "" }))}><Trash2 size={16} /> Remove</button>}
+      <div className="employee-modal-body">
+        <h2>{employee ? "Edit employee" : "Add employee"}</h2>
+        <p className="muted">Complete the employee details below.</p>
+        <div className="employee-photo-editor">
+          <EmployeeAvatar employee={draft} />
+          <div>
+            <strong>Employee photo</strong>
+            <p>Saved with this employee record.</p>
+            <div className="inline-controls">
+              <label className="button-like"><ImagePlus size={16} /> {draft.photo ? "Replace photo" : "Add photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { void updateEmployeePhoto(event.target.files?.[0]); event.target.value = ""; }} /></label>
+              {draft.photo && <button type="button" onClick={() => setDraft(prev => ({ ...prev, photo: "" }))}><Trash2 size={16} /> Remove</button>}
+            </div>
           </div>
         </div>
+        <div className="employee-status">
+          <label>Status<select value={draft.status} onChange={event => setDraft(prev => ({ ...prev, status: event.target.value as EmployeeRecord["status"] }))}>{statusOptions.map(item => <option key={item}>{item}</option>)}</select></label>
+        </div>
+        <div className="employee-form">
+          {employeeProfileSections.map((section, index) => (
+            <details key={section.title} open={index < 3}>
+                <summary>{section.title}</summary>
+                <div className="form-grid">
+                {section.fields.map(field => {
+                  const options = field === "Department" ? state.settings.departments : employeeFieldOptions[field];
+                  const values = options && Array.from(new Set([...options, draft.fields[field] || ""])).filter(Boolean);
+                  return <label key={field}>{field}
+                    {values
+                      ? <select aria-label={field} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
+                      : <input aria-label={field} type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
+                  </label>;
+                })}
+              </div>
+            </details>
+          ))}
+        </div>
       </div>
-      <div className="employee-status">
-        <label>Status<select value={draft.status} onChange={event => setDraft(prev => ({ ...prev, status: event.target.value as EmployeeRecord["status"] }))}>{statusOptions.map(item => <option key={item}>{item}</option>)}</select></label>
-      </div>
-      <div className="employee-form">
-        {employeeProfileSections.map((section, index) => (
-          <details key={section.title} open={index < 3}>
-              <summary>{section.title}</summary>
-              <div className="form-grid">
-              {section.fields.map(field => {
-                const options = field === "Department" ? state.settings.departments : employeeFieldOptions[field];
-                const values = options && Array.from(new Set([...options, draft.fields[field] || ""])).filter(Boolean);
-                return <label key={field}>{field}
-                  {values
-                    ? <select aria-label={field} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
-                    : <input aria-label={field} type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
-                </label>;
-              })}
-            </div>
-          </details>
-        ))}
-      </div>
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Save employee</button></div>
+      <div className="modal-actions employee-modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Save employee</button></div>
     </div>
   );
 }
@@ -1265,30 +1268,32 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
   const salary = employeeSalary(employee);
   return (
     <div className="employee-profile">
-      <div className="profile-head">
-        <EmployeeAvatar employee={employee} />
-        <div><h2>{employeeName(employee)}</h2><p>{employee.fields.Designation} - {employee.fields.Department}</p></div>
-        <Badge value={employee.status} />
+      <div className="employee-modal-body">
+        <div className="profile-head">
+          <EmployeeAvatar employee={employee} />
+          <div><h2>{employeeName(employee)}</h2><p>{employee.fields.Designation} - {employee.fields.Department}</p></div>
+          <Badge value={employee.status} />
+        </div>
+        <section className="profile-grid">
+          {["Employee Code", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", "Bank Code", "IBAN No."].map(field => (
+            <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
+          ))}
+          {canViewSalary && <div><span>Monthly Total</span><strong>{formatMoney(salary.total, state.settings.company.currency)}</strong></div>}
+        </section>
+        <div className="profile-sections">
+          {employeeProfileSections.filter(section => canViewSalary || section.title !== "Bank & Salary").map(section => (
+            <section key={section.title}>
+              <h3>{section.title}</h3>
+              <div className="profile-field-grid">
+                {section.fields.map(field => (
+                  <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
-      <section className="profile-grid">
-        {["Employee Code", "Joining Date", "Line Manager Employee Code/Name", "Manager Employee Code/Name", "E-Mail ID (Work)", "Personal Mobile No.", "Nationality", "QID Expiry Date", "Bank Code", "IBAN No."].map(field => (
-          <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
-        ))}
-        {canViewSalary && <div><span>Monthly Total</span><strong>{formatMoney(salary.total, state.settings.company.currency)}</strong></div>}
-      </section>
-      <div className="profile-sections">
-        {employeeProfileSections.filter(section => canViewSalary || section.title !== "Bank & Salary").map(section => (
-          <section key={section.title}>
-            <h3>{section.title}</h3>
-            <div className="profile-field-grid">
-              {section.fields.map(field => (
-                <div key={field}><span>{field}</span><strong>{field.includes("Date") || field.includes("Expiry") ? formatDate(employee.fields[field]) : employee.fields[field] || "-"}</strong></div>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-      <div className="modal-actions">
+      <div className="modal-actions employee-modal-actions">
         {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>Profile PDF</button>}
         {edit && <button onClick={edit}>Edit</button>}
         <button className="primary" onClick={close}>Done</button>

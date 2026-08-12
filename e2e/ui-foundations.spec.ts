@@ -162,6 +162,15 @@ test("employee add, edit, and profile dialogs use the wide layout without leavin
   await expect(panel.getByRole("button", { name: "Profile PDF" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Done" })).toBeVisible();
+  const profileBody = panel.locator(".employee-modal-body");
+  const profileActions = panel.locator(".employee-modal-actions");
+  await expect(profileBody).toHaveCSS("overflow-y", "auto");
+  await expect(profileActions).toHaveCSS("position", "static");
+  await profileBody.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  const profileFooter = await profileActions.boundingBox();
+  expect(profileFooter).not.toBeNull();
+  expect(profileFooter!.y).toBeGreaterThanOrEqual(desktop!.y);
+  expect(profileFooter!.y + profileFooter!.height).toBeLessThanOrEqual(desktop!.y + desktop!.height);
 
   await panel.getByRole("button", { name: "Edit", exact: true }).click();
   const editPanel = page.locator(".modal:has(> .employee-editor)");
@@ -170,6 +179,8 @@ test("employee add, edit, and profile dialogs use the wide layout without leavin
   expect(editDesktop!.width).toBeGreaterThanOrEqual(900);
   expect(editDesktop!.width).toBeLessThanOrEqual(920);
   await expect(editPanel.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC005");
+  await expect(editPanel.locator(".employee-modal-body")).toHaveCSS("overflow-y", "auto");
+  await expect(editPanel.locator(".employee-modal-actions")).toHaveCSS("position", "static");
 
   await page.setViewportSize({ width: 390, height: 844 });
   const mobile = await editPanel.boundingBox();
