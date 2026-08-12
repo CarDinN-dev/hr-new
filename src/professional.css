@@ -1572,6 +1572,22 @@ td button {
   user-select: none;
 }
 
+.company-role-viewport:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: auto;
+  background-color: var(--pro-surface-subtle);
+  scrollbar-gutter: stable;
+}
+
+.company-role-viewport::backdrop {
+  background: var(--pro-surface-subtle);
+}
+
 .company-role-canvas-controls {
   position: sticky;
   top: 10px;

@@ -1,6 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Building2, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Download, Maximize2, Minus, Move, Pencil, Plus, RotateCcw, Search, ShieldCheck, Users } from "lucide-react";
+import { ArrowLeft, Building2, ChevronDown, ChevronLeft, ChevronRight, Crosshair, Download, Fullscreen, Maximize2, Minimize2, Minus, Move, Pencil, Plus, RotateCcw, Search, ShieldCheck, Users } from "lucide-react";
 import { apiList, hasPermission, type BackendSession } from "../api";
 import type { EmployeeRecord } from "../data";
 import { buildCompanyRoleHierarchy, type RoleHierarchyBranch, type RoleHierarchyDepartment } from "../roleHierarchy";
@@ -412,6 +412,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
   const [zoom, setZoom] = useState(1);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const zoomRef = useRef(1);
   const panRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
   const selectedPathIds = useMemo(() => {
@@ -434,6 +435,13 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     if (selectedId === "company-unassigned") return new Set(hierarchy.unassignedDepartments.map(item => item.id));
     return new Set<string>();
   }, [branchMeta.byId, coo.departments, cpo.departments, departmentMeta, hierarchy.unassignedDepartments, selectedId]);
+
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === viewportRef.current);
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    syncFullscreen();
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -527,6 +535,16 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     setZoom(1);
     setFocusId(companyCooId);
     requestAnimationFrame(() => requestAnimationFrame(() => centerNode(companyCooId)));
+  };
+  const toggleFullscreen = async () => {
+    const viewport = viewportRef.current;
+    if (!viewport || !document.fullscreenEnabled) return;
+    try {
+      if (document.fullscreenElement === viewport) await document.exitFullscreen();
+      else await viewport.requestFullscreen({ navigationUI: "hide" });
+    } catch (error) {
+      console.warn("Unable to toggle role hierarchy fullscreen.", error);
+    }
   };
   const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
     if (roleHierarchyIsCompact() || event.button !== 0 || (event.target as Element).closest("button, input, select, a, .company-role-canvas-controls")) return;
@@ -790,6 +808,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
 
   return <div className={`company-role-hierarchy${focusedMeta ? " company-role-hierarchy-focused" : ""}${selectedId ? " company-role-hierarchy-has-selection" : ""}`} role="group" aria-label="Company role hierarchy" onKeyDown={event => {
     if (event.key !== "Escape") return;
+    if (document.fullscreenElement === viewportRef.current) return;
     if (query) clearSearch();
     else if (focusedDepartmentId) focusDepartment(null);
   }}>
@@ -823,6 +842,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
         <button type="button" aria-label="Fit role hierarchy in view" title="Fit hierarchy (F)" onClick={fitHierarchy}><Maximize2 size={16} aria-hidden="true" /></button>
         <button type="button" aria-label="Center selected hierarchy item" title="Center selected" onClick={() => centerNode(selectedId ?? focusId)}><Crosshair size={16} aria-hidden="true" /></button>
         <button type="button" aria-label="Reset role hierarchy view" title="Reset view (0)" onClick={resetView}><RotateCcw size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label={isFullscreen ? "Exit fullscreen hierarchy" : "Enter fullscreen hierarchy"} aria-pressed={isFullscreen} title={isFullscreen ? "Exit fullscreen" : "View fullscreen"} disabled={!document.fullscreenEnabled} onClick={() => void toggleFullscreen()}>{isFullscreen ? <Minimize2 size={16} aria-hidden="true" /> : <Fullscreen size={16} aria-hidden="true" />}</button>
       </div>
       <div className="company-role-stage" data-zoom={zoom} style={{ width: canvasSize.width ? `${canvasSize.width * zoom}px` : "100%", height: canvasSize.height ? `${canvasSize.height * zoom}px` : "100%" }}>
       <div className="role-flowchart-canvas company-role-canvas" id="company-role-hierarchy-flowchart" ref={canvasRef} style={{ minWidth: `${canvasMinWidth}px`, transform: `scale(${zoom})` }}>
