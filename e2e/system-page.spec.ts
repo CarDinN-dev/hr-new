@@ -237,6 +237,22 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect(page.getByRole("heading", { name: "Organizational hierarchy" })).toBeVisible();
   await expect(page.locator(".organization-chart")).toBeVisible();
 
+  const sidebar = page.locator("aside.sidebar");
+  const workspace = page.locator(".workspace");
+  const hierarchyContent = page.locator(".content.hierarchy-content");
+  const expandedWorkspaceBox = (await workspace.boundingBox())!;
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar).toBeHidden();
+  const collapsedWorkspaceBox = (await workspace.boundingBox())!;
+  const hierarchyContentBox = (await hierarchyContent.boundingBox())!;
+  expect(collapsedWorkspaceBox.width).toBeGreaterThan(expandedWorkspaceBox.width + 200);
+  expect(Math.abs(hierarchyContentBox.x - collapsedWorkspaceBox.x)).toBeLessThanOrEqual(14);
+  expect(Math.abs(hierarchyContentBox.x + hierarchyContentBox.width - collapsedWorkspaceBox.x - collapsedWorkspaceBox.width)).toBeLessThanOrEqual(14);
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar).toBeVisible();
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar).toBeHidden();
+
   const organizationTab = page.getByRole("tab", { name: "Organizational hierarchy" });
   const roleTab = page.getByRole("tab", { name: "Role hierarchy" });
   await expect(organizationTab).toHaveAttribute("aria-selected", "true");
@@ -400,6 +416,12 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect(zoomValue).toHaveText("100%");
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeHidden();
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(sidebar).toBeVisible();
+  await page.getByRole("button", { name: "Close navigation" }).click();
+  await expect(sidebar).not.toHaveClass(/\bopen\b/);
+  await expect.poll(() => sidebar.evaluate(element => element.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
   await expect(flowViewport).toBeVisible();
   await expect.poll(() => flowViewport.evaluate(element => element.scrollWidth > element.clientWidth + 1)).toBe(false);
   await expect(flowViewport).toHaveCSS("overflow-y", "visible");

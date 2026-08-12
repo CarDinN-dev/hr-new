@@ -26,6 +26,8 @@ import {
   LogOut,
   Menu,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   ShieldCheck,
   Settings,
@@ -302,6 +304,7 @@ function App() {
   const [state, setState] = useState<HrState>(() => loadState());
   const [toast, setToast] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [modal, setModal] = useState<React.ReactNode>(null);
   const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(() => loadBackendSession() ?? undefined);
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
@@ -555,7 +558,7 @@ function App() {
 
   return (
     <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className="app">
-      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Main navigation">
+      <aside id="main-navigation" className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Main navigation" hidden={sidebarCollapsed}>
         <div className="brand-block">
           <span className="logo-crop wordmark"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
           <div>
@@ -592,11 +595,23 @@ function App() {
           <button type="button" aria-label="Dismiss save error" title="Dismiss" onClick={() => setSyncAlertDismissed(true)}><X size={16} /></button>
         </div>}
         <header className="topbar">
-          <button className="mobile-menu" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
-          <div className="page-title">
-            <p className="section-label">MedTech Corporation Trading W.L.L.</p>
-            <h1>{nav}</h1>
-            <p className="page-hint">{pageHint}</p>
+          <button className="mobile-menu" aria-label="Open menu" onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
+          <div className="topbar-heading">
+            <button
+              className="desktop-sidebar-toggle"
+              type="button"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-controls="main-navigation"
+              aria-expanded={!sidebarCollapsed}
+              onClick={() => setSidebarCollapsed(collapsed => !collapsed)}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+            <div className="page-title">
+              <p className="section-label">MedTech Corporation Trading W.L.L.</p>
+              <h1>{nav}</h1>
+              <p className="page-hint">{pageHint}</p>
+            </div>
           </div>
           {nav !== "Employees" && <PageSearchBar page={nav} />}
           <div className="topbar-actions">
@@ -607,7 +622,7 @@ function App() {
           </div>
         </header>
 
-        <div className="content"><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
+        <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
           {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);

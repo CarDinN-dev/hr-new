@@ -141,6 +141,10 @@ textarea:focus-visible,
   box-shadow: 8px 0 28px rgba(15, 23, 42, .08);
 }
 
+.app > .sidebar[hidden] {
+  display: none !important;
+}
+
 :root[data-theme="dark"] .sidebar {
   border-right-color: rgba(255,255,255,.07) !important;
   background: linear-gradient(180deg, var(--pro-sidebar), var(--pro-sidebar-2)) !important;
@@ -337,6 +341,24 @@ small {
 
 .topbar-actions {
   gap: 8px !important;
+}
+
+.topbar-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.desktop-sidebar-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 38px !important;
+  min-width: 38px !important;
+  min-height: 38px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  color: var(--pro-text-soft) !important;
 }
 
 .content {
@@ -1036,6 +1058,10 @@ td button {
     box-shadow: 22px 0 60px rgba(0,0,0,.28) !important;
   }
 
+  .desktop-sidebar-toggle {
+    display: none !important;
+  }
+
   .topbar {
     min-height: 78px !important;
     padding: 14px 18px !important;
@@ -1322,6 +1348,15 @@ td button {
   border-bottom: 0;
   border-left: 0;
   border-radius: 0;
+}
+
+@media (min-width: 901px) {
+  .app .content.hierarchy-content {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 12px !important;
+  }
 }
 
 .company-role-summary {
