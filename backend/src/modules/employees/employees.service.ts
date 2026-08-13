@@ -41,6 +41,17 @@ const employeeSummarySelect = {
 
 const corporateEmailSuffix = '@med-tech.com';
 
+type TeamHierarchyPerson = {
+  id: string;
+  name: string;
+  title: string;
+  managerId: string | null;
+  lineManagerId: string | null;
+  departmentId: string | null;
+};
+
+type TeamHierarchyNode = Pick<TeamHierarchyPerson, 'id' | 'name' | 'title'> & { children: TeamHierarchyNode[] };
+
 @Injectable()
 export class EmployeesService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly authorization: AuthorizationService) {}
@@ -208,6 +219,78 @@ export class EmployeesService {
         daysUntil,
       }];
     }).sort((left, right) => left.daysUntil - right.daysUntil || `${left.firstName} ${left.lastName}`.localeCompare(`${right.firstName} ${right.lastName}`));
+  }
+
+  async teamHierarchy(user: RequestUser) {
+    const organizationalRoles = ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER', 'HR', 'CPO', 'COO'];
+    if (!user.isSuperAdmin && !user.roles.some(role => organizationalRoles.includes(role))) throw new ForbiddenException('Team access is not available for this role');
+
+    const executiveScope = user.isSuperAdmin || user.roles.some(role => ['HR', 'CPO', 'COO'].includes(role));
+    const departmentId = user.departmentId;
+    if (!executiveScope && (!departmentId || !this.authorization.permissionAllowedForScope(user, 'employee.department.read', AccessScopeType.DEPARTMENT, departmentId))) {
+      throw new ForbiddenException('Department team access is not available');
+    }
+
+    const people = await this.prisma.employee.findMany({
+      where: { deletedAt: null, employmentStatus: { in: [EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE] } },
+      select: {
+        id: true, firstName: true, lastName: true, departmentId: true, managerId: true, lineManagerId: true,
+        position: { select: { title: true } },
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+    const peopleById = new Map<string, TeamHierarchyPerson>(people.map(person => [person.id, {
+      id: person.id,
+      name: `${person.firstName} ${person.lastName}`.trim(),
+      title: person.position?.title || 'Job title not assigned',
+      departmentId: person.departmentId,
+      managerId: person.managerId,
+      lineManagerId: person.lineManagerId,
+    }]));
+    const visibleIds = new Set<string>();
+    for (const person of peopleById.values()) {
+      if (executiveScope) {
+        if (this.authorization.permissionAllowedForScope(user, 'employee.department.read', AccessScopeType.DEPARTMENT, person.departmentId)) visibleIds.add(person.id);
+      } else if (person.departmentId === departmentId) visibleIds.add(person.id);
+    }
+    for (const personId of [...visibleIds]) {
+      const seen = new Set<string>([personId]);
+      let current = peopleById.get(personId);
+      while (current) {
+        const parentId = current.lineManagerId || current.managerId;
+        if (!parentId || seen.has(parentId)) break;
+        const parent = peopleById.get(parentId);
+        if (!parent) break;
+        seen.add(parentId);
+        visibleIds.add(parentId);
+        current = parent;
+      }
+    }
+    const childrenById = new Map<string, string[]>();
+    const roots: string[] = [];
+    for (const personId of visibleIds) {
+      const person = peopleById.get(personId)!;
+      const parentId = person.lineManagerId || person.managerId;
+      if (parentId && visibleIds.has(parentId)) childrenById.set(parentId, [...(childrenById.get(parentId) ?? []), personId]);
+      else roots.push(personId);
+    }
+    const build = (personId: string, ancestry = new Set<string>()): TeamHierarchyNode => {
+      const person = peopleById.get(personId)!;
+      const nextAncestry = new Set(ancestry).add(personId);
+      return {
+        id: person.id,
+        name: person.name,
+        title: person.title,
+        children: (childrenById.get(person.id) ?? [])
+          .filter(childId => !nextAncestry.has(childId))
+          .sort((left, right) => peopleById.get(left)!.name.localeCompare(peopleById.get(right)!.name))
+          .map(childId => build(childId, nextAncestry)),
+      };
+    };
+    return {
+      scope: executiveScope ? 'ORGANIZATION' : 'DEPARTMENT',
+      roots: roots.sort((left, right) => peopleById.get(left)!.name.localeCompare(peopleById.get(right)!.name)).map(root => build(root)),
+    };
   }
 
   async findById(id: string, user: RequestUser) {

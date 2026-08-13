@@ -45,4 +45,17 @@ describe("System route authorization", () => {
   it("allows employee Settings for signed-in device management", () => {
     expect(canAccessRoute(session(["EMPLOYEE"], ["session.self.read"]), "Settings")).toBe(true);
   });
+
+  it("replaces the employee directory with the minimal Team route for organizational roles", () => {
+    for (const role of ["EMPLOYEE", "LINE_MANAGER", "MANAGER"]) {
+      const user = session([role], ["employee.department.read", "employee.self.read", "employee.management.read"]);
+      expect(canAccessRoute(user, "Team")).toBe(true);
+      expect(canAccessRoute(user, "Employees")).toBe(false);
+    }
+    for (const role of ["HR", "CPO", "COO"]) {
+      const user = session([role], ["employee.department.read", "employee.read_all"]);
+      expect(canAccessRoute(user, "Team")).toBe(true);
+      expect(canAccessRoute(user, "Employees")).toBe(true);
+    }
+  });
 });

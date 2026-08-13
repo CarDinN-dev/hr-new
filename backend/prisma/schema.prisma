@@ -21,6 +21,7 @@ enum PermissionOverrideEffect {
 enum AccessScopeType {
   SELF
   DIRECT_REPORTS
+  DEPARTMENT
   MANAGEMENT_TREE
   ASSIGNED_APPROVALS
   ALL_EMPLOYEES

@@ -49,7 +49,7 @@ test('role inheritance and business separation match the production matrix', () 
   const admin = expandedPermissions('ADMIN', roles);
   const superAdmin = new Set(catalog.permissions);
 
-  for (const permission of ['employee.self.read', 'leave.self.create', 'announcement.read', 'notification.self.read']) {
+  for (const permission of ['employee.self.read', 'employee.department.read', 'leave.self.create', 'announcement.read', 'notification.self.read']) {
     assert.equal(employee.has(permission), true, `EMPLOYEE requires ${permission}`);
   }
   for (const permission of ['employee.self.read_bank', 'employee.self.update_bank']) {

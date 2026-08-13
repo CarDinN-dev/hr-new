@@ -34,6 +34,12 @@ export class EmployeesController {
     return this.employeesService.upcomingBirthdays();
   }
 
+  @Permissions('employee.department.read')
+  @Get('team-hierarchy')
+  teamHierarchy(@CurrentUser() user: RequestUser) {
+    return this.employeesService.teamHierarchy(user);
+  }
+
   @AnyPermission('employee.self.read', 'employee.team.read', 'employee.management.read', 'employee.hr.read', 'employee.read_all')
   @Get()
   list(@Query() query: QueryEmployeesDto, @CurrentUser() user: RequestUser) {

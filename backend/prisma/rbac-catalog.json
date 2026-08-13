@@ -11,7 +11,7 @@
     "session.self.read", "session.self.revoke", "session.manage",
     "organization.read", "settings.read", "settings.manage", "system.read", "system.configure",
     "department.read", "department.manage", "position.read", "position.manage", "announcement.read", "announcement.manage",
-    "employee.self.read", "employee.self.update_basic", "employee.self.read_documents", "employee.self.manage_documents", "employee.self.read_compensation",
+    "employee.self.read", "employee.self.update_basic", "employee.self.read_documents", "employee.self.manage_documents", "employee.self.read_compensation", "employee.department.read",
     "employee.team.read", "employee.management.read", "employee.hr.read", "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "employee.hr.manage_documents", "employee.read_all",
     "attendance.self.read", "attendance.self.create", "attendance.self.correct_request", "attendance.team.read", "attendance.team.review", "attendance.management.read", "attendance.management.review", "attendance.hr.read", "attendance.hr.manage", "attendance.audit.read", "attendance.read_all",
     "leave.self.read", "leave.self.create", "leave.self.cancel", "leave.team.read", "leave.team.approve_line_manager", "leave.management.read", "leave.management.approve_manager", "leave.hr.read", "leave.hr.manage", "leave.hr.approve", "leave.hr.override", "leave.executive.approve_cpo", "leave.executive.approve_coo", "leave.executive.self_approve_coo", "leave.audit.read", "leave.read_all", "leave.configure", "leave.reassign", "leave.override",
@@ -38,7 +38,7 @@
       "inherits": [],
       "permissions": [
         "session.self.read", "session.self.revoke", "organization.read", "announcement.read",
-        "employee.self.read", "employee.self.update_basic", "employee.self.read_documents", "employee.self.manage_documents", "employee.self.read_compensation",
+        "employee.self.read", "employee.self.update_basic", "employee.self.read_documents", "employee.self.manage_documents", "employee.self.read_compensation", "employee.department.read",
         "attendance.self.read", "attendance.self.create", "attendance.self.correct_request",
         "leave.self.read", "leave.self.create", "leave.self.cancel",
         "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download",

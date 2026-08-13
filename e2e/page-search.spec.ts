@@ -22,6 +22,8 @@ const employees = [
   { id: "employee-2", employeeCode: "MTC002", firstName: "Bob", lastName: "Jones", email: "bob@example.invalid", phone: "+974 5555 0002", hireDate: "2025-02-10", employmentStatus: "ACTIVE", department: { id: "dept-tech", code: "TECH", name: "Technology" }, position: { code: "ENG", title: "Engineer" } },
 ];
 
+const teamHierarchy = { scope: "ORGANIZATION", roots: [{ id: "employee-1", name: "Alice Smith", title: "Manager", children: [{ id: "employee-2", name: "Bob Jones", title: "Engineer", children: [] }] }] };
+
 type ApiOptions = {
   searchedEmployees?: Array<(typeof employees)[number]>;
   attendance?: Array<Record<string, unknown>>;
@@ -45,6 +47,7 @@ async function installApi(page: Page, options: ApiOptions = {}) {
     const data = url.pathname === "/api/v1/search/sections" ? { data: [] }
       : url.pathname === "/api/v1/approvals/inbox" ? (url.searchParams.get("search") ? options.searchedApprovals : options.approvals) ?? { leave: [], certificates: [], payroll: [] }
       : url.pathname === "/api/v1/payroll/preflight" ? { ready: true, runType: "REGULAR", policy: { prorationBasis: "FIXED_30", requireBankDetails: true, requireAttendance: false, varianceThreshold: "10" }, summary: { employees: 0, errors: 0, warnings: 0, grossPay: "0", deductions: "0", netPay: "0", adjustments: 0 }, issues: [] }
+      : url.pathname === "/api/v1/employees/team-hierarchy" ? teamHierarchy
       : url.pathname === "/api/v1/employees" ? (url.searchParams.get("search") ? options.searchedEmployees ?? employees.slice(0, 1) : employees)
       : url.pathname === "/api/v1/attendance" ? (url.searchParams.get("search") ? options.searchedAttendance ?? [] : options.attendance ?? [])
       : [];
@@ -114,7 +117,7 @@ test("state-backed lists keep their content while loading, preserve database ran
     .toEqual([expect.stringContaining("Alice Smith"), expect.stringContaining("Bob Jones")]);
 });
 
-test("Team keeps its full-scope metric while filtering people", async ({ page }) => {
+test("Team keeps its full-scope metric while filtering the minimal hierarchy", async ({ page }) => {
   const api = await installApi(page, {
     searchedEmployees: [employees[0]],
     approvals: { leave: [], certificates: [{ id: "certificate-1", requestType: "EMPLOYMENT_LETTER", status: "PENDING", version: 1, subject: { firstName: "Alice", lastName: "Smith" } }], payroll: [] },
@@ -125,15 +128,15 @@ test("Team keeps its full-scope metric while filtering people", async ({ page })
   await expect(page.getByText(/Certificate.*Employment Letter/)).toBeVisible();
   const searched = page.waitForRequest(request => {
     const url = new URL(request.url());
-    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "Alice";
+    return url.pathname === "/api/v1/approvals/inbox" && url.searchParams.get("search") === "Alice";
   });
   await page.getByRole("searchbox").fill("Alice");
   await searched;
-  const metric = page.locator(".metric").filter({ hasText: "PEOPLE IN SCOPE" });
+  const metric = page.locator(".metric").filter({ hasText: "PEOPLE IN VIEW" });
   await expect(metric.locator("strong")).toHaveText("2");
-  const table = page.getByRole("region", { name: "People in scope" });
-  await expect(table).toContainText("Alice Smith");
-  await expect(table).not.toContainText("Bob Jones");
+  const hierarchy = page.getByRole("list", { name: "Team reporting hierarchy" });
+  await expect(hierarchy).toContainText("Alice Smith");
+  await expect(hierarchy).not.toContainText("Bob Jones");
   await expect(page.getByText(/Certificate.*Employment Letter/)).toBeVisible();
   api.releaseApprovalSearch();
   await expect(page.getByText("No approvals waiting.")).toBeVisible();

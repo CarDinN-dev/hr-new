@@ -30,6 +30,7 @@ export class AuthorizationService {
             id: true,
             firstName: true,
             lastName: true,
+            departmentId: true,
             deletedAt: true,
             managedDepartments: { where: { deletedAt: null }, select: { id: true } },
           },
@@ -110,6 +111,7 @@ export class AuthorizationService {
       authorizationVersion: user.authorizationVersion,
       csrfToken: session.csrfToken,
       employeeId: user.employee?.id ?? null,
+      departmentId: user.employee?.departmentId ?? null,
       departmentScopeIds: user.employee?.managedDepartments.map((department) => department.id) ?? [],
       reauthenticatedAt: session.reauthenticatedAt,
       ipHash: session.ipHash,
@@ -192,7 +194,7 @@ export class AuthorizationService {
     if (scopes.self && employeeId === user.employeeId && this.permissionAllowedForScope(user, scopes.self, AccessScopeType.SELF, employeeId)) return;
     if (scopes.team && employee.lineManagerId === user.employeeId && this.permissionAllowedForScope(user, scopes.team, AccessScopeType.DIRECT_REPORTS, employeeId)) return;
     if (scopes.department && employee.departmentId && user.departmentScopeIds.includes(employee.departmentId)
-      && this.permissionAllowedForScope(user, scopes.department, AccessScopeType.MANAGEMENT_TREE, employeeId)) return;
+      && this.permissionAllowedForScope(user, scopes.department, AccessScopeType.DEPARTMENT, employee.departmentId)) return;
     if (scopes.tree && user.employeeId && await this.isInManagementTree(user.employeeId, employeeId)
       && this.permissionAllowedForScope(user, scopes.tree, AccessScopeType.MANAGEMENT_TREE, employeeId)) return;
     throw new NotFoundException('Record not found');

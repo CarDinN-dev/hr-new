@@ -8,6 +8,7 @@
     "build": "nest build",
     "test:security": "npm run build && node --test scripts/security-regression.js",
     "test:rbac": "npm run build && node --test scripts/rbac-regression.js",
+    "test:team-hierarchy": "npm run build && node --test scripts/team-hierarchy-regression.js",
     "test:integration": "npm run build && node --test scripts/integration-regression.js",
     "test:hybrid-search": "npm run build && node --test scripts/hybrid-search-regression.js",
     "test:financial": "npm run build && node scripts/financial-regression.js",

@@ -55,5 +55,10 @@ export function canAccessRoute(session: BackendSession, route: NavItem) {
   if (route === "System") return hasActiveSystemAdministratorRole(session);
   if (route === "Hierarchy") return hasActiveHierarchyRole(session);
   if (route === "Payroll") return hasActiveSuperAdminRole(session) || ["HR", "CPO", "COO"].some(role => session.roles.includes(role));
+  if (route === "Team") return hasActiveSuperAdminRole(session) || (["EMPLOYEE", "LINE_MANAGER", "MANAGER", "HR", "CPO", "COO"].some(role => session.roles.includes(role)) && hasPermission(session, "employee.department.read"));
+  if (route === "Employees") {
+    if (["HR", "CPO", "COO", "ADMIN", "SUPER_ADMIN"].some(role => session.roles.includes(role))) return hasAnyPermission(session, ...routePermissions.Employees);
+    if (["EMPLOYEE", "LINE_MANAGER", "MANAGER"].some(role => session.roles.includes(role))) return false;
+  }
   return hasAnyPermission(session, ...routePermissions[route]);
 }

@@ -3008,6 +3008,38 @@ summary {
   transform: translateY(-1px);
 }
 
+.team-hierarchy,
+.team-hierarchy ul {
+  margin: 0;
+  padding-left: 1rem;
+  list-style: none;
+}
+
+.team-hierarchy > li {
+  padding-left: 0;
+}
+
+.team-hierarchy li {
+  position: relative;
+  margin: 0.5rem 0;
+}
+
+.team-hierarchy-node {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: min(18rem, 100%);
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--panel-2);
+}
+
+.team-hierarchy-node span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .employee-picker {
   position: relative;
 }

@@ -549,6 +549,7 @@ function App() {
   }
 
   const visibleNavItems = navItems.filter(item => canAccessRoute(backendSession, item));
+  const dashboardRole = dashboardTemplate(backendSession);
   if (!nav) return <NotFoundPage />;
   if (!canAccessRoute(backendSession, nav)) return <AccessDenied onBack={() => setNav("Dashboard")} />;
   const canViewSalary = hasAnyPermission(backendSession, "employee.self.read_compensation", "payroll.read_compensation");
@@ -623,12 +624,14 @@ function App() {
         </header>
 
         <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
-          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
+          {nav === "Dashboard" && dashboardRole === "EMPLOYEE" && <PersonalDashboard state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={() => setNav("Leave")} />}
+          {nav === "Dashboard" && (dashboardRole === "LINE_MANAGER" || dashboardRole === "MANAGER") && <ManagementDashboard state={state} session={backendSession} notify={notify} onOpenLeave={() => setNav("Leave")} />}
+          {nav === "Dashboard" && !["EMPLOYEE", "LINE_MANAGER", "MANAGER"].includes(dashboardRole) && <Dashboard state={state} session={backendSession} setNav={setNav} template={dashboardRole} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={() => setNav("Leave")} />}
-          {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
+          {nav === "Team" && <TeamPage session={backendSession} notify={notify} />}
           {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
@@ -764,14 +767,37 @@ function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { s
   </div>;
 }
 
-function TeamPage({ state, session, notify }: { state: HrState; session: BackendSession; notify: (message: string) => void }) {
-  const { active: searchActive } = usePageSearch();
-  const matches = usePageSearchList<{ id: string }>("team-employees", "/employees");
-  const employees = rankedPageSearchItems(state.employees, matches.data, searchActive, employee => employee.id, match => match.id);
+type TeamHierarchyNode = { id: string; name: string; title: string; children: TeamHierarchyNode[] };
+type TeamHierarchy = { scope: "DEPARTMENT" | "ORGANIZATION"; roots: TeamHierarchyNode[] };
+
+function teamHierarchyCount(nodes: TeamHierarchyNode[]): number {
+  return nodes.reduce((total, node) => total + 1 + teamHierarchyCount(node.children), 0);
+}
+
+function filterTeamHierarchy(nodes: TeamHierarchyNode[], search: string): TeamHierarchyNode[] {
+  const query = search.trim().toLocaleLowerCase();
+  if (!query) return nodes;
+  return nodes.flatMap(node => {
+    const children = filterTeamHierarchy(node.children, search);
+    return node.name.toLocaleLowerCase().includes(query) || node.title.toLocaleLowerCase().includes(query) || children.length ? [{ ...node, children }] : [];
+  });
+}
+
+function TeamHierarchyBranch({ node }: { node: TeamHierarchyNode }) {
+  return <li>
+    <div className="team-hierarchy-node"><strong>{node.name}</strong><span>{node.title}</span></div>
+    {node.children.length > 0 && <ul>{node.children.map(child => <TeamHierarchyBranch key={child.id} node={child} />)}</ul>}
+  </li>;
+}
+
+function TeamPage({ session, notify }: { session: BackendSession; notify: (message: string) => void }) {
+  const { search } = usePageSearch();
+  const hierarchy = useQuery({ queryKey: ["team-hierarchy", session.sessionId, session.authorizationVersion], queryFn: () => apiRequest<TeamHierarchy>("/employees/team-hierarchy") });
+  const roots = filterTeamHierarchy(hierarchy.data?.roots ?? [], search);
   return <div className="dashboard-grid">
-    <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
-    <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
-      <DataTable label="People in scope" empty="No team members match this search." columns={["Employee", "Department", "Status", "Joined"]} rows={employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
+    <Metric label="PEOPLE IN VIEW" value={teamHierarchyCount(hierarchy.data?.roots ?? [])} hint={hierarchy.data?.scope === "ORGANIZATION" ? "Organization hierarchy" : "Your department hierarchy"} />
+    <section className="panel span-2"><div className="panel-head"><div><h3>{hierarchy.data?.scope === "ORGANIZATION" ? "Organization hierarchy" : "Your department hierarchy"}</h3><span>Names and job titles only.</span></div></div>
+      {hierarchy.isPending ? <p className="muted">Loading team hierarchy...</p> : hierarchy.isError ? <p className="sync-alert">{errorMessage(hierarchy.error)}</p> : roots.length ? <ul className="team-hierarchy" aria-label="Team reporting hierarchy">{roots.map(root => <TeamHierarchyBranch key={root.id} node={root} />)}</ul> : <div className="empty">No team members match this search.</div>}
     </section>
     <ApprovalInboxPanel session={session} notify={notify} />
   </div>;
@@ -783,7 +809,24 @@ type DashboardPayrollRun = { id: string; year: number; month: number; status: st
 type DashboardPayslip = { id: string; netPay: string };
 type DashboardBirthday = { id: string; firstName: string; lastName: string; department: string | null; profilePhoto: string | null; date: string; daysUntil: number };
 
-function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
+type DashboardRole = "EMPLOYEE" | "LINE_MANAGER" | "MANAGER" | "HR" | "CPO" | "COO" | "ADMIN";
+
+function dashboardTemplate(session: BackendSession): DashboardRole {
+  for (const role of ["COO", "CPO", "HR", "MANAGER", "LINE_MANAGER", "EMPLOYEE"] as const) if (session.roles.includes(role)) return role;
+  return "ADMIN";
+}
+
+function PersonalDashboard({ state, session, notify, refreshWorkspace, onOpenLeave }: { state: HrState; session: BackendSession; notify: (message: string) => void; refreshWorkspace: () => Promise<void>; onOpenLeave: () => void }) {
+  const employee = state.employees.find(item => item.id === session.employeeId);
+  return <><section className="hero-panel"><div className="hero-copy"><p className="section-label">Employee dashboard</p><h2>My workday</h2><p>{employee?.fields.Designation || "Your personal details, leave, and entitled self-service actions."}</p></div></section><MyHrPage state={state} session={session} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={onOpenLeave} /></>;
+}
+
+function ManagementDashboard({ state, session, notify, onOpenLeave }: { state: HrState; session: BackendSession; notify: (message: string) => void; onOpenLeave: () => void }) {
+  const role = dashboardTemplate(session) === "MANAGER" ? "Manager" : "Line Manager";
+  return <><section className="hero-panel"><div className="hero-copy"><p className="section-label">{role} dashboard</p><h2>Team oversight</h2><p>Review your authorized people, approvals, and personal leave.</p></div></section><div className="dashboard-grid"><Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint={role === "Manager" ? "Management tree" : "Direct reports"} /><MyLeaveStatusPanel session={session} onOpenLeave={onOpenLeave} /><ApprovalInboxPanel session={session} notify={notify} /></div></>;
+}
+
+function Dashboard({ state, session, setNav, template, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; template: DashboardRole; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
   const { search, active: searchActive } = usePageSearch();
   const sectionSearch = useSectionSearch("dashboard");
   const employeeSearch = usePageSearchList<{ id: string }>("dashboard-employees", "/employees");
@@ -834,10 +877,10 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
     <>
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="section-label">Dashboard</p>
+          <p className="section-label">{template === "HR" ? "HR operations dashboard" : template === "ADMIN" ? "Dashboard" : `${template} executive dashboard`}</p>
           <span className="hero-logo-crop"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
-          <h2>Today at MedTech</h2>
-          <p>Review attendance, leave requests, payroll and employee records.</p>
+          <h2>{template === "HR" ? "HR operations at MedTech" : template === "ADMIN" ? "Today at MedTech" : "Executive overview"}</h2>
+          <p>{template === "HR" ? "Review workforce operations, payroll, recruitment, and approvals." : template === "ADMIN" ? "Review attendance, leave requests, payroll and employee records." : "Review the organization, executive approvals, payroll, and recruitment."}</p>
         </div>
         <div className="dashboard-snapshot">
           <span>Today's snapshot</span>
