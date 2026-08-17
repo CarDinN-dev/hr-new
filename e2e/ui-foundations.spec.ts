@@ -243,8 +243,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".logo-crop.wordmark").boundingBox(),
     page.locator(".hero-logo-crop").boundingBox(),
   ]);
-  expect(sidebarLogo).toMatchObject({ width: 88, height: 70 });
-  expect(heroLogo).toMatchObject({ width: 144, height: 115 });
+  expect(sidebarLogo).toMatchObject({ width: 112, height: 90 });
+  expect(heroLogo).toMatchObject({ width: 176, height: 141 });
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.getByText("MedTech HR ERP", { exact: true })).toBeVisible();
@@ -276,8 +276,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".hero-logo-crop").boundingBox(),
     page.locator(".topbar-brand-mark").boundingBox(),
   ]);
-  expect(mobileHeroLogo).toMatchObject({ width: 144, height: 115 });
-  expect(mobileHeaderLogo).toMatchObject({ width: 52, height: 42 });
+  expect(mobileHeroLogo).toMatchObject({ width: 176, height: 141 });
+  expect(mobileHeaderLogo).toMatchObject({ width: 64, height: 52 });
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const darkDashboardColors = await page.evaluate(() => {
     const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
@@ -330,7 +330,7 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await expect(desktopToggle).toHaveCSS("width", "40px");
   await desktopToggle.click();
   await expect(sidebar).toBeHidden();
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 52, height: 42 });
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 64, height: 52 });
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
@@ -380,7 +380,7 @@ test("login uses the full uncropped brand mark", async ({ page }) => {
   await page.goto("/");
   const logo = page.locator(".login-logo");
   await expect(logo).toBeVisible();
-  expect(await logo.boundingBox()).toMatchObject({ width: 160, height: 128 });
+  expect(await logo.boundingBox()).toMatchObject({ width: 200, height: 160 });
   await expect(logo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo.locator("img")).toHaveCSS("transform", "none");
 });

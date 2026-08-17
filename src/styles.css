@@ -5073,9 +5073,9 @@ summary:focus-visible,
 }
 
 .app .brand-block {
-  min-height: 112px;
+  min-height: 132px;
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) auto;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 14px 6px;
@@ -5083,8 +5083,8 @@ summary:focus-visible,
 }
 
 .app .logo-crop.wordmark {
-  width: 88px;
-  height: 70px;
+  width: 112px;
+  height: 90px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -5251,8 +5251,8 @@ summary:focus-visible,
 
 .topbar-brand-mark {
   display: none;
-  width: 52px;
-  height: 42px;
+  width: 64px;
+  height: 52px;
   flex: 0 0 auto;
   padding: 0;
   border: 0;
@@ -5997,8 +5997,8 @@ summary:focus-visible,
 }
 
 .login-logo {
-  width: 160px;
-  height: 128px;
+  width: 200px;
+  height: 160px;
 }
 
 .login-card h1 {
@@ -6108,8 +6108,8 @@ summary:focus-visible,
 
 .dashboard-layout .hero-logo-crop {
   grid-row: 2 / span 2;
-  width: 144px;
-  height: 115px;
+  width: 176px;
+  height: 141px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -6975,8 +6975,8 @@ summary:focus-visible,
   }
 
   .dashboard-layout .hero-logo-crop {
-    width: 144px;
-    height: 115px;
+    width: 176px;
+    height: 141px;
     margin-bottom: 2px;
   }
 
