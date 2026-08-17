@@ -1,0 +1,57 @@
+name: Current HR ERP Dashboard Screenshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/current-dashboard-screenshot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and start current UI
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          nohup npm run dev -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/frontend.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173 >/dev/null && exit 0; sleep 2; done
+          cat /tmp/frontend.log
+          exit 1
+      - name: Capture current dashboard
+        run: |
+          mkdir -p current-ui
+          cat > capture-current.mjs <<'EOF'
+          import { chromium } from '@playwright/test';
+          const base='http://127.0.0.1:4173';
+          const sessionKey='medtech-hr-erp-backend-session-v2';
+          const permissions=['session.self.read','session.manage','employee.self.read','employee.team.read','employee.management.read','employee.hr.read','employee.read_all','employee.hr.create','employee.hr.update','employee.hr.terminate','employee.hr.read_sensitive','employee.self.read_compensation','department.read','department.manage','position.manage','organization.read','settings.read','settings.manage','attendance.self.read','attendance.team.read','attendance.management.read','attendance.hr.read','attendance.audit.read','attendance.read_all','attendance.hr.manage','leave.self.read','leave.team.read','leave.management.read','leave.hr.read','leave.audit.read','leave.read_all','leave.configure','trip.self.read','trip.team.read','trip.management.read','trip.hr.read','trip.read_all','expense.self.read','expense.team.read','expense.management.read','expense.hr.read','expense.read_all','loan.self.read','loan.hr.read','loan.audit.read','loan.read_all','loan.hr.manage','payroll.self.read_payslip','payroll.payslip.read_all','payroll.read','payroll.audit.read','payroll.generate','payroll.approve','payroll.read_compensation','payroll.configure','payroll.export','service_request.self.read','service_request.hr.approve','service_request.hr.reject','recruitment.read','eos.read','document.self.read','document.hr.read','document.read_all','report.read','report.export','audit.read','audit.export','import.run','notification.self.read','user.read','user.manage','user.deactivate','user.delete_soft','role.read','role.manage','role.assign','permission.read','permission.assign','workflow.policy.read','workflow.policy.manage','workflow.delegation.read','workflow.delegation.manage'];
+          const session={id:'screenshot-admin',email:'screenshots@medtech.qa',displayName:'Screenshot Administrator',roles:['SUPER_ADMIN','HR','CPO','COO'],permissions,departmentScopeIds:[],sessionId:'screenshot-session',authProvider:'local',authorizationVersion:1,employeeId:null,csrfToken:'screenshot-csrf-token'};
+          const envelope={csrfToken:session.csrfToken,user:session};
+          const browser=await chromium.launch({headless:true});
+          const context=await browser.newContext({viewport:{width:1440,height:1000},deviceScaleFactor:1,colorScheme:'light',reducedMotion:'reduce'});
+          await context.addInitScript(({key,value})=>sessionStorage.setItem(key,JSON.stringify(value)),{key:sessionKey,value:session});
+          const page=await context.newPage();
+          await page.route('**/api/v1/**',async route=>{const u=new URL(route.request().url());const p=u.pathname.replace(/^\/api\/v1/,'');let data=[];if(p==='/auth/me'||p==='/auth/login') data=envelope;else if(p==='/organization-settings') data={name:'MedTech',legalName:'MedTech Corporation Trading W.L.L.',tagline:'People operations, made precise.',address:'Doha, Qatar',phone:'+974 4000 0000',email:'hr@medtech.qa',website:'www.med-tech.com',currency:'QAR'};else if(p==='/approvals/inbox') data={leave:[],certificates:[],payroll:[]};else if(p.includes('/summary')||p.includes('/stats')) data={};await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,data,meta:{total:0,page:1,limit:100,totalPages:1}})});});
+          await page.goto(base+'/',{waitUntil:'domcontentloaded'});
+          await page.waitForTimeout(1500);
+          await page.screenshot({path:'current-ui/current-dashboard.png',fullPage:true});
+          await browser.close();
+          EOF
+          node capture-current.mjs
+      - name: Upload current dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-hr-erp-dashboard
+          path: current-ui/current-dashboard.png
+          retention-days: 7
