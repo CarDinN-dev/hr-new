@@ -925,8 +925,8 @@
     "semantic_hash": ""
   },
   "e2e/system-page.spec.ts": {
-    "mtime": 1786954428.0394661,
-    "ast_hash": "7ffaa6c23a469f054eb08e8cc26c465d",
+    "mtime": 1786957459.2509942,
+    "ast_hash": "d94b0dcef87b0dd6be30c8d8d7225e20",
     "semantic_hash": ""
   },
   "ops/backup.sh": {
@@ -1110,8 +1110,8 @@
     "semantic_hash": "5fccf9f367b51fefd0727409f545cf3e"
   },
   "src/main.tsx": {
-    "mtime": 1786952808.34594,
-    "ast_hash": "8b59b09ecf6aa2f6ea3fc4c5054bf887",
+    "mtime": 1786956460.3975008,
+    "ast_hash": "1963e7f3011ab5e89d36e51cb7804636",
     "semantic_hash": ""
   },
   "src/normalizedSync.ts": {
@@ -1445,8 +1445,8 @@
     "semantic_hash": ""
   },
   "e2e/ui-foundations.spec.ts": {
-    "mtime": 1786954478.304552,
-    "ast_hash": "eb970fd544bd23e89f0e12bfbc518a8e",
+    "mtime": 1786957534.0394757,
+    "ast_hash": "d3a1dda987741d6241c5fe1edfc02f27",
     "semantic_hash": ""
   },
   "src/dialog.tsx": {

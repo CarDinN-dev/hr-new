@@ -132,6 +132,7 @@ import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
+const compactNavigationQuery = "(max-width: 1080px)";
 type Theme = "light" | "dark";
 const employeeFieldOptions: Record<string, readonly string[]> = {
   "Employee Category": ["Staff", "Management", "Worker", "Intern"],
@@ -304,12 +305,16 @@ function App() {
   const [toast, setToast] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [compactNavigation, setCompactNavigation] = useState(() => window.matchMedia(compactNavigationQuery).matches);
   const [modal, setModal] = useState<React.ReactNode>(null);
   const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(() => loadBackendSession() ?? undefined);
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
   const [syncError, setSyncError] = useState("");
   const [syncAlertDismissed, setSyncAlertDismissed] = useState(false);
   const backendReady = useRef(false);
+  const mobileMenuRef = useRef<HTMLButtonElement>(null);
+  const sidebarCloseRef = useRef<HTMLButtonElement>(null);
+  const sidebarWasOpen = useRef(false);
   const hydratedWorkspaceSession = useRef("");
   const backendSessionRef = useRef<BackendSession | null | undefined>(backendSession);
   const stateRef = useRef(state);
@@ -410,6 +415,38 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(themeKey, theme);
   }, [theme]);
+
+  useEffect(() => {
+    const media = window.matchMedia(compactNavigationQuery);
+    const updateNavigationMode = (event: MediaQueryListEvent | MediaQueryList) => {
+      setCompactNavigation(event.matches);
+      if (!event.matches) setSidebarOpen(false);
+    };
+    updateNavigationMode(media);
+    media.addEventListener("change", updateNavigationMode);
+    return () => media.removeEventListener("change", updateNavigationMode);
+  }, []);
+
+  useEffect(() => {
+    const wasOpen = sidebarWasOpen.current;
+    sidebarWasOpen.current = sidebarOpen;
+    if (!compactNavigation || !sidebarOpen) {
+      if (wasOpen && compactNavigation) mobileMenuRef.current?.focus();
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    sidebarCloseRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [compactNavigation, sidebarOpen]);
 
   useEffect(() => {
     document.title = backendSession === null
@@ -557,14 +594,21 @@ function App() {
 
   return (
     <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-      <aside id="main-navigation" className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Main navigation" hidden={sidebarCollapsed}>
+      <aside
+        id="main-navigation"
+        className={`sidebar ${sidebarOpen ? "open" : ""}`}
+        aria-label="Main navigation"
+        aria-hidden={compactNavigation && !sidebarOpen ? true : undefined}
+        inert={compactNavigation && !sidebarOpen ? true : undefined}
+        hidden={!compactNavigation && sidebarCollapsed}
+      >
         <div className="brand-block">
           <span className="logo-crop wordmark"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
           <div>
             <strong>MedTech HR ERP</strong>
             <span>People and payroll</span>
           </div>
-          <button className="sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
+          <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
           {visibleNavItems.map(item => {
@@ -594,7 +638,7 @@ function App() {
           <button type="button" aria-label="Dismiss save error" title="Dismiss" onClick={() => setSyncAlertDismissed(true)}><X size={16} /></button>
         </div>}
         <header className="topbar">
-          <button className="mobile-menu" aria-label="Open menu" onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
+          <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
           <div className="topbar-heading">
             <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/brand-mark.svg" alt="" /></span>
             <button
@@ -664,7 +708,7 @@ function App() {
         </React.Suspense></div>
       </main>
 
-      {sidebarOpen && <button aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
+      {compactNavigation && sidebarOpen && <button type="button" aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
       {modal && <Dialog onClose={closeModal}>{modal}</Dialog>}
       {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
     </div></PageSearchProvider></AuthorizationProvider>

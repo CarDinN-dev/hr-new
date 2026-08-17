@@ -476,6 +476,7 @@ test("Sidebar surfaces follow the selected theme", async ({ page }) => {
   await page.getByLabel("Switch to dark mode").click();
   await expect.poll(() => color(".sidebar", "backgroundImage")).toContain("linear-gradient");
   await expect.poll(() => color(".account-trigger", "color")).toBe("rgb(255, 255, 255)");
+  await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgba(0, 0, 0, 0)");
 });
 
 test("Super Admin System controls submit mutations and protect invalid actions", async ({ page }) => {

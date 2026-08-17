@@ -20,11 +20,11 @@ const session = {
   ]
 };
 
-async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = []) {
-  await page.addInitScript(({ value, permissions }) => {
+async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = [], initialTheme: "light" | "dark" = "light") {
+  await page.addInitScript(({ value, permissions, theme }) => {
     sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, permissions: [...value.permissions, ...permissions] }));
-    localStorage.setItem("medtech-hr-theme", "light");
-  }, { value: session, permissions: extraPermissions });
+    localStorage.setItem("medtech-hr-theme", theme);
+  }, { value: session, permissions: extraPermissions, theme: initialTheme });
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
     const data = pathname === "/api/v1/employees" ? employees
@@ -59,8 +59,47 @@ test("every application route renders with a specific document title", async ({ 
   await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(0);
 });
 
+for (const theme of ["light", "dark"] as const) {
+  test(`all application routes use the canonical ${theme} surfaces`, async ({ page }) => {
+    test.setTimeout(60_000);
+    await installUiApi(page, [], [], theme);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const expected = theme === "light"
+      ? { canvas: "#f3f6fa", surface: "rgb(255, 255, 255)", body: "rgb(243, 246, 250)" }
+      : { canvas: "#08111f", surface: "rgb(15, 27, 45)", body: "rgb(8, 17, 31)" };
+
+    for (const [name, path] of Object.entries(navPaths)) {
+      await test.step(name, async () => {
+        await page.goto(path);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        await expect(page.locator(".content")).toBeVisible();
+        await expect(page.getByRole("search")).toHaveCount(1);
+        const colors = await page.evaluate(() => {
+          const root = getComputedStyle(document.documentElement);
+          const firstSurface = document.querySelector<HTMLElement>(".content :is(.panel, .metric, .report-card, .employee-card, .payroll-tile):not(.hero-panel)");
+          return {
+            canvas: root.getPropertyValue("--canvas").trim().toLowerCase(),
+            body: getComputedStyle(document.body).backgroundColor,
+            search: getComputedStyle(document.querySelector<HTMLElement>('[role="search"]')!).backgroundColor,
+            surface: firstSurface ? getComputedStyle(firstSurface).backgroundColor : null,
+          };
+        });
+        expect(colors.canvas).toBe(expected.canvas);
+        expect(colors.body).toBe(expected.body);
+        expect(colors.search).toBe(expected.surface);
+        if (colors.surface) expect(colors.surface).toBe(expected.surface);
+        await expect(page.locator(".mobile-menu")).toBeHidden();
+        await expect(page.locator(".sidebar-close")).toBeHidden();
+      });
+    }
+  });
+}
+
 for (const viewport of [
   { width: 1440, height: 900 },
+  { width: 1200, height: 900 },
+  { width: 1081, height: 900 },
+  { width: 1080, height: 900 },
   { width: 1024, height: 768 },
   { width: 768, height: 900 },
   { width: 390, height: 844 },
@@ -97,6 +136,20 @@ for (const viewport of [
         expect(content).not.toBeNull();
         expect(content!.x).toBeGreaterThanOrEqual(0);
         expect(content!.x + content!.width).toBeLessThanOrEqual(viewport.width + 1);
+
+        const search = page.getByRole("search");
+        await expect(search).toHaveCount(1);
+        const searchBox = await search.boundingBox();
+        expect(searchBox).not.toBeNull();
+        expect(searchBox!.height).toBe(44);
+        expect(searchBox!.x).toBeGreaterThanOrEqual(0);
+        expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+        if (name !== "Employees") {
+          const actions = await page.locator(".topbar-actions").boundingBox();
+          expect(actions).not.toBeNull();
+          if (viewport.width <= 1080) expect(actions!.y + actions!.height).toBeLessThanOrEqual(searchBox!.y);
+          else expect(Math.abs(actions!.y + actions!.height / 2 - searchBox!.y - searchBox!.height / 2)).toBeLessThanOrEqual(4);
+        }
 
         const firstSurface = page.locator(".panel, .metric, .report-card, .employee-card, .payroll-tile").first();
         if (await firstSurface.count()) {
@@ -190,8 +243,10 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".logo-crop.wordmark").boundingBox(),
     page.locator(".hero-logo-crop").boundingBox(),
   ]);
-  expect(sidebarLogo).toMatchObject({ width: 60, height: 48 });
-  expect(heroLogo).toMatchObject({ width: 80, height: 64 });
+  expect(sidebarLogo).toMatchObject({ width: 72, height: 58 });
+  expect(heroLogo).toMatchObject({ width: 112, height: 90 });
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.getByText("MedTech HR ERP", { exact: true })).toBeVisible();
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
@@ -219,9 +274,66 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".hero-logo-crop").boundingBox(),
     page.locator(".topbar-brand-mark").boundingBox(),
   ]);
-  expect(mobileHeroLogo).toMatchObject({ width: 64, height: 52 });
-  expect(mobileHeaderLogo).toMatchObject({ width: 32, height: 26 });
+  expect(mobileHeroLogo).toMatchObject({ width: 112, height: 90 });
+  expect(mobileHeaderLogo).toMatchObject({ width: 44, height: 35 });
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.getByRole("heading", { name: "Today at MedTech" })).toHaveCSS("color", "rgb(255, 255, 255)");
+});
+
+test("navigation drawer cannot block header controls across the 1080px breakpoint", async ({ page }) => {
+  await installUiApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const sidebar = page.locator("#main-navigation");
+  const desktopToggle = page.getByRole("button", { name: "Collapse sidebar" });
+  await expect(sidebar).toBeVisible();
+  await expect(desktopToggle).toHaveCSS("width", "40px");
+  await desktopToggle.click();
+  await expect(sidebar).toBeHidden();
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 44, height: 35 });
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar).toBeVisible();
+
+  await page.setViewportSize({ width: 1080, height: 900 });
+  const menu = page.getByRole("button", { name: "Open menu" });
+  await expect(menu).toBeVisible();
+  await expect(menu).toHaveCSS("width", "44px");
+  await expect(sidebar).toBeHidden();
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar).toBeVisible();
+  await expect(page.locator(".scrim")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close navigation" })).toBeFocused();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".scrim")).toHaveCount(0);
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(menu).toBeFocused();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+
+  await menu.click();
+  await page.locator(".scrim").click();
+  await expect(sidebar).toBeHidden();
+  await menu.click();
+  await expect(page.locator(".scrim")).toBeVisible();
+  await page.setViewportSize({ width: 1081, height: 900 });
+  await expect(page.locator(".scrim")).toHaveCount(0);
+  await expect(sidebar).toBeVisible();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+
+  const themeButton = page.getByRole("button", { name: "Switch to dark mode" });
+  await expect(themeButton).toHaveCSS("width", "40px");
+  expect(await themeButton.evaluate(button => {
+    const rect = button.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return hit === button || button.contains(hit);
+  })).toBe(true);
+  await themeButton.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator(".mobile-menu")).toBeHidden();
+  await expect(page.locator(".sidebar-close")).toBeHidden();
 });
 
 test("login uses the full uncropped brand mark", async ({ page }) => {
@@ -229,7 +341,8 @@ test("login uses the full uncropped brand mark", async ({ page }) => {
   await page.goto("/");
   const logo = page.locator(".login-logo");
   await expect(logo).toBeVisible();
-  expect(await logo.boundingBox()).toMatchObject({ width: 112, height: 90 });
+  expect(await logo.boundingBox()).toMatchObject({ width: 144, height: 115 });
+  await expect(logo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo.locator("img")).toHaveCSS("transform", "none");
 });
 
@@ -242,7 +355,7 @@ test("unknown URLs show an explicit not-found page", async ({ page }) => {
 test("notification actions stay right-aligned and the popover remains visible beside responsive search", async ({ page }) => {
   await installUiApi(page, [], ["notification.self.read", "notification.self.manage"]);
 
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 900, height: 768 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1081, height: 900 }, { width: 1080, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
     await test.step(`${viewport.width}x${viewport.height}`, async () => {
       await page.setViewportSize(viewport);
       await page.goto("/");
@@ -258,7 +371,7 @@ test("notification actions stay right-aligned and the popover remains visible be
       expect(actions).not.toBeNull();
       expect(topbar!.x + topbar!.width - actions!.x - actions!.width).toBeLessThanOrEqual(48);
       expect(actions!.x + actions!.width).toBeLessThanOrEqual(topbar!.x + topbar!.width);
-      if (viewport.width <= 900) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
+      if (viewport.width <= 1080) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
       else expect(Math.abs(actions!.y + actions!.height / 2 - search!.y - search!.height / 2)).toBeLessThanOrEqual(4);
 
       await trigger.click();
