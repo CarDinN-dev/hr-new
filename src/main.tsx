@@ -15,7 +15,6 @@ import {
   BarChart3,
   BriefcaseBusiness,
   CalendarCheck,
-  ChevronDown,
   Download,
   Eye,
   FileText,
@@ -621,14 +620,6 @@ function App() {
             );
           })}
         </nav>
-        <AccountMenu
-          state={state}
-          backendSession={backendSession}
-          onLogout={() => void logout()}
-          setNav={setNav}
-          theme={theme}
-          toggleTheme={toggleTheme}
-        />
       </aside>
 
       <main className="workspace">
@@ -663,6 +654,14 @@ function App() {
             <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
               {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
             </button>
+            <AccountMenu
+              state={state}
+              backendSession={backendSession}
+              onLogout={() => void logout()}
+              setNav={setNav}
+              theme={theme}
+              toggleTheme={toggleTheme}
+            />
           </div>
         </header>
 
@@ -751,7 +750,7 @@ function AccountMenu({
     setNav(destination);
   }
 
-  return <div className="account-menu">
+  return <div className="account-menu account-menu--topbar">
     {open && <div id="account-popover" ref={popoverRef} className="account-popover" role="menu" aria-label="Account options" onKeyDown={event => {
       if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); return; }
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -760,18 +759,20 @@ function AccountMenu({
       const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
       items[(current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
     }}>
+      <div className="account-popover-identity" role="presentation">
+        <span className="account-avatar">{photo ? <img src={photo} alt="" /> : accountInitials(backendSession.email)}</span>
+        <span className="account-label">
+          <strong>{backendSession.displayName || backendSession.email}</strong>
+          <small>{backendSession.roles.join(", ")}</small>
+        </span>
+      </div>
       <button role="menuitem" onClick={() => { toggleTheme(); setOpen(false); }}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Light mode" : "Dark mode"}</button>
       {canAccessRoute(backendSession, "My HR") && <button role="menuitem" onClick={() => go("My HR")}><UsersRound size={16} /> My HR</button>}
       {canAccessRoute(backendSession, "Settings") && <button role="menuitem" onClick={() => go("Settings")}><Settings size={16} /> Settings</button>}
       <button role="menuitem" onClick={onLogout}><LogOut size={16} /> Log out</button>
     </div>}
-    <button ref={triggerRef} className="account-trigger" aria-haspopup="menu" aria-controls="account-popover" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
+    <button ref={triggerRef} className="account-trigger" aria-label="Open account menu" title={backendSession.displayName || backendSession.email} aria-haspopup="menu" aria-controls="account-popover" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
       <span className="account-avatar">{photo ? <img src={photo} alt="" /> : accountInitials(backendSession.email)}</span>
-      <span className="account-label">
-        <strong>{backendSession.displayName || backendSession.email}</strong>
-        <small>{backendSession.roles.join(", ")}</small>
-      </span>
-      <ChevronDown className="account-chevron" size={16} aria-hidden="true" />
     </button>
   </div>;
 }

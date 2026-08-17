@@ -466,7 +466,7 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect(page.getByRole("group", { name: "Company role hierarchy" })).toHaveCount(0);
 });
 
-test("Sidebar surfaces follow the selected theme", async ({ page }) => {
+test("Sidebar surfaces and topbar account menu follow the selected theme", async ({ page }) => {
   await installSystemApi(page);
   await page.goto("/");
   await page.getByLabel("Email").fill("super.admin@example.invalid");
@@ -475,13 +475,23 @@ test("Sidebar surfaces follow the selected theme", async ({ page }) => {
 
   const color = (selector: string, property: "backgroundColor" | "color" | "backgroundImage") => page.locator(selector).evaluate((element, propertyName) => getComputedStyle(element)[propertyName], property);
   await expect.poll(() => color(".sidebar", "backgroundImage")).toContain("linear-gradient");
-  await expect.poll(() => color(".account-trigger", "color")).toBe("rgb(255, 255, 255)");
   await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgba(0, 0, 0, 0)");
+  await expect(page.locator(".sidebar .account-menu")).toHaveCount(0);
+  const accountTrigger = page.getByRole("button", { name: "Open account menu" });
+  await expect(accountTrigger).toBeVisible();
+  await accountTrigger.click();
+  await expect(page.getByRole("menu", { name: "Account options" })).toBeVisible();
+  await expect(page.getByText("Super Admin", { exact: true })).toBeVisible();
 
   await page.getByLabel("Switch to dark mode").click();
   await expect.poll(() => color(".sidebar", "backgroundImage")).toContain("linear-gradient");
-  await expect.poll(() => color(".account-trigger", "color")).toBe("rgb(255, 255, 255)");
+  await expect(page.getByRole("menu", { name: "Account options" })).toBeHidden();
+  await accountTrigger.click();
+  await expect(page.getByRole("menu", { name: "Account options" })).toBeVisible();
   await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgba(0, 0, 0, 0)");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(accountTrigger).toHaveCSS("width", "44px");
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
 });
 
 test("Super Admin System controls submit mutations and protect invalid actions", async ({ page }) => {

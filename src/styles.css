@@ -5172,14 +5172,14 @@ summary:focus-visible,
   color: currentColor;
 }
 
-.app .account-menu {
+.app .sidebar .account-menu {
   padding: 12px 10px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.app .account-trigger,
-.app .account-trigger:hover,
-:root[data-theme="dark"] .app .account-trigger {
+.app .sidebar .account-trigger,
+.app .sidebar .account-trigger:hover,
+:root[data-theme="dark"] .app .sidebar .account-trigger {
   min-height: 56px;
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.07);
@@ -5187,7 +5187,6 @@ summary:focus-visible,
   box-shadow: none;
 }
 
-.app .sidebar .account-trigger,
 .app .sidebar .account-label strong {
   color: var(--on-brand);
 }
@@ -5304,6 +5303,72 @@ summary:focus-visible,
   gap: 8px;
   grid-column: 3;
   grid-row: 1;
+}
+
+.app .account-menu--topbar {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.app .account-menu--topbar .account-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.app .account-menu--topbar .account-trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand-red) 42%, var(--border));
+  background: var(--surface-subtle);
+  transform: none;
+}
+
+.app .account-menu--topbar .account-avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 0.68rem;
+}
+
+.app .account-menu--topbar .account-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  width: min(292px, calc(100vw - 32px));
+  padding: 8px;
+}
+
+.app .account-popover-identity {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app .account-popover-identity .account-avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 0.78rem;
+}
+
+.app .account-popover-identity .account-label strong,
+.app .account-popover-identity .account-label small {
+  color: var(--text);
+}
+
+.app .account-popover-identity .account-label small {
+  margin-top: 2px;
+  color: var(--text-muted);
 }
 
 .page-search {
@@ -6906,6 +6971,13 @@ summary:focus-visible,
   }
 
   .app :is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close) {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .app .account-menu--topbar .account-trigger {
     width: 44px;
     min-width: 44px;
     height: 44px;
