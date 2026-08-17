@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-08T09:06:53.325503+00:00",
+  "generated_at": "2026-08-13T12:22:37.096719+00:00",
   "nodes": {
     "backend_src_modules_leave_leave_service_leaveservice": {
-      "code_fingerprint": "bcf1926e18fe38f538294835896f254da33226269ea5a1cafeb1b760e30b7551",
+      "code_fingerprint": "523c79f35f29b02045c66a897beee233e5443ed693474311fc33ff54461bf4fe",
       "label": "LeaveService",
       "last": "2026-07-29T21:37:03.011892+00:00",
       "provenance": [
@@ -12,7 +12,7 @@
           "q": "Explain to me the current leave application system for user roles."
         }
       ],
-      "score": 0.803311544,
+      "score": 0.713425195,
       "source_file": "backend/src/modules/leave/leave.service.ts",
       "status": "tentative",
       "uses": 1
@@ -28,13 +28,13 @@
           "q": "Explain to me the current leave application system for user roles."
         }
       ],
-      "score": 0.803311544,
+      "score": 0.713425195,
       "source_file": "backend/src/modules/leave/leave-workflow.controller.ts",
       "status": "tentative",
       "uses": 1
     },
     "backend_src_modules_system_dto_system_dto_querysystemusersdto": {
-      "code_fingerprint": "d1a5cdf2135beee950196d2d61ec6f554bbd6887f6bfb9dda8ea019accc9becf",
+      "code_fingerprint": "e4eea159dc6f221f62be1eb1753736fc8d1bd20169395ab2a0474aa96609c356",
       "label": "QuerySystemUsersDto",
       "last": "2026-07-28T09:33:10.717013+00:00",
       "provenance": [
@@ -44,13 +44,13 @@
           "q": "/plan Implement a UI branching feature in system page. This UI branching feature is for showcasing the hierarchy between different roles while also acting as a search filter in place to find users."
         }
       ],
-      "score": 0.775899604,
+      "score": 0.689080507,
       "source_file": "backend/src/modules/system/dto/system.dto.ts",
       "status": "tentative",
       "uses": 1
     },
     "backend_src_modules_system_system_service_systemservice_listusers": {
-      "code_fingerprint": "b3f927f97d5a6f99b8066c84a1dbbdd5d21ab990f38075b8c9b3f432aba29fae",
+      "code_fingerprint": "ec15540ae32eb975ee0eaac1cea49d6b0a1e190f0ef873921888d884115de654",
       "label": ".listUsers()",
       "last": "2026-07-28T09:33:10.717013+00:00",
       "provenance": [
@@ -60,13 +60,45 @@
           "q": "/plan Implement a UI branching feature in system page. This UI branching feature is for showcasing the hierarchy between different roles while also acting as a search filter in place to find users."
         }
       ],
-      "score": 0.775899604,
+      "score": 0.689080507,
       "source_file": "backend/src/modules/system/system.service.ts",
       "status": "tentative",
       "uses": 1
     },
+    "src_domain_candidatepipeline": {
+      "code_fingerprint": "a0ef871ecfe88d545cf66365f8e2a094a06d5dffa449f9f41510013a3ded00f3",
+      "label": "candidatePipeline()",
+      "last": "2026-08-08T09:35:47.376875+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T09:35:47.376875+00:00",
+          "outcome": "useful",
+          "q": "Show and enforce filled recruitment roles"
+        }
+      ],
+      "score": 0.888517169,
+      "source_file": "src/domain.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_domain_hirecandidateasemployee": {
+      "code_fingerprint": "a0ef871ecfe88d545cf66365f8e2a094a06d5dffa449f9f41510013a3ded00f3",
+      "label": "hireCandidateAsEmployee()",
+      "last": "2026-08-08T09:35:47.376875+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T09:35:47.376875+00:00",
+          "outcome": "useful",
+          "q": "Show and enforce filled recruitment roles"
+        }
+      ],
+      "score": 0.888517169,
+      "source_file": "src/domain.ts",
+      "status": "tentative",
+      "uses": 1
+    },
     "src_features_hierarchy_page": {
-      "code_fingerprint": "45d7884a34246a6cccf7900d6dd5bc91a79c73051c05c1254f088459552a223e",
+      "code_fingerprint": "92398330497a58104a6344adcff40b71dabb9588501dbd2c2d2ef3dbaa2f25c9",
       "label": "hierarchy-page.tsx",
       "last": "2026-08-07T18:46:54.992758+00:00",
       "provenance": [
@@ -81,13 +113,13 @@
           "q": "Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
         }
       ],
-      "score": 1.783877361,
+      "score": 1.584270839,
       "source_file": "src/features/hierarchy-page.tsx",
       "status": "preferred",
       "uses": 2
     },
     "src_features_hierarchy_page_buildorganizationhierarchy": {
-      "code_fingerprint": "45d7884a34246a6cccf7900d6dd5bc91a79c73051c05c1254f088459552a223e",
+      "code_fingerprint": "92398330497a58104a6344adcff40b71dabb9588501dbd2c2d2ef3dbaa2f25c9",
       "label": "buildOrganizationHierarchy()",
       "last": "2026-07-29T14:10:50.980408+00:00",
       "provenance": [
@@ -97,13 +129,13 @@
           "q": "Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
         }
       ],
-      "score": 0.797580918,
+      "score": 0.708335796,
       "source_file": "src/features/hierarchy-page.tsx",
       "status": "tentative",
       "uses": 1
     },
     "src_features_hierarchy_page_departmentrolehierarchy": {
-      "code_fingerprint": "45d7884a34246a6cccf7900d6dd5bc91a79c73051c05c1254f088459552a223e",
+      "code_fingerprint": "92398330497a58104a6344adcff40b71dabb9588501dbd2c2d2ef3dbaa2f25c9",
       "label": "DepartmentRoleHierarchy()",
       "last": "2026-08-07T18:46:54.992758+00:00",
       "provenance": [
@@ -113,13 +145,13 @@
           "q": "In the role hierarchy in the hierarchy page, branch managers, line managers, and employees at the same level from their shared parent."
         }
       ],
-      "score": 0.986296443,
+      "score": 0.875935043,
       "source_file": "src/features/hierarchy-page.tsx",
       "status": "tentative",
       "uses": 1
     },
     "src_features_hierarchy_page_organizationchart": {
-      "code_fingerprint": "45d7884a34246a6cccf7900d6dd5bc91a79c73051c05c1254f088459552a223e",
+      "code_fingerprint": "92398330497a58104a6344adcff40b71dabb9588501dbd2c2d2ef3dbaa2f25c9",
       "label": "OrganizationChart()",
       "last": "2026-07-29T14:10:50.980408+00:00",
       "provenance": [
@@ -129,8 +161,24 @@
           "q": "Bro the workflow is not correct in the hierarchy fix it bro. And make the hierarchy thing more better visually give it a better UI and UX"
         }
       ],
-      "score": 0.797580918,
+      "score": 0.708335796,
       "source_file": "src/features/hierarchy-page.tsx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_main_recruitment": {
+      "code_fingerprint": "c77e5412330d56d1ecc1f0652d83c0c8bf9cc7f39d5e5b23301340fd7a605eb3",
+      "label": "Recruitment()",
+      "last": "2026-08-08T09:35:47.376875+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T09:35:47.376875+00:00",
+          "outcome": "useful",
+          "q": "Show and enforce filled recruitment roles"
+        }
+      ],
+      "score": 0.888517169,
+      "source_file": "src/main.tsx",
       "status": "tentative",
       "uses": 1
     },
@@ -145,7 +193,7 @@
           "q": "In the role hierarchy in the hierarchy page, branch managers, line managers, and employees at the same level from their shared parent."
         }
       ],
-      "score": 0.986296443,
+      "score": 0.875935043,
       "source_file": "src/roleHierarchy.ts",
       "status": "tentative",
       "uses": 1

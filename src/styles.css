@@ -1,19 +1,22 @@
 :root {
   color-scheme: light;
-  --navy: #111d2c;
-  --navy-2: #203149;
-  --red: #ed1e36;
-  --red-dark: #c91029;
+  --brand-red: #ed1e36;
+  --brand-plum: #832951;
+  --brand-navy: #23326a;
+  --navy: var(--brand-navy);
+  --navy-2: #18244f;
+  --red: var(--brand-red);
+  --red-dark: #c6162e;
   --teal: #0f766e;
   --violet: #7467d9;
-  --bg: #f5f8fc;
+  --bg: #f6f7fa;
   --panel: #ffffff;
-  --panel-2: #f9fbfe;
-  --line: #dde7f1;
-  --line-strong: #bdcad9;
-  --ink: #172033;
-  --muted: #64748b;
-  --soft: #eef4f8;
+  --panel-2: #f9fafc;
+  --line: #e1e5ec;
+  --line-strong: #c8d0dc;
+  --ink: #17213a;
+  --muted: #657086;
+  --soft: #eef1f6;
   --good: #13734b;
   --good-bg: #e5f7ed;
   --warn: #a66010;
@@ -22,11 +25,12 @@
   --info-bg: #e7f3ff;
   --bad: #b42338;
   --bad-bg: #ffe7eb;
-  --shadow: 0 16px 42px rgba(17, 29, 44, 0.08);
-  --shadow-hover: 0 22px 58px rgba(17, 29, 44, 0.13);
+  --shadow: 0 8px 24px rgba(23, 33, 58, 0.07);
+  --shadow-hover: 0 16px 38px rgba(23, 33, 58, 0.11);
   --glass: rgba(255, 255, 255, 0.78);
   --ring: rgba(237, 30, 54, 0.18);
-  --radius: 10px;
+  --radius: 12px;
+  --motion-standard: 180ms cubic-bezier(.2, .8, .2, 1);
   font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 

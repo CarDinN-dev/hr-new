@@ -449,7 +449,7 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
   await page.getByLabel("Switch to dark mode").click();
   await expect(target.getByText("Taylor Target")).toBeVisible();
-  await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(21, 34, 56)");
+  await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(16, 23, 34)");
   await page.getByLabel("Switch to light mode").click();
 
   const download = page.waitForEvent("download");
@@ -469,8 +469,8 @@ test("Sidebar surfaces follow the selected theme", async ({ page }) => {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
   const color = (selector: string, property: "backgroundColor" | "color" | "backgroundImage") => page.locator(selector).evaluate((element, propertyName) => getComputedStyle(element)[propertyName], property);
-  await expect.poll(() => color(".sidebar", "backgroundColor")).toBe("rgb(255, 255, 255)");
-  await expect.poll(() => color(".account-trigger", "backgroundColor")).toBe("rgb(248, 250, 252)");
+  await expect.poll(() => color(".sidebar", "backgroundImage")).toContain("linear-gradient");
+  await expect.poll(() => color(".account-trigger", "color")).toBe("rgb(255, 255, 255)");
   await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgba(0, 0, 0, 0)");
 
   await page.getByLabel("Switch to dark mode").click();

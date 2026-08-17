@@ -39,6 +39,7 @@ apply
 approval
 approvals
 approve
+approver
 architecture
 args
 array
@@ -78,6 +79,7 @@ balance
 balances
 band
 bank
+bar
 base
 baseline
 basic
@@ -109,17 +111,20 @@ branches
 branching
 brand
 branded
+brief
 bro
 browser
 bucket
 buffer
 build
 bulk
+bullets
 bundle
 business
 calculate
 calculation
 callback
+callout
 can
 cancel
 cancellation
@@ -215,6 +220,7 @@ controller
 controls
 cookie
 core
+corporate
 correct
 correction
 corrupt
@@ -255,6 +261,7 @@ default
 defaults
 define
 defined
+delays
 delegate
 delegates
 delegation
@@ -262,6 +269,8 @@ delegations
 delete
 deleted
 delimited
+deliver
+delivery
 delta
 denial
 denied
@@ -303,6 +312,7 @@ dry
 dto
 dump
 duration
+dynamic
 each
 edge
 editor
@@ -315,10 +325,12 @@ employee
 employees
 employment
 empty
+enabled
 enables
 encrypt
 end
 endpoint
+enforce
 enforcement
 ensure
 entities
@@ -372,6 +384,7 @@ field
 fields
 file
 files
+filled
 filter
 filters
 final
@@ -421,6 +434,7 @@ growth
 guard
 guid
 guide
+guides
 half
 handle
 handling
@@ -450,6 +464,7 @@ hooks
 html
 http
 hub
+hybrid
 hydrate
 icon
 idempotency
@@ -513,6 +528,7 @@ jsx
 jwt
 key
 keys
+kind
 label
 labelize
 labels
@@ -529,6 +545,7 @@ library
 license
 limit
 line
+lines
 linking
 lint
 list
@@ -548,6 +565,7 @@ logs
 looking
 lop
 lucide
+mail
 main
 maintainability
 maintenance
@@ -560,11 +578,12 @@ managers
 mandatory
 manifest
 manual
+many
 map
 mark
 marker
 master
-matches
+match
 maternity
 matrix
 may
@@ -640,12 +659,14 @@ open
 openid
 operations
 opt
+option
 options
 oracle
 organization
 organizational
 out
 outcome
+output
 outputs
 over
 overcommits
@@ -692,9 +713,11 @@ persona
 personas
 phone
 photo
+picker
 pid
 pipeline
 place
+placeholders
 plain
 plaintext
 plan
@@ -750,7 +773,10 @@ quick
 races
 random
 range
+rank
+ranked
 ratings
+raw
 rbac
 react
 reactivates
@@ -790,6 +816,7 @@ reliability
 remaining
 remediation
 remove
+render
 repay
 repayment
 replace
@@ -822,6 +849,8 @@ result
 results
 retarget
 retention
+rethrow
+retry
 return
 review
 reviews
@@ -864,6 +893,9 @@ scores
 script
 scripts
 search
+searchable
+searched
+seconds
 section
 sections
 security
@@ -871,6 +903,7 @@ seed
 seeded
 self
 semantic
+send
 sensitive
 seq
 serializable
@@ -889,6 +922,7 @@ shape
 shared
 sheet
 shell
+show
 showcasing
 sif
 sign
@@ -930,6 +964,7 @@ studio
 subagent
 subagents
 subcommands
+subject
 submit
 success
 sum
@@ -1013,6 +1048,7 @@ users
 util
 utils
 uuid
+vacancies
 validate
 validator
 value

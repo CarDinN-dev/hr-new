@@ -831,7 +831,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
   const showSection = (id: string, hasMatches: boolean) => !searchActive || sectionSearch.query.isPending || hasMatches || sectionSearch.ids.has(id);
 
   return (
-    <>
+    <div className="dashboard-layout">
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="section-label">Dashboard</p>
@@ -923,7 +923,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
           />
         </div>}
       </section>
-    </>
+    </div>
   );
 }
 
@@ -1044,10 +1044,15 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
                     {canViewSalary && <span><b>Total pay</b>{formatMoney(salary.total, state.settings.company.currency)}</span>}
                   </div>
                   <div className="row-actions">
-                    <button onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canUpdate ? () => edit(employee) : undefined} savePdf={savePdf} canExport={canExport} canViewSalary={canViewSalary} />)}>Open profile</button>
-                    {canUpdate && <button onClick={() => edit(employee)}>Edit</button>}
-                    {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>PDF</button>}
-                    {canTerminate && <button className="danger-outline" onClick={() => void remove(employee)}><Trash2 size={15} /> Delete</button>}
+                    <button className="primary" onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canUpdate ? () => edit(employee) : undefined} savePdf={savePdf} canExport={canExport} canViewSalary={canViewSalary} />)}>Open profile</button>
+                    {(canUpdate || canExport || canTerminate) && <details className="card-actions-menu">
+                      <summary>More actions</summary>
+                      <div className="card-actions-menu__items">
+                        {canUpdate && <button onClick={() => edit(employee)}>Edit employee</button>}
+                        {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>Download PDF</button>}
+                        {canTerminate && <button className="danger-outline" onClick={() => void remove(employee)}><Trash2 size={15} /> Delete employee</button>}
+                      </div>
+                    </details>}
                   </div>
                 </article>
               );

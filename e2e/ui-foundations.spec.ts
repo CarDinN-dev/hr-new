@@ -21,7 +21,10 @@ const session = {
 };
 
 async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = []) {
-  await page.addInitScript(({ value, permissions }) => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, permissions: [...value.permissions, ...permissions] })), { value: session, permissions: extraPermissions });
+  await page.addInitScript(({ value, permissions }) => {
+    sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, permissions: [...value.permissions, ...permissions] }));
+    localStorage.setItem("medtech-hr-theme", "light");
+  }, { value: session, permissions: extraPermissions });
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
     const data = pathname === "/api/v1/employees" ? employees : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }] : [];
@@ -85,6 +88,49 @@ test("mobile dashboard, wide tables and shared dialog retain usable geometry", a
   await expect(table.locator("th").first()).toHaveCSS("position", "sticky");
 });
 
+test("clinical tokens, dashboard bento, themes and reduced motion stay responsive", async ({ page }) => {
+  await installUiApi(page);
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+    await test.step(`${viewport.width}x${viewport.height}`, async () => {
+      await page.setViewportSize(viewport);
+      await page.goto("/");
+
+      const tokens = await page.evaluate(() => {
+        const styles = getComputedStyle(document.documentElement);
+        return ["--brand-red", "--brand-plum", "--brand-navy"].map(token => styles.getPropertyValue(token).trim().toLowerCase());
+      });
+      expect(tokens).toEqual(["#ed1e36", "#832951", "#23326a"]);
+      await expect(page.locator(".dashboard-layout")).toHaveCSS("display", "grid");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+      const [hero, metrics] = await Promise.all([
+        page.locator(".hero-panel").boundingBox(),
+        page.locator(".metric-grid").boundingBox()
+      ]);
+      expect(hero).not.toBeNull();
+      expect(metrics).not.toBeNull();
+      if (viewport.width > 1200) expect(Math.abs(hero!.y - metrics!.y)).toBeLessThanOrEqual(2);
+      else expect(metrics!.y).toBeGreaterThan(hero!.y + hero!.height - 2);
+    });
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const logo = page.locator(".brand-block img");
+  expect(await logo.evaluate(image => ({ width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ width: 300, transform: "none" });
+  const lightPanel = await page.locator(".panel").first().evaluate(element => getComputedStyle(element).backgroundColor);
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const darkPanel = await page.locator(".panel").first().evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(darkPanel).not.toBe(lightPanel);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const transitionSeconds = await page.getByRole("button", { name: "Add employee" }).evaluate(element => parseFloat(getComputedStyle(element).transitionDuration));
+  expect(transitionSeconds).toBeLessThanOrEqual(.001);
+});
+
 test("unknown URLs show an explicit not-found page", async ({ page }) => {
   await page.goto("/not-a-module");
   await expect(page).toHaveTitle("Page not found | MedTech HR ERP");
@@ -139,7 +185,13 @@ test("employee add, edit, and profile dialogs use the wide layout without leavin
     position: { title: "Application Manager", code: "APP-MGR" }
   }], ["employee.hr.update", "payroll.read_compensation", "report.export"]);
   await page.goto("/employees");
-  await expect(page.locator("article").filter({ hasText: "Dima Osama Ahmad Alhawi" })).toContainText("+974 5000 1234");
+  const employeeCard = page.locator("article").filter({ hasText: "Dima Osama Ahmad Alhawi" });
+  await expect(employeeCard).toContainText("+974 5000 1234");
+  await expect(employeeCard.getByRole("button", { name: "Open profile" })).toBeVisible();
+  await employeeCard.locator("summary").click();
+  await expect(employeeCard.getByRole("button", { name: "Edit employee" })).toBeVisible();
+  await expect(employeeCard.getByRole("button", { name: "Download PDF" })).toBeVisible();
+  await employeeCard.locator("summary").click();
 
   await page.getByRole("button", { name: "Add employee" }).click();
   const addPanel = page.locator(".modal:has(> .employee-editor)");
