@@ -145,8 +145,8 @@
     "semantic_hash": "ff918029aa9daea82c003ff2b6d46a92"
   },
   "backend/scripts/financial-regression.js": {
-    "mtime": 1786176169.9360304,
-    "ast_hash": "57dc201befe4af5f99a9944667587ac0",
+    "mtime": 1786960919.5333169,
+    "ast_hash": "62bd8b0cfb6c387a315ce5e6a3dab165",
     "semantic_hash": ""
   },
   "backend/scripts/import-console-state.js": {
@@ -155,8 +155,8 @@
     "semantic_hash": "d8318c917f691ddbced093a41ad02b62"
   },
   "backend/scripts/integration-regression.js": {
-    "mtime": 1786535893.2707753,
-    "ast_hash": "5ea0eb464a4a04a4acaf66c836b3ab32",
+    "mtime": 1786960311.045044,
+    "ast_hash": "0db6442ab2c61870634eb194334c7b63",
     "semantic_hash": ""
   },
   "backend/scripts/microsoft-provisioning-regression.js": {
@@ -805,8 +805,8 @@
     "semantic_hash": "a511a7aa86442a6532758af511d79660"
   },
   "backend/src/modules/payroll/payroll.service.ts": {
-    "mtime": 1786281907.1470845,
-    "ast_hash": "e077205709fd23ec10560c653adfee7a",
+    "mtime": 1786960919.5308096,
+    "ast_hash": "5c33c48cf01d28cb940be2458471ab51",
     "semantic_hash": ""
   },
   "backend/src/modules/payroll/salary-records.controller.ts": {
@@ -925,8 +925,8 @@
     "semantic_hash": ""
   },
   "e2e/system-page.spec.ts": {
-    "mtime": 1786957459.2509942,
-    "ast_hash": "d94b0dcef87b0dd6be30c8d8d7225e20",
+    "mtime": 1786960919.5290656,
+    "ast_hash": "f58ac90c1629874187126cc58ab21a96",
     "semantic_hash": ""
   },
   "ops/backup.sh": {
@@ -1055,13 +1055,13 @@
     "semantic_hash": ""
   },
   "src/features/audit-page.tsx": {
-    "mtime": 1786281261.3228807,
-    "ast_hash": "311f6e0469dca9e0cd8be8953a29e827",
+    "mtime": 1786959969.054002,
+    "ast_hash": "86b505dc0bf9aa1ad9b425f04135afca",
     "semantic_hash": ""
   },
   "src/features/leave-workflow.tsx": {
-    "mtime": 1786950762.0562382,
-    "ast_hash": "8fbc35e527821c9c9865247bad392d86",
+    "mtime": 1786959969.054002,
+    "ast_hash": "835c9d7e8984d78789dfd1edf3cf0319",
     "semantic_hash": ""
   },
   "src/features/notifications-panel.tsx": {
@@ -1070,8 +1070,8 @@
     "semantic_hash": ""
   },
   "src/features/payroll-workflow.tsx": {
-    "mtime": 1786950927.6284232,
-    "ast_hash": "17177eed624de70d607287776a0598ae",
+    "mtime": 1786960050.037675,
+    "ast_hash": "dde65582a7597f544b0e3639cd4f0a01",
     "semantic_hash": ""
   },
   "src/features/service-requests.tsx": {
@@ -1080,8 +1080,8 @@
     "semantic_hash": ""
   },
   "src/features/system-access.tsx": {
-    "mtime": 1786312677.9380548,
-    "ast_hash": "114f3dbbdfdc326be10f21add6a17344",
+    "mtime": 1786959934.7547066,
+    "ast_hash": "55cbe05cac5092168b1630d372ea172b",
     "semantic_hash": ""
   },
   "src/features/system-workflow-settings.tsx": {
@@ -1110,8 +1110,8 @@
     "semantic_hash": "5fccf9f367b51fefd0727409f545cf3e"
   },
   "src/main.tsx": {
-    "mtime": 1786956460.3975008,
-    "ast_hash": "1963e7f3011ab5e89d36e51cb7804636",
+    "mtime": 1786960179.2627914,
+    "ast_hash": "a456afa75a694726638ccf5c92f02c87",
     "semantic_hash": ""
   },
   "src/normalizedSync.ts": {
@@ -1130,13 +1130,13 @@
     "semantic_hash": "7af8af7223bcc6ca55bf325edbd16b8b"
   },
   "src/pdf.test.ts": {
-    "mtime": 1786950455.768503,
-    "ast_hash": "359cabc15ca4fcd045f95e5bb5b0b4ad",
+    "mtime": 1786960573.9519317,
+    "ast_hash": "4d259bb4d91d09ee64b180def432f1ab",
     "semantic_hash": ""
   },
   "src/pdf.ts": {
-    "mtime": 1786950455.768503,
-    "ast_hash": "080b08c80b3c1720c476576b89fff075",
+    "mtime": 1786960958.2218223,
+    "ast_hash": "7d02b1338cdf811ef080363334433902",
     "semantic_hash": ""
   },
   "src/photo.test.ts": {
@@ -1445,8 +1445,8 @@
     "semantic_hash": ""
   },
   "e2e/ui-foundations.spec.ts": {
-    "mtime": 1786957534.0394757,
-    "ast_hash": "d3a1dda987741d6241c5fe1edfc02f27",
+    "mtime": 1786960919.5308096,
+    "ast_hash": "18b64d66540264563c3191732356a1bc",
     "semantic_hash": ""
   },
   "src/dialog.tsx": {
@@ -1565,8 +1565,8 @@
     "semantic_hash": ""
   },
   "src/features/documents-library.tsx": {
-    "mtime": 1786452251.4145958,
-    "ast_hash": "1e15d10dd6c968bc9e8d8a70d868715b",
+    "mtime": 1786959997.9144518,
+    "ast_hash": "e631816f1d7b8ebdb1bb2c0f497a4814",
     "semantic_hash": ""
   },
   "graphify-out/memory/query_20260807_184654_in_the_role_hierarchy_in_the_hierarchy_page__branc.md": {

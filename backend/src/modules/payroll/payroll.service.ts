@@ -49,6 +49,7 @@ const payrollRunInclude = {
 const salaryRecordInclude = { employee: { select: employeePayrollSelect } } satisfies Prisma.SalaryRecordInclude;
 type PayrollView = Prisma.PayrollGetPayload<{ include: typeof payrollInclude }>;
 type PayrollRunView = Prisma.PayrollRunGetPayload<{ include: typeof payrollRunInclude }>;
+type PayslipSettings = { name: string; legalName: string; address: string | null; phone: string | null; email: string | null; website: string | null; currency: string } | null;
 type PayrollIssue = { severity: 'ERROR' | 'WARNING'; code: string; message: string; employeeId?: string; employeeCode?: string };
 type CalculationSalaryRecord = {
   id: string; version: number; effectiveFrom: Date; effectiveTo: Date | null;
@@ -510,7 +511,10 @@ export class PayrollService {
     }
     const [run, settings] = await Promise.all([
       this.prisma.payrollRun.findUnique({ where: { id }, include: payrollRunInclude }),
-      this.prisma.organizationSettings.findUnique({ where: { id: 'default' }, select: { phone: true } }),
+      this.prisma.organizationSettings.findUnique({
+        where: { id: 'default' },
+        select: { name: true, legalName: true, address: true, phone: true, email: true, website: true, currency: true },
+      }),
     ]);
     if (!run) throw new NotFoundException('Payroll run not found');
     this.assertVersion(run.version, dto.expectedVersion);
@@ -769,25 +773,73 @@ export class PayrollService {
     }) };
   }
 
-  private payslipPdf(payroll: Prisma.PayrollGetPayload<{ include: { employee: { select: typeof employeePayrollSelect }; lineItems: true } }>, run: { year: number; month: number; revision: number }, settings: { phone: string | null } | null) {
+  private payslipPdf(payroll: Prisma.PayrollGetPayload<{ include: { employee: { select: typeof employeePayrollSelect }; lineItems: true } }>, run: { year: number; month: number; revision: number }, settings: PayslipSettings) {
     const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     const safe = (value: string) => stripControlCharacters(value).slice(0, 200);
+    const red = [237, 30, 54] as const; const plum = [131, 41, 81] as const; const navy = [35, 50, 106] as const;
+    const muted = [82, 96, 122] as const; const line = [214, 220, 231] as const; const soft = [247, 248, 251] as const;
+    const legalName = safe(settings?.legalName?.trim() || 'MedTech Corporation Trading W.L.L.');
+    const companyName = safe(settings?.name?.trim() || 'MedTech');
+    const currency = safe(settings?.currency?.trim() || 'QAR');
     const phone = settings?.phone?.trim() || defaultPdfPhone;
-    doc.addImage(payrollLogo(), 'PNG', 40, 20, 50, 40, undefined, 'FAST');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('Payslip', 110, 50);
-    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-    doc.text(`Employee: ${safe(`${payroll.employee.firstName} ${payroll.employee.lastName}`)}`, 40, 82);
-    doc.text(`Employee code: ${safe(payroll.employee.employeeCode)}`, 40, 100);
-    doc.text(`Period: ${run.year}-${String(run.month).padStart(2, '0')}  Revision: ${run.revision}`, 40, 118);
-    doc.text(`Department: ${safe(payroll.employee.department?.name ?? 'N/A')}`, 40, 136);
-    let y = 175; doc.setFont('helvetica', 'bold'); doc.text('Description', 40, y); doc.text('Amount', 480, y, { align: 'right' }); doc.line(40, y + 5, 500, y + 5); doc.setFont('helvetica', 'normal');
-    for (const line of payroll.lineItems) { y += 22; doc.text(safe(line.description), 40, y); doc.text(line.amount.toFixed(2), 480, y, { align: 'right' }); }
-    y += 35; doc.line(310, y - 15, 500, y - 15); doc.setFont('helvetica', 'bold');
-    doc.text('Gross pay', 330, y); doc.text(payroll.grossPay.toFixed(2), 480, y, { align: 'right' });
-    y += 20; doc.text('Total deductions', 330, y); doc.text(payroll.deductions.plus(payroll.taxAmount).toFixed(2), 480, y, { align: 'right' });
-    y += 20; doc.text('Net pay', 330, y); doc.text(payroll.netPay.toFixed(2), 480, y, { align: 'right' });
-    doc.setDrawColor(217, 39, 62); doc.line(40, 785, 555, 785);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text('System-generated payroll record', 40, 805); doc.text(safe(phone), 555, 805, { align: 'right' });
+    const period = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(run.year, run.month - 1, 1)));
+    const joined = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(payroll.employee.hireDate);
+    const moneyText = (value: Prisma.Decimal) => `${currency} ${value.toFixed(2)}`;
+    const header = () => {
+      doc.setFillColor(...soft); doc.rect(0, 0, 595.28, 96, 'F');
+      doc.addImage(payrollLogo(), 'PNG', 40, 18, 64, 51, undefined, 'FAST');
+      doc.setTextColor(...navy); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(legalName.toUpperCase(), 118, 36);
+      doc.setTextColor(...plum); doc.setFontSize(8); doc.text(companyName.toUpperCase(), 118, 53);
+      doc.setTextColor(...muted); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.text(safe(settings?.address?.trim() || 'Qatar'), 118, 68);
+      doc.setTextColor(...navy); doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.text('PAYSLIP', 555, 35, { align: 'right' });
+      doc.setTextColor(...muted); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(period, 555, 54, { align: 'right' }); doc.text(`Revision ${run.revision}`, 555, 69, { align: 'right' });
+      doc.setDrawColor(...red); doc.setLineWidth(2); doc.line(40, 92, 555, 92); doc.setLineWidth(0.5);
+    };
+    const tableHeader = (top: number) => {
+      doc.setFillColor(...navy); doc.roundedRect(40, top, 515, 24, 3, 3, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      doc.text('TYPE', 50, top + 16); doc.text('DESCRIPTION', 132, top + 16); doc.text('AMOUNT', 545, top + 16, { align: 'right' });
+      return top + 24;
+    };
+    const category = (item: typeof payroll.lineItems[number]) => {
+      if (item.kind === PayrollLineKind.FIXED_DEDUCTION || item.kind === PayrollLineKind.TAX || item.kind === PayrollLineKind.LOSS_OF_PAY || item.kind === PayrollLineKind.LOAN_REPAYMENT) return 'Deduction';
+      if (item.kind === PayrollLineKind.MANUAL_ADJUSTMENT && item.description.toLowerCase().startsWith('deduction')) return 'Deduction';
+      return 'Earning';
+    };
+    doc.setFillColor(255, 255, 255); doc.setDrawColor(...line); doc.roundedRect(40, 112, 515, 96, 5, 5, 'FD');
+    const detail = (label: string, value: string, x: number, y: number, fontSize = 9) => {
+      doc.setTextColor(...muted); doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); doc.text(label.toUpperCase(), x, y);
+      doc.setTextColor(...navy); doc.setFontSize(fontSize); doc.text((doc.splitTextToSize(safe(value || 'N/A'), 148) as string[]).slice(0, 2), x, y + 14, { lineHeightFactor: 1.05 });
+    };
+    detail('Employee', `${payroll.employee.firstName} ${payroll.employee.lastName}`, 54, 132);
+    detail('Employee code', payroll.employee.employeeCode, 225, 132);
+    detail('Department', payroll.employee.department?.name ?? 'N/A', 390, 132);
+    detail('Designation', payroll.employee.position?.title ?? 'N/A', 54, 174);
+    detail('Email', payroll.employee.email, 225, 174, 8);
+    detail('Employment', `${payroll.employee.employmentStatus.replaceAll('_', ' ')} · Joined ${joined}`, 390, 174);
+    let y = tableHeader(226);
+    payroll.lineItems.forEach((item, index) => {
+      const description = doc.splitTextToSize(safe(item.description), 320) as string[];
+      const height = Math.max(26, description.length * 10 + 10);
+      if (y + height > 684) { doc.addPage(); y = tableHeader(116); }
+      if (index % 2 === 1) { doc.setFillColor(...soft); doc.rect(40, y, 515, height, 'F'); }
+      doc.setDrawColor(...line); doc.line(40, y + height, 555, y + height);
+      const itemCategory = category(item); if (itemCategory === 'Deduction') doc.setTextColor(...red); else doc.setTextColor(...plum);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.text(itemCategory.toUpperCase(), 50, y + 17);
+      doc.setTextColor(...navy); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.text(description, 132, y + 16, { lineHeightFactor: 1.15 });
+      doc.setFont('helvetica', 'bold'); doc.text(moneyText(item.amount), 545, y + 17, { align: 'right' });
+      y += height;
+    });
+    if (y > 550) { doc.addPage(); y = 122; } else y += 24;
+    const deductions = payroll.deductions.plus(payroll.taxAmount);
+    doc.setDrawColor(...line); doc.setFillColor(...soft); doc.roundedRect(305, y, 250, 68, 5, 5, 'FD');
+    doc.setTextColor(...muted); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text('GROSS PAY', 321, y + 21); doc.text('TOTAL DEDUCTIONS', 321, y + 45);
+    doc.setTextColor(...navy); doc.setFontSize(10); doc.text(moneyText(payroll.grossPay), 539, y + 21, { align: 'right' }); doc.text(moneyText(deductions), 539, y + 45, { align: 'right' });
+    y += 80; doc.setFillColor(...navy); doc.roundedRect(305, y, 250, 54, 5, 5, 'F'); doc.setTextColor(255, 255, 255); doc.setFontSize(9); doc.text('NET PAY', 321, y + 31); doc.setFontSize(17); doc.text(moneyText(payroll.netPay), 539, y + 33, { align: 'right' });
+    const pages = doc.getNumberOfPages();
+    const contact = [settings?.address, settings?.email, phone, settings?.website].map(value => safe(value?.trim() || '')).filter(Boolean).join('  |  ');
+    for (let page = 1; page <= pages; page += 1) { doc.setPage(page); header(); doc.setDrawColor(...red); doc.line(40, 786, 555, 786); doc.setTextColor(...muted); doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.text(contact, 40, 804, { maxWidth: 315 }); doc.text(`Confidential payroll record  |  Page ${page} of ${pages}`, 555, 804, { align: 'right' }); }
+    doc.setProperties({ title: `Payslip - ${payroll.employee.employeeCode} - ${period}`, subject: 'Confidential payroll record', author: legalName, creator: 'MedTech HR ERP' });
     return Buffer.from(doc.output('arraybuffer'));
   }
 

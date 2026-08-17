@@ -25,6 +25,9 @@ describe("professional PDF output", () => {
     expect(Buffer.from(profile.dataUrl.split(",")[1], "base64").toString("latin1")).toContain("/Subtype /Image");
     expect(payslip.filename).toContain("2026-07");
     expect(payslip.sizeBytes).toBeGreaterThan(5_000);
+    const payslipSource = Buffer.from(payslip.dataUrl.split(",")[1], "base64").toString("latin1");
+    expect(payslipSource).toContain("/Subtype /Image");
+    expect(payslipSource).toContain(state.settings.company.legalName);
   });
 
   it("rejects executable or mislabeled saved document data", () => {

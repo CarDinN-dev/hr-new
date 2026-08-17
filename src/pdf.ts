@@ -14,11 +14,12 @@ type PayslipPeriod = Pick<PayrollSlip, "year" | "month">;
 const page = { width: 210, height: 297, margin: 14 };
 const defaultPdfPhone = "+974 4443 4140";
 const brand = {
-  ink: [24, 31, 43] as [number, number, number],
-  red: [217, 39, 62] as [number, number, number],
-  muted: [95, 107, 122] as [number, number, number],
-  line: [218, 223, 230] as [number, number, number],
-  soft: [247, 248, 250] as [number, number, number]
+  ink: [35, 50, 106] as [number, number, number],
+  red: [237, 30, 54] as [number, number, number],
+  plum: [131, 41, 81] as [number, number, number],
+  muted: [82, 96, 122] as [number, number, number],
+  line: [214, 220, 231] as [number, number, number],
+  soft: [247, 248, 251] as [number, number, number]
 };
 
 export function saveEmployeeProfilePdf(employee: EmployeeRecord, settings: HrSettings) {
@@ -54,6 +55,7 @@ export function savePayslipPdf(slip: PayrollSlip, employee: EmployeeRecord, sett
   nextY = table(doc, sectionTitle(doc, nextY + 5, "Employee details"), [], [
     labelCells(["Employee", employeeName(employee), "Employee Code", employee.fields["Employee Code"]]),
     labelCells(["Designation", employee.fields.Designation, "Department", employee.fields.Department]),
+    labelCells(["Work Email", employee.fields["E-Mail ID (Work)"], "Status", employee.status]),
     labelCells(["Joining Date", formatDate(employee.fields["Joining Date"]), "Bank", employee.fields["Bank Code"]])
   ]);
 
@@ -455,7 +457,7 @@ function finish(doc: jsPDF, settings: HrSettings, filename: string): GeneratedPd
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.setTextColor(...brand.muted);
-    doc.text(`${settings.company.address}  |  ${settings.company.email}  |  ${pdfPhone(settings)}`, page.margin, 287);
+    doc.text(companyContact(settings), page.margin, 287);
     doc.text(`Confidential  |  Page ${current} of ${pages}`, 196, 287, { align: "right" });
   }
   const dataUrl = doc.output("datauristring");
@@ -466,15 +468,17 @@ function finish(doc: jsPDF, settings: HrSettings, filename: string): GeneratedPd
 function drawPageChrome(doc: jsPDF, settings: HrSettings, current: number, pages: number) {
   doc.setFillColor(250, 250, 251);
   doc.rect(0, 0, page.width, 25, "F");
-  doc.addImage(brandMark, "PNG", page.margin, 3, 20, 16);
+  doc.addImage(brandMark, "PNG", page.margin, 2.5, 24, 19.2, undefined, "FAST");
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.4);
   doc.setTextColor(...brand.muted);
-  doc.text(settings.company.legalName.toUpperCase(), page.margin + 24, 12.5);
+  doc.text(settings.company.legalName.toUpperCase(), page.margin + 29, 12.5);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(6.7);
+  doc.setTextColor(...brand.plum);
   doc.text("HUMAN RESOURCES", page.width - page.margin, 10.5, { align: "right" });
   doc.setFont("helvetica", "normal");
+  doc.setTextColor(...brand.muted);
   doc.text(`Document ${current}/${pages}`, page.width - page.margin, 16, { align: "right" });
   doc.setDrawColor(...brand.red);
   doc.setLineWidth(0.7);
@@ -486,10 +490,17 @@ function pdfPhone(settings: HrSettings) {
   return settings.company.phone.trim() || defaultPdfPhone;
 }
 
+function companyContact(settings: HrSettings) {
+  return [settings.company.address, settings.company.email, pdfPhone(settings), settings.company.website]
+    .map(value => value.trim())
+    .filter(Boolean)
+    .join("  |  ");
+}
+
 function employeeIdentity(doc: jsPDF, y: number, employee: EmployeeRecord) {
   doc.setFillColor(...brand.soft);
   doc.setDrawColor(...brand.line);
-  doc.roundedRect(page.margin, y, page.width - page.margin * 2, 34, 2, 2, "FD");
+  doc.roundedRect(page.margin, y, page.width - page.margin * 2, 46, 2, 2, "FD");
   const photoX = page.margin + 4;
   const photoY = y + 4;
   if (employee.photo) {
@@ -504,13 +515,13 @@ function employeeIdentity(doc: jsPDF, y: number, employee: EmployeeRecord) {
   doc.setTextColor(...brand.ink);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
-  doc.text(employeeName(employee), photoX + 32, y + 12);
+  doc.text((doc.splitTextToSize(employeeName(employee), 140) as string[]).slice(0, 2), photoX + 32, y + 10, { lineHeightFactor: 1.05 });
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(...brand.muted);
-  doc.text(`${employee.fields.Designation || "No designation"}  |  ${employee.fields.Department || "Unassigned"}`, photoX + 32, y + 19);
-  doc.text(`${employee.fields["Employee Code"]}  |  ${employee.status}`, photoX + 32, y + 26);
-  return y + 34;
+  doc.text((doc.splitTextToSize(`${employee.fields.Designation || "No designation"}  |  ${employee.fields.Department || "Unassigned"}`, 140) as string[]).slice(0, 2), photoX + 32, y + 26, { lineHeightFactor: 1.05 });
+  doc.text(`${employee.fields["Employee Code"]}  |  ${employee.status}`, photoX + 32, y + 41);
+  return y + 46;
 }
 
 function identityInitials(doc: jsPDF, x: number, y: number, employee: EmployeeRecord) {

@@ -204,8 +204,8 @@ test("mobile dashboard, wide tables and shared dialog retain usable geometry", a
   await page.goto("/system");
   const table = page.locator(".table-wrap:has(th:nth-child(4))").first();
   await expect(table).toBeVisible();
-  expect(await table.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
-  await expect(table.locator("th").first()).toHaveCSS("position", "sticky");
+  expect(await table.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(page.getByText("Scroll horizontally for more columns")).toHaveCount(0);
 });
 
 test("clinical tokens, dashboard bento, themes and reduced motion stay responsive", async ({ page }) => {
@@ -243,8 +243,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".logo-crop.wordmark").boundingBox(),
     page.locator(".hero-logo-crop").boundingBox(),
   ]);
-  expect(sidebarLogo).toMatchObject({ width: 72, height: 58 });
-  expect(heroLogo).toMatchObject({ width: 112, height: 90 });
+  expect(sidebarLogo).toMatchObject({ width: 88, height: 70 });
+  expect(heroLogo).toMatchObject({ width: 144, height: 115 });
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.getByText("MedTech HR ERP", { exact: true })).toBeVisible();
@@ -270,14 +270,53 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const [mobileHeroLogo, mobileHeaderLogo] = await Promise.all([
     page.locator(".hero-logo-crop").boundingBox(),
     page.locator(".topbar-brand-mark").boundingBox(),
   ]);
-  expect(mobileHeroLogo).toMatchObject({ width: 112, height: 90 });
-  expect(mobileHeaderLogo).toMatchObject({ width: 44, height: 35 });
+  expect(mobileHeroLogo).toMatchObject({ width: 144, height: 115 });
+  expect(mobileHeaderLogo).toMatchObject({ width: 52, height: 42 });
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.getByRole("heading", { name: "Today at MedTech" })).toHaveCSS("color", "rgb(255, 255, 255)");
+  const darkDashboardColors = await page.evaluate(() => {
+    const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
+    return { heading: getComputedStyle(document.querySelector<HTMLElement>(".hero-panel h2")!).color, snapshot: getComputedStyle(snapshot).color, surface: getComputedStyle(snapshot).backgroundColor };
+  });
+  expect(darkDashboardColors.heading).toBe(darkDashboardColors.snapshot);
+  expect(darkDashboardColors.surface).not.toBe("rgba(0, 0, 0, 0)");
+});
+
+test("dashboard composition and leave workspace use aligned semantic surfaces", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installUiApi(page, [{
+    id: "employee-1", employeeCode: "MTC001", firstName: "Dashboard", lastName: "Employee",
+    email: "dashboard.employee@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",
+    department: { id: "department-1", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR-SPEC" },
+  }], ["leave.self.create"]);
+  await page.goto("/");
+  await expect(page.locator(".hero-panel")).toBeVisible();
+  await expect(page.locator(".headcount-chart svg")).toBeVisible();
+
+  const dashboardSurfaces = await page.evaluate(() => {
+    return {
+      hero: getComputedStyle(document.querySelector<HTMLElement>(".hero-panel")!).backgroundColor,
+      surface: getComputedStyle(document.querySelector<HTMLElement>(".metric")!).backgroundColor,
+    };
+  });
+  expect(dashboardSurfaces.hero).toBe(dashboardSurfaces.surface);
+  await expect(page.locator(".headcount-ranking")).toContainText("Human Resources");
+
+  await page.goto("/leave");
+  await expect(page.locator(".leave-request-panel")).toBeVisible();
+  const [balance, request] = await Promise.all([
+    page.locator(".leave-balance-panel").boundingBox(),
+    page.locator(".leave-request-panel").boundingBox(),
+  ]);
+  expect(balance).not.toBeNull();
+  expect(request).not.toBeNull();
+  expect(Math.abs(balance!.y - request!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(balance!.height - request!.height)).toBeLessThanOrEqual(1);
 });
 
 test("navigation drawer cannot block header controls across the 1080px breakpoint", async ({ page }) => {
@@ -291,7 +330,7 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await expect(desktopToggle).toHaveCSS("width", "40px");
   await desktopToggle.click();
   await expect(sidebar).toBeHidden();
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 44, height: 35 });
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 52, height: 42 });
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
@@ -341,7 +380,7 @@ test("login uses the full uncropped brand mark", async ({ page }) => {
   await page.goto("/");
   const logo = page.locator(".login-logo");
   await expect(logo).toBeVisible();
-  expect(await logo.boundingBox()).toMatchObject({ width: 144, height: 115 });
+  expect(await logo.boundingBox()).toMatchObject({ width: 160, height: 128 });
   await expect(logo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo.locator("img")).toHaveCSS("transform", "none");
 });
@@ -394,14 +433,15 @@ test("notification actions stay right-aligned and the popover remains visible be
 test("employee add, edit, and profile dialogs use the wide layout without leaving the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await installUiApi(page, [{
-    id: "employee-1", employeeCode: "MTC005", firstName: "Dima Osama Ahmad", lastName: "Alhawi",
-    email: "mtc005@example.invalid", phone: "+974 5000 1234", hireDate: "2017-04-05", employmentStatus: "ACTIVE",
+    id: "employee-1", employeeCode: "MTC005", firstName: "Dima Osama Ahmad", lastName: "Alhawi Hassan Al Hajri",
+    email: "mtc005.application.manager.long.address@example.invalid", phone: "+974 5000 1234", hireDate: "2017-04-05", employmentStatus: "ACTIVE",
     department: { id: "department-1", name: "Diagnostics & POCT", code: "DPOCT" },
-    position: { title: "Application Manager", code: "APP-MGR" }
+    position: { title: "Application Manager for Diagnostics and Point of Care Technologies", code: "APP-MGR" }
   }], ["employee.hr.update", "payroll.read_compensation", "report.export"]);
   await page.goto("/employees");
-  const employeeCard = page.locator("article").filter({ hasText: "Dima Osama Ahmad Alhawi" });
+  const employeeCard = page.locator("article").filter({ hasText: "Dima Osama Ahmad Alhawi Hassan Al Hajri" });
   await expect(employeeCard).toContainText("+974 5000 1234");
+  expect(await employeeCard.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await expect(employeeCard.getByRole("button", { name: "Open profile" })).toBeVisible();
   await employeeCard.locator("summary").click();
   await expect(employeeCard.getByRole("button", { name: "Edit employee" })).toBeVisible();
@@ -417,7 +457,7 @@ test("employee add, edit, and profile dialogs use the wide layout without leavin
   await expect(addPanel.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC006");
   await addPanel.getByRole("button", { name: "Cancel" }).click();
 
-  await page.getByRole("button", { name: /Dima Osama Ahmad Alhawi/ }).click();
+  await page.getByRole("button", { name: /Dima Osama Ahmad Alhawi Hassan Al Hajri/ }).click();
 
   const panel = page.locator(".modal:has(> .employee-profile)");
   const desktop = await panel.boundingBox();

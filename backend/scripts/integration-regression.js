@@ -741,6 +741,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   }, systemAdmin);
   assert.equal(disabledLocalUser.status, 200);
   assert.equal((await api('/auth/me', {}, localUserSession)).status, 401);
+  assert.equal((await api('/auth/login', { method: 'POST', body: { email: localUserEmail, password: localUserPassword } })).status, 401);
   assert.equal((await api(`/system/users/${localUser.id}/status`, {
     method: 'PATCH', body: { isActive: true, expectedAuthorizationVersion: localUser.authorizationVersion, reason: 'Stale account status test' },
   }, systemAdmin)).status, 409);

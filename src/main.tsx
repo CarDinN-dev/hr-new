@@ -862,7 +862,6 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
     department,
     count: matchingActive.filter(employee => employee.fields.Department === department).length
   })).filter(item => item.count > 0);
-  const maxHeadcount = Math.max(1, ...headcount.map(item => item.count));
   const upcomingBirthdays = rankedPageSearchItems(birthdays.data ?? [], employeeSearch.data, searchActive, item => item.id, match => match.id);
   const recentJoiners = rankedPageSearchItems(
     [...state.employees].sort((a, b) => (b.fields["Joining Date"] || "").localeCompare(a.fields["Joining Date"] || "")),
@@ -908,17 +907,9 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
       </section>
 
       <section className="two-col">
-        {showSection("headcount", headcount.length > 0) && <div className="panel">
+        {showSection("headcount", headcount.length > 0) && <div className="panel headcount-panel">
           <div className="panel-head"><h3>Headcount by Department</h3><span>{active.length} active</span></div>
-          <div className="bars">
-            {headcount.map(item => (
-              <div className="bar-row" key={item.department}>
-                <span>{item.department}</span>
-                <div><i style={{ width: `${Math.round(item.count / maxHeadcount * 100)}%` }} /></div>
-                <b>{item.count}</b>
-              </div>
-            ))}
-          </div>
+          <HeadcountDonut items={headcount} />
         </div>}
         {showSection("leave-approvals", visiblePendingLeave.length > 0) && <div className="panel">
           <div className="panel-head"><h3>Pending Leave Approvals</h3><span>{visiblePendingLeave.length} open</span></div>
@@ -1229,7 +1220,7 @@ function EmployeeMasterDataImportPreview({ rows, errors, existingEmployeeCodes, 
     </div>
     {errors.length > 0 && <div className="form-error"><strong>Fix these rows before importing:</strong><ul>{errors.slice(0, 12).map(error => <li key={error}>{error}</li>)}</ul>{errors.length > 12 && <p>{errors.length - 12} more issue(s).</p>}</div>}
     {submitError && <p className="form-error">{submitError}</p>}
-    <div className="table-wrap table-wide" role="region" aria-label="Employee import preview" tabIndex={0}><span className="table-scroll-hint" aria-hidden="true">Scroll horizontally for more columns</span><table><thead><tr><th>Employee Code</th><th>Employee</th><th>Department</th><th>Designation</th><th>Gross salary</th></tr></thead><tbody>{rows.slice(0, 12).map(row => <tr key={row["Employee Code"]}><td>{row["Employee Code"]}</td><td>{row["Full Name"]}</td><td>{row.Department}</td><td>{row.Designation}</td><td>{row.Total}</td></tr>)}</tbody></table>{rows.length > 12 && <p className="muted">Showing the first 12 records.</p>}</div>
+    <div className="table-wrap table-wide" role="region" aria-label="Employee import preview"><table><thead><tr><th>Employee Code</th><th>Employee</th><th>Department</th><th>Designation</th><th>Gross salary</th></tr></thead><tbody>{rows.slice(0, 12).map(row => <tr key={row["Employee Code"]}><td data-label="Employee Code">{row["Employee Code"]}</td><td data-label="Employee">{row["Full Name"]}</td><td data-label="Department">{row.Department}</td><td data-label="Designation">{row.Designation}</td><td data-label="Gross salary">{row.Total}</td></tr>)}</tbody></table>{rows.length > 12 && <p className="muted">Showing the first 12 records.</p>}</div>
     <div className="modal-actions"><button type="button" onClick={close} disabled={submitting}>Cancel</button><button className="primary" type="button" onClick={() => void confirm()} disabled={submitting || errors.length > 0 || !session}>{submitting ? "Importing…" : "Confirm import"}</button></div>
   </div>;
 }
@@ -1491,13 +1482,13 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
                     <div className="attendance-record" key={employee.id}>
                       <div className="attendance-row">
                         <div className="employee-cell"><strong>{employeeName(employee)}</strong><span>{employee.fields["Employee Code"]} - {employee.fields.Designation || "-"}</span></div>
-                        <span>{formatDate(date)}</span>
-                        <strong>{punch.in}</strong>
-                        <strong>{punch.out}</strong>
-                        <strong>{punch.hours}</strong>
-                        <Badge value={punch.status} />
-                        <Badge value={approval || (needsReview ? "Pending" : code ? "Approved" : "Not marked")} />
-                        {canManage ? <div className="att-btns">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div> : <span>-</span>}
+                        <span data-label="Date">{formatDate(date)}</span>
+                        <strong data-label="Punch in">{punch.in}</strong>
+                        <strong data-label="Punch out">{punch.out}</strong>
+                        <strong data-label="Hours">{punch.hours}</strong>
+                        <span className="attendance-status-cell" data-label="Status"><Badge value={punch.status} /></span>
+                        <span className="attendance-status-cell" data-label="Approval"><Badge value={approval || (needsReview ? "Pending" : code ? "Approved" : "Not marked")} /></span>
+                        {canManage ? <div className="att-btns" data-label="Action">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div> : <span data-label="Action">-</span>}
                       </div>
                       {canManage && needsReview && (
                         <div className="attendance-review">
@@ -2470,7 +2461,38 @@ function DataTable({ columns, rows, empty, label = "Data table" }: { columns: Re
   if (!rows.length) return <div className="empty">{empty || "No records."}</div>;
   const wide = columns.length >= 4;
   const actions = typeof columns.at(-1) === "string" && /actions?/i.test(String(columns.at(-1)));
-  return <div className={`table-wrap${wide ? " table-wide" : ""}${actions ? " table-actions" : ""}`} role="region" aria-label={label} tabIndex={wide ? 0 : undefined}>{wide && <span className="table-scroll-hint" aria-hidden="true">Scroll horizontally for more columns</span>}<table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
+  return <div className={`table-wrap${wide ? " table-wide" : ""}${actions ? " table-actions" : ""}`} role="region" aria-label={label}><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td data-label={typeof columns[cellIndex] === "string" ? columns[cellIndex] : `Field ${cellIndex + 1}`} key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
+}
+
+function HeadcountDonut({ items }: { items: Array<{ department: string; count: number }> }) {
+  const ordered = [...items].sort((left, right) => right.count - left.count || left.department.localeCompare(right.department));
+  const total = ordered.reduce((sum, item) => sum + item.count, 0);
+  const primary = ordered.slice(0, 5);
+  const other = ordered.slice(5).reduce((sum, item) => sum + item.count, 0);
+  const chartItems = other > 0 ? [...primary, { department: "Other departments", count: other }] : primary;
+  const colors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
+  let offset = 0;
+  const segments = chartItems.map((item, index) => {
+    const share = total ? item.count / total * 100 : 0;
+    const segment = { ...item, share, offset, color: colors[index] };
+    offset += share;
+    return segment;
+  });
+  const max = Math.max(1, ...ordered.map(item => item.count));
+  return <div className="headcount-visual">
+    <div className="headcount-chart">
+      <svg viewBox="0 0 120 120" role="img" aria-label={`${total} assigned active employees across ${ordered.length} departments`}>
+        <circle className="headcount-chart__track" cx="60" cy="60" r="43" pathLength="100" />
+        {segments.map(segment => <circle key={segment.department} className="headcount-chart__segment" cx="60" cy="60" r="43" pathLength="100" stroke={segment.color} strokeDasharray={`${segment.share} ${100 - segment.share}`} strokeDashoffset={-segment.offset}><title>{segment.department}: {segment.count} employees</title></circle>)}
+        <text className="headcount-chart__value" x="60" y="57" textAnchor="middle">{total}</text>
+        <text className="headcount-chart__label" x="60" y="70" textAnchor="middle">assigned</text>
+      </svg>
+    </div>
+    <ol className="headcount-ranking">
+      {segments.map(segment => <li key={segment.department}><i style={{ background: segment.color }} /><span>{segment.department}</span><strong>{segment.count}</strong><small>{total ? Math.round(segment.count / total * 100) : 0}%</small></li>)}
+    </ol>
+    {ordered.length > 5 && <details className="headcount-details"><summary>View all departments</summary><div className="bars">{ordered.map(item => <div className="bar-row" key={item.department}><span>{item.department}</span><div><i style={{ width: `${Math.round(item.count / max * 100)}%` }} /></div><b>{item.count}</b></div>)}</div></details>}
+  </div>;
 }
 
 function Badge({ value }: { value: string }) {

@@ -190,28 +190,33 @@ test("System page-wide search intersects independent user and session searches",
 test("Super Admin can create a local account without Entra provisioning", async ({ page }) => {
   await loginAndOpenSystem(page);
   await expect(page.getByText("Choose Local for an email-and-password account.")).toBeVisible();
+  const createUserPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Create login user" }) });
+  await expect(createUserPanel.getByLabel("Reason")).toHaveCount(0);
   await expect(page.getByText("Current user")).toBeVisible();
   await expect(page.getByRole("row", { name: /super\.admin@example\.invalid.*Current user/ }).getByRole("button")).toHaveCount(0);
   await page.getByRole("checkbox", { name: "Local", exact: true }).click();
-  await expect(page.getByRole("checkbox", { name: "Sign-in methods Microsoft Local" })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Microsoft", exact: true })).not.toBeChecked();
   await page.locator('input[type="email"]').last().fill("local.user@example.invalid");
   await page.getByLabel("Initial password").fill("LocalAccount123!");
   await page.getByRole("checkbox", { name: "HR", exact: true }).click();
   await page.getByRole("checkbox", { name: "Super Administrator (super_admin)", exact: true }).click();
-  await page.getByLabel("Reason").first().fill("System UI local-account regression");
   const created = page.waitForResponse(response => response.url().endsWith("/api/v1/system/users") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Create user" }).click();
   const createdResponse = await created;
   expect(createdResponse.status()).toBe(201);
   const payload = JSON.parse(createdResponse.request().postData() || "{}");
-  expect(payload).toMatchObject({ localLoginEnabled: true, microsoftLoginEnabled: false, email: "local.user@example.invalid" });
+  expect(payload).toMatchObject({
+    localLoginEnabled: true,
+    microsoftLoginEnabled: false,
+    email: "local.user@example.invalid",
+    reason: "Administrative login user creation",
+  });
   await expect(page.getByText("local.user@example.invalid")).toBeVisible();
 
   await page.getByRole("checkbox", { name: "Local", exact: true }).click();
   await page.locator('input[type="email"]').last().fill("duplicate@example.invalid");
   await page.getByLabel("Initial password").fill("LocalAccount123!");
   await page.getByRole("checkbox", { name: "HR", exact: true }).click();
-  await page.getByLabel("Reason").first().fill("System UI duplicate-account regression");
   await page.getByRole("button", { name: "Create user" }).click();
   await expect(page.getByText("Email address is already in use")).toBeVisible();
 });

@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 const assert = require('node:assert/strict');
+const { writeFileSync } = require('node:fs');
 const { AttendanceStatus, LoanRepaymentMode, LoanStatus, Prisma } = require('@prisma/client');
 const { money, percentageMoney, sumMoney } = require('../dist/common/money');
 const { LoansService } = require('../dist/modules/loans/loans.service');
@@ -32,13 +33,28 @@ async function main() {
   const netPay = grossPay.minus(sumMoney(['100', '25']));
   assert.equal(grossPay.toFixed(2), '3250.00');
   assert.equal(netPay.toFixed(2), '3125.00');
+  const payslipLines = Array.from({ length: 48 }, (_, index) => ({
+    description: `${index % 3 === 0 ? 'Deduction adjustment' : 'Earning component'} ${index + 1} with a professional multi-line description`,
+    kind: index % 3 === 0 ? 'FIXED_DEDUCTION' : 'ALLOWANCE',
+    amount: new Prisma.Decimal(index % 3 === 0 ? '10.00' : '75.00'),
+  }));
   const brandedPayslip = payroll.payslipPdf({
-    employee: { firstName: 'Payroll', lastName: 'Employee', employeeCode: 'MT-0001', department: { name: 'Human Resources' } },
-    lineItems: [{ description: 'Basic salary', amount: new Prisma.Decimal('3250.00') }],
+    employee: {
+      firstName: 'Payroll', lastName: 'Employee', employeeCode: 'MT-0001', email: 'payroll.employee@example.invalid',
+      hireDate: new Date('2020-01-15T00:00:00.000Z'), employmentStatus: 'ACTIVE', department: { name: 'Human Resources' }, position: { title: 'Payroll Specialist' },
+    },
+    lineItems: payslipLines,
     grossPay, deductions: new Prisma.Decimal('100.00'), taxAmount: new Prisma.Decimal('25.00'), netPay,
-  }, { year: 2026, month: 8, revision: 1 }, { phone: '+974 4443 4140' });
+  }, { year: 2026, month: 8, revision: 1 }, {
+    name: 'MedTech', legalName: 'MedTech Corporation Trading W.L.L.', address: 'Doha, Qatar', phone: '+974 4443 4140',
+    email: 'hr@med-tech.com', website: 'https://med-tech.com', currency: 'QAR',
+  });
   assert.equal(brandedPayslip.subarray(0, 4).toString(), '%PDF');
-  assert.match(brandedPayslip.toString('latin1'), /\/Subtype \/Image/);
+  const payslipSource = brandedPayslip.toString('latin1');
+  assert.match(payslipSource, /\/Subtype \/Image/);
+  assert.match(payslipSource, /MedTech Corporation Trading/);
+  assert.ok((payslipSource.match(/\/Type \/Page\b/g) || []).length >= 2);
+  if (process.env.PAYSLIP_RENDER_PATH) writeFileSync(process.env.PAYSLIP_RENDER_PATH, brandedPayslip);
   const lopDays = await payroll.payrollLopDays('employee-1', new Date('2026-07-01T00:00:00Z'), new Date('2026-07-31T23:59:59Z'), {
     attendance: { findMany: async () => [
       { attendanceDate: new Date('2026-07-02T00:00:00Z'), status: AttendanceStatus.ABSENT },
