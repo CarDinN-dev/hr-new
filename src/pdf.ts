@@ -9,6 +9,7 @@ import { buildCompanyRoleHierarchy, type RoleHierarchyBranch, type RoleHierarchy
 
 type AutoTableDoc = jsPDF & { lastAutoTable?: { finalY: number } };
 export type GeneratedPdf = { filename: string; dataUrl: string; sizeBytes: number };
+type PayslipPeriod = Pick<PayrollSlip, "year" | "month">;
 
 const page = { width: 210, height: 297, margin: 14 };
 const defaultPdfPhone = "+974 4443 4140";
@@ -47,7 +48,8 @@ export function saveReportPdf(template: PdfTemplate, state: HrState, year: numbe
 }
 
 export function savePayslipPdf(slip: PayrollSlip, employee: EmployeeRecord, settings: HrSettings) {
-  const { doc, y } = brandedDoc(settings, "Payslip", `${months[slip.month - 1]} ${slip.year}`);
+  const draft = slip.status === "Draft";
+  const { doc, y } = brandedDoc(settings, draft ? "DRAFT PAYSLIP" : "Payslip", `${months[slip.month - 1]} ${slip.year}`);
   let nextY = employeeIdentity(doc, y, employee);
   nextY = table(doc, sectionTitle(doc, nextY + 5, "Employee details"), [], [
     labelCells(["Employee", employeeName(employee), "Employee Code", employee.fields["Employee Code"]]),
@@ -65,17 +67,19 @@ export function savePayslipPdf(slip: PayrollSlip, employee: EmployeeRecord, sett
   ]);
 
   nextY = summaryBand(doc, nextY + 7, "Net pay", money(slip.net, settings));
-  doc.setTextColor(...brand.muted);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.text("Computer-generated payslip. Payroll status: " + slip.status + ".", page.margin, nextY + 7);
+  doc.setTextColor(...(draft ? brand.red : brand.muted));
+  doc.setFont("helvetica", draft ? "bold" : "normal");
+  doc.setFontSize(draft ? 9 : 7.5);
+  doc.text(draft ? "DRAFT — Generated without a finalized payroll run." : "Computer-generated payslip. Payroll status: Finalized.", page.margin, nextY + 7);
   return finish(doc, settings, `Payslip-${safe(employee.fields["Employee Code"])}-${slip.year}-${String(slip.month).padStart(2, "0")}.pdf`);
 }
 
-export function saveEmployeeDocumentPdf(template: PdfTemplate, employee: EmployeeRecord, state: HrState, notes: string) {
+export function saveEmployeeDocumentPdf(template: PdfTemplate, employee: EmployeeRecord, state: HrState, notes: string, payslipPeriod?: PayslipPeriod) {
   const settings = state.settings;
   if (template === "payslip") {
-    const slip = latestSlip(state, employee) ?? provisionalSlip(employee);
+    const today = new Date();
+    const period = payslipPeriod ?? { year: today.getFullYear(), month: today.getMonth() + 1 };
+    const slip = periodSlip(state, employee, period) ?? provisionalSlip(employee, period);
     return savePayslipPdf(slip, employee, settings);
   }
 
@@ -597,17 +601,17 @@ function documentParagraphs(template: PdfTemplate, employee: EmployeeRecord, set
   return [notes || `${name} - ${designation} - ${department}`];
 }
 
-function latestSlip(state: HrState, employee: EmployeeRecord) {
-  return [...state.payroll].reverse().find(item => item.employeeId === employee.id);
+function periodSlip(state: HrState, employee: EmployeeRecord, period: PayslipPeriod) {
+  return [...state.payroll].reverse().find(item => item.employeeId === employee.id && item.year === period.year && item.month === period.month);
 }
 
-function provisionalSlip(employee: EmployeeRecord): PayrollSlip {
+function provisionalSlip(employee: EmployeeRecord, period: PayslipPeriod): PayrollSlip {
   const salary = employeeSalary(employee);
   return {
     id: "preview",
     employeeId: employee.id,
-    year: new Date().getFullYear(),
-    month: new Date().getMonth() + 1,
+    year: period.year,
+    month: period.month,
     basic: salary.basic,
     housing: salary.housing,
     allowances: salary.allowances,

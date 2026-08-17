@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { testState } from "./testState";
-import { saveEmployeeProfilePdf, savePayslipPdf, saveRoleHierarchyPdf } from "./pdf";
+import { saveEmployeeDocumentPdf, saveEmployeeProfilePdf, savePayslipPdf, saveRoleHierarchyPdf } from "./pdf";
 import { createPayroll } from "./domain";
 import { dataUrlBlob } from "./dataUrl";
 
@@ -30,6 +30,20 @@ describe("professional PDF output", () => {
   it("rejects executable or mislabeled saved document data", () => {
     expect(() => dataUrlBlob(`data:text/html;base64,${btoa("<script>alert(1)</script>")}`)).toThrow("Saved PDF data is invalid.");
     expect(() => dataUrlBlob(`data:application/pdf;base64,${btoa("not a pdf")}`)).toThrow("Saved PDF data is invalid.");
+  });
+
+  it("uses the selected payslip period and clearly marks an unfinalized fallback", () => {
+    const state = testState();
+    const employee = state.employees[0];
+    const draft = saveEmployeeDocumentPdf("payslip", employee, state, "", { year: 2025, month: 3 });
+    const finalizedState = createPayroll(state, 2026, 7).state;
+    finalizedState.payroll = finalizedState.payroll.map(item => item.employeeId === employee.id ? { ...item, status: "Finalized" } : item);
+    const finalized = saveEmployeeDocumentPdf("payslip", employee, finalizedState, "", { year: 2026, month: 7 });
+
+    expect(draft.filename).toContain("2025-03");
+    expect(Buffer.from(draft.dataUrl.split(",")[1], "base64").toString("latin1")).toContain("DRAFT PAYSLIP");
+    expect(finalized.filename).toContain("2026-07");
+    expect(Buffer.from(finalized.dataUrl.split(",")[1], "base64").toString("latin1")).not.toContain("DRAFT PAYSLIP");
   });
 
   it("exports the complete company role hierarchy as a landscape PDF", () => {

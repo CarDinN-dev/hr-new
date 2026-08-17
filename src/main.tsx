@@ -2258,12 +2258,18 @@ function Documents({ state, session, notify, savePdf }: { state: HrState; sessio
   const active = activeEmployees(state.employees);
   const [employeeId, setEmployeeId] = useState(active[0]?.id || "");
   const [template, setTemplate] = useState<PdfTemplate>("offer_letter");
+  const [payslipPeriod, setPayslipPeriod] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  });
   const [notes, setNotes] = useState("");
   const employee = state.employees.find(item => item.id === employeeId);
 
   function generate() {
     if (!employee) return notify("Select an employee first.");
-    void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf(template, employee, state, notes), template, employee.id));
+    const [year, month] = payslipPeriod.split("-").map(Number);
+    if (template === "payslip" && (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12)) return notify("Select a valid payslip month.");
+    void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf(template, employee, state, notes, template === "payslip" ? { year, month } : undefined), template, employee.id));
   }
 
   return (
@@ -2273,8 +2279,10 @@ function Documents({ state, session, notify, savePdf }: { state: HrState; sessio
         <div className="document-grid">
           <label>Employee<EmployeePicker value={employeeId} onChange={setEmployeeId} options={employeePickerOptions(active)} /></label>
           <label>Template<select value={template} onChange={event => setTemplate(event.target.value as PdfTemplate)}>{pdfTemplates.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-          <label className="wide">Notes / purpose<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bank request, visa processing, warning details, settlement notes..." /></label>
-          <button className="primary" onClick={generate}>Generate PDF</button>
+          {template === "payslip"
+            ? <label className="wide">Payslip month<input type="month" min="2000-01" max="2100-12" required value={payslipPeriod} onChange={event => setPayslipPeriod(event.target.value)} /></label>
+            : <label className="wide">Notes / purpose<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bank request, visa processing, warning details, settlement notes..." /></label>}
+          <button className="primary" onClick={generate}>{template === "payslip" ? "Generate payslip" : "Generate PDF"}</button>
         </div>
         {employee && ["final_settlement", "gratuity_statement", "clearance_certificate"].includes(template) && <SettlementPreview employee={employee} state={state} />}
       </div>}
