@@ -627,7 +627,7 @@ function App() {
         <header className="topbar">
           <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
           <div className="topbar-heading">
-            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/brand-mark.svg" alt="" /></span>
+            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-lockup.svg" alt="" /></span>
             <button
               className="desktop-sidebar-toggle"
               type="button"
@@ -875,7 +875,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="section-label">Dashboard</p>
-          <span className="hero-logo-crop"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
+          <span className="hero-logo-crop"><img src="/logos/medtech-lockup.svg" alt="MedTech Corporation Trading W.L.L." /></span>
           <h2>Today at MedTech</h2>
           <p>Review attendance, leave requests, payroll and employee records.</p>
         </div>

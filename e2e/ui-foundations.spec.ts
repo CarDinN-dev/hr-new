@@ -244,7 +244,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".hero-logo-crop").boundingBox(),
   ]);
   expect(sidebarLogo).toMatchObject({ width: 201, height: 58 });
-  expect(heroLogo).toMatchObject({ width: 176, height: 141 });
+  expect(heroLogo).toMatchObject({ width: 320, height: 88 });
+  await expect(page.locator(".hero-logo-crop img")).toHaveAttribute("src", "/logos/medtech-lockup.svg");
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
@@ -276,7 +277,7 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".hero-logo-crop").boundingBox(),
     page.locator(".topbar-brand-mark").boundingBox(),
   ]);
-  expect(mobileHeroLogo).toMatchObject({ width: 176, height: 141 });
+  expect(mobileHeroLogo).toMatchObject({ width: 320, height: 88 });
   expect(mobileHeaderLogo).toMatchObject({ width: 64, height: 52 });
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const darkDashboardColors = await page.evaluate(() => {
@@ -330,7 +331,7 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await expect(desktopToggle).toHaveCSS("width", "40px");
   await desktopToggle.click();
   await expect(sidebar).toBeHidden();
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 64, height: 52 });
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 164, height: 46 });
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
