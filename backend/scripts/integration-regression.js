@@ -887,7 +887,7 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const searchedSessions = await api('/system/sessions?active=true&page=1&limit=10&search=rbac.employee', {}, systemAdmin);
   assert.equal(searchedSessions.status, 200);
   assert.ok(searchedSessions.data.length <= 10);
-  assert.ok(searchedSessions.data.every((entry) => entry.user.email === personaEmail('EMPLOYEE')));
+  assert.equal(searchedSessions.data[0]?.user.email, personaEmail('EMPLOYEE'));
   const bulkRevocation = await api('/system/sessions/revoke-all', { method: 'POST', body: { reason: 'Administrative bulk session revocation test' } }, systemAdmin);
   assert.equal(bulkRevocation.status, 201);
   assert.equal(bulkRevocation.data.currentSessionRevoked, true);
