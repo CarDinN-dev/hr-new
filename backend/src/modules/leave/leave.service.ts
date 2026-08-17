@@ -24,6 +24,7 @@ import { UpdateLeaveRequestDto } from './dto/update-leave-request.dto';
 import { UpdateLeaveTypeDto } from './dto/update-leave-type.dto';
 import { DocumentStorageService } from '../documents/document-storage.service';
 import { DocumentMalwareScannerService } from '../documents/document-malware-scanner.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const leavePolicyCodes = {
   SICK: 'SICK',
@@ -98,6 +99,7 @@ export class LeaveService {
     private readonly authorization: AuthorizationService,
     private readonly storage: DocumentStorageService,
     private readonly scanner: DocumentMalwareScannerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   createType(dto: CreateLeaveTypeDto, user: RequestUser) {
@@ -300,7 +302,14 @@ export class LeaveService {
         }
         await this.createWorkflowSteps(tx, request.id, workflowVersion, workflow.steps);
         await this.notifyWorkflow(tx, request.id, workflow.blocked, workflow.steps);
-        if (employee.userId !== user.id) await tx.notification.create({ data: { userId: employee.userId, type: 'LEAVE_SUBMITTED_ON_BEHALF', title: 'Leave submitted on your behalf', message: 'HR submitted a leave request on your behalf.', resourceType: 'LeaveRequest', resourceId: request.id } });
+        await this.notifications.createLeave(tx, {
+          userIds: [employee.userId],
+          type: employee.userId === user.id ? 'LEAVE_SUBMITTED' : 'LEAVE_SUBMITTED_ON_BEHALF',
+          title: employee.userId === user.id ? 'Leave request submitted' : 'Leave submitted on your behalf',
+          message: employee.userId === user.id ? 'Your leave request was submitted.' : 'HR submitted a leave request on your behalf.',
+          requestId: request.id,
+          email: { kind: 'SUBMITTED', stage: workflow.blocked?.stage ?? workflow.steps[0].stage },
+        });
         await this.audit.record(tx, user, {
           action: AuditAction.CREATE, resourceType: 'LeaveRequest', resourceId: request.id, workflowId: request.id,
           workflowStage: request.currentStage ?? undefined, workflowStatus: request.status,
@@ -508,6 +517,11 @@ export class LeaveService {
       });
       await tx.leaveDecision.create({ data: { requestId: id, actorUserId: user.id, decisionType: LeaveDecisionType.APPROVE, fromStatus: request.status, toStatus: nextStatus, reason: dto.reason, idempotencyKey: key } });
       await this.notifyWorkflow(tx, request.id, workflow.blocked, workflow.steps);
+      await this.notifications.createLeave(tx, {
+        userIds: [employee.userId], type: 'LEAVE_RESUBMITTED', title: 'Leave request resubmitted',
+        message: 'Your corrected leave request was resubmitted.', requestId: id,
+        email: { kind: 'SUBMITTED', stage: workflow.blocked?.stage ?? workflow.steps[0].stage },
+      });
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: workflow.blocked?.stage ?? workflow.steps[0].stage, workflowStatus: nextStatus, summary: 'Leave request resubmitted', subjectEmployeeId: request.employeeId, changes: [{ field: 'status', previousValue: request.status, nextValue: nextStatus }] });
       await this.saveIdempotency(tx, user, 'leave.resubmit', key, { id, dto }, id);
       return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
@@ -528,10 +542,26 @@ export class LeaveService {
         await this.assertPayrollIsOpen(request.employeeId, request.startDate, request.endDate, tx);
       }
       await this.releaseBalance(tx, request, request.status === LeaveRequestStatus.APPROVED);
-      const active = await tx.leaveApprovalStep.findFirst({ where: { requestId: id, workflowVersion: request.workflowVersion, stage: request.currentStage ?? undefined } });
+      const pendingSteps = await tx.leaveApprovalStep.findMany({
+        where: { requestId: id, workflowVersion: request.workflowVersion, status: LeaveStepStatus.PENDING },
+        include: { assignees: { where: { isActive: true, revokedAt: null }, select: { userId: true } } },
+      });
+      const active = request.currentStage ? pendingSteps.find(({ stage }) => stage === request.currentStage) : null;
       if (active && active.status === LeaveStepStatus.PENDING) await tx.leaveApprovalStep.update({ where: { id: active.id }, data: { status: LeaveStepStatus.REJECTED, decisionType: LeaveDecisionType.CANCEL, decidedByUserId: user.id, decidedAt: new Date(), reason: dto.reason, version: { increment: 1 } } });
       await tx.leaveRequest.update({ where: { id }, data: { status: LeaveRequestStatus.CANCELLED, currentStage: null, finalDecisionAt: new Date(), version: { increment: 1 } } });
       await tx.leaveDecision.create({ data: { requestId: id, stepId: active?.id, actorUserId: user.id, stage: request.currentStage, decisionType: LeaveDecisionType.CANCEL, fromStatus: request.status, toStatus: LeaveRequestStatus.CANCELLED, reason: dto.reason, idempotencyKey: key } });
+      const subject = await tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } });
+      const subjectRecipients = [...new Set([request.requesterUserId, subject?.userId])].filter((userId): userId is string => Boolean(userId));
+      await this.notifications.createLeave(tx, {
+        userIds: subjectRecipients, type: 'LEAVE_STATUS', title: 'Leave request cancelled',
+        message: 'Your leave request was cancelled.', requestId: id,
+        email: { kind: 'FINAL', stage: request.currentStage, status: LeaveRequestStatus.CANCELLED, reason: dto.reason },
+      });
+      await this.notifications.createLeave(tx, {
+        userIds: pendingSteps.flatMap(({ assignees }) => assignees.map(({ userId }) => userId)).filter((userId) => userId !== user.id && !subjectRecipients.includes(userId)),
+        type: 'LEAVE_CANCELLED', title: 'Leave request cancelled', message: 'This leave request was cancelled and no longer requires your approval.', requestId: id,
+        email: { kind: 'WORKFLOW_UPDATED', stage: request.currentStage, status: LeaveRequestStatus.CANCELLED, reason: dto.reason },
+      });
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: request.currentStage ?? undefined, workflowStatus: LeaveRequestStatus.CANCELLED, summary: 'Leave request cancelled', reason: dto.reason, subjectEmployeeId: request.employeeId, changes: [{ field: 'status', previousValue: request.status, nextValue: LeaveRequestStatus.CANCELLED }] });
       await this.saveIdempotency(tx, user, 'leave.cancel', key, { id, dto }, id);
       return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
@@ -554,7 +584,11 @@ export class LeaveService {
       await tx.leaveApprovalStepAssignee.upsert({ where: { stepId_userId: { stepId: step.id, userId: dto.assigneeUserId } }, create: { stepId: step.id, userId: dto.assigneeUserId }, update: { isActive: true, revokedAt: null } });
       await tx.leaveRequest.update({ where: { id }, data: { status: stageStatus[step.stage], version: { increment: 1 } } });
       await tx.leaveDecision.create({ data: { requestId: id, stepId: step.id, actorUserId: user.id, stage: step.stage, decisionType: LeaveDecisionType.REASSIGN, fromStatus: request.status, toStatus: stageStatus[step.stage], reason: dto.reason, idempotencyKey: key } });
-      await tx.notification.create({ data: { userId: dto.assigneeUserId, type: 'LEAVE_ASSIGNED', title: 'Leave approval assigned', message: 'A leave request has been assigned to you.', resourceType: 'LeaveRequest', resourceId: id } });
+      await this.notifications.createLeave(tx, {
+        userIds: [dto.assigneeUserId], type: 'LEAVE_ASSIGNED', title: 'Leave approval assigned',
+        message: 'A leave request has been assigned to you.', requestId: id,
+        email: { kind: 'REASSIGNED', stage: step.stage },
+      });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'LeaveApprovalStep', resourceId: step.id, workflowId: id, workflowStage: step.stage, workflowStatus: stageStatus[step.stage], summary: 'Leave approval step reassigned', reason: dto.reason, subjectEmployeeId: request.employeeId, before: { assigneeUserIds: step.assignees.map((item) => item.userId) }, after: { assigneeUserIds: [dto.assigneeUserId] } });
       await this.saveIdempotency(tx, user, 'leave.reassign', key, { id, dto }, id);
       return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
@@ -624,8 +658,20 @@ export class LeaveService {
         tx.user.findMany({ where: { isActive: true, deletedAt: null, roles: { some: { revokedAt: null, role: { isActive: true, permissions: { some: { permission: { code: 'leave.hr.read', isDeprecated: false } } } } } } }, select: { id: true } }),
         tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } }),
       ]);
-      const recipients = [...new Set([request.requesterUserId, subject?.userId, ...(step?.assignees.map(({ userId }) => userId) ?? []), ...hrUsers.map(({ id: userId }) => userId), ...pendingSteps.flatMap((pending) => pending.assignees.map(({ userId }) => userId))])].filter((userId): userId is string => Boolean(userId) && userId !== user.id);
-      if (recipients.length) await tx.notification.createMany({ data: recipients.map((userId) => ({ userId, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden', message: superOverride ? 'A Super Administrator changed a leave workflow decision.' : 'HR approved a leave request by override.', resourceType: 'LeaveRequest', resourceId: id })) });
+      const subjectRecipients = [...new Set([request.requesterUserId, subject?.userId])].filter((userId): userId is string => Boolean(userId));
+      const affectedRecipients = [...new Set([...(step?.assignees.map(({ userId }) => userId) ?? []), ...hrUsers.map(({ id: userId }) => userId), ...pendingSteps.flatMap((pending) => pending.assignees.map(({ userId }) => userId))])]
+        .filter((userId) => userId !== user.id && !subjectRecipients.includes(userId));
+      const recipients = [...new Set([...subjectRecipients, ...affectedRecipients])];
+      await this.notifications.createLeave(tx, {
+        userIds: subjectRecipients, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden',
+        message: `Your leave request is now ${dto.targetStatus.replaceAll('_', ' ').toLowerCase()}.`, requestId: id,
+        email: { kind: 'FINAL', stage: request.currentStage, status: dto.targetStatus, reason: dto.reason },
+      });
+      await this.notifications.createLeave(tx, {
+        userIds: affectedRecipients, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden',
+        message: superOverride ? 'A Super Administrator changed a leave workflow decision.' : 'HR approved a leave request by override.', requestId: id,
+        email: { kind: 'WORKFLOW_UPDATED', stage: request.currentStage, status: dto.targetStatus, reason: dto.reason },
+      });
       await this.audit.record(tx, user, { action: AuditAction.OVERRIDE, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: request.currentStage ?? undefined, workflowStatus: dto.targetStatus, summary: 'Leave workflow overridden', reason: dto.reason, subjectEmployeeId: request.employeeId, isOverride: true, before: { status: request.status, currentStage: request.currentStage, version: request.version }, after: { status: dto.targetStatus, currentStage: null, version: request.version + 1 }, metadata: { skippedStages: pendingSteps.map((pending) => pending.stage), affectedUserIds: recipients }, changes: [{ field: 'status', previousValue: request.status, nextValue: dto.targetStatus }] });
       await this.saveIdempotency(tx, user, 'leave.override', key, { id, dto }, id);
       return tx.leaveRequest.findUniqueOrThrow({ where: { id }, include: leaveRequestInclude });
@@ -699,11 +745,18 @@ export class LeaveService {
     });
     if (nextStep) {
       const assignees = await tx.leaveApprovalStepAssignee.findMany({ where: { stepId: nextStep.id, isActive: true, revokedAt: null }, select: { userId: true } });
-      if (assignees.length) await tx.notification.createMany({ data: assignees.map(({ userId }) => ({ userId, type: 'LEAVE_APPROVAL', title: 'Leave approval required', message: 'A leave request is waiting for your decision.', resourceType: 'LeaveRequest', resourceId: request.id })) });
+      await this.notifyStage(tx, request.id, nextStep.stage, assignees.map(({ userId }) => userId), step.stage);
     }
     const subject = await tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } });
     const recipients = [...new Set([request.requesterUserId, subject?.userId])].filter((userId): userId is string => Boolean(userId));
-    await tx.notification.createMany({ data: recipients.map((userId) => ({ userId, type: 'LEAVE_STATUS', title: 'Leave request updated', message: `Your leave request is now ${nextStatus.replaceAll('_', ' ').toLowerCase()}.`, resourceType: 'LeaveRequest', resourceId: request.id })) });
+    const employeeEmail = nextStatus === LeaveRequestStatus.RETURNED_FOR_CORRECTION
+      ? { kind: 'RETURNED' as const, stage: step.stage, status: nextStatus, reason }
+      : terminal ? { kind: 'FINAL' as const, stage: step.stage, status: nextStatus, reason } : undefined;
+    await this.notifications.createLeave(tx, {
+      userIds: recipients, type: 'LEAVE_STATUS', title: 'Leave request updated',
+      message: `Your leave request is now ${nextStatus.replaceAll('_', ' ').toLowerCase()}.`, requestId: request.id,
+      email: employeeEmail,
+    });
     await this.audit.record(tx, user, {
       action: AuditAction.TRANSITION, resourceType: 'LeaveRequest', resourceId: request.id, workflowId: request.id,
       workflowStage: step.stage, workflowStatus: nextStatus,
@@ -835,13 +888,25 @@ export class LeaveService {
   }
 
   private async notifyWorkflow(tx: Prisma.TransactionClient, requestId: string, blocked: WorkflowStepPlan | undefined, steps: WorkflowStepPlan[]) {
-    if (blocked) {
-      const admins = await tx.user.findMany({ where: { isActive: true, deletedAt: null, roles: { some: { revokedAt: null, role: { code: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] }, isActive: true } } } }, select: { id: true } });
-      if (admins.length) await tx.notification.createMany({ data: admins.map(({ id }) => ({ userId: id, type: 'LEAVE_BLOCKED', title: 'Leave workflow needs an approver', message: `A ${blocked.stage.toLowerCase()} approver could not be resolved.`, resourceType: 'LeaveRequest', resourceId: requestId })) });
+    const first = blocked ?? steps[0];
+    if (first) await this.notifyStage(tx, requestId, first.stage, blocked ? [] : first.assigneeUserIds);
+  }
+
+  private async notifyStage(tx: Prisma.TransactionClient, requestId: string, stage: LeaveApprovalStage, assigneeUserIds: string[], previousStage?: LeaveApprovalStage) {
+    if (assigneeUserIds.length) {
+      await this.notifications.createLeave(tx, {
+        userIds: assigneeUserIds, type: 'LEAVE_APPROVAL', title: 'Leave approval required',
+        message: 'A leave request is waiting for your decision.', requestId,
+        email: { kind: 'APPROVAL_REQUIRED', stage, previousStage },
+      });
       return;
     }
-    const first = steps[0];
-    if (first?.assigneeUserIds.length) await tx.notification.createMany({ data: first.assigneeUserIds.map((userId) => ({ userId, type: 'LEAVE_APPROVAL', title: 'Leave approval required', message: 'A leave request is waiting for your decision.', resourceType: 'LeaveRequest', resourceId: requestId })) });
+    const admins = await tx.user.findMany({ where: { isActive: true, deletedAt: null, roles: { some: { revokedAt: null, role: { code: { in: ['HR', 'ADMIN', 'SUPER_ADMIN'] }, isActive: true } } } }, select: { id: true } });
+    await this.notifications.createLeave(tx, {
+      userIds: admins.map(({ id }) => id), type: 'LEAVE_BLOCKED', title: 'Leave workflow needs an approver',
+      message: `A ${stage.toLowerCase()} approver could not be resolved.`, requestId,
+      email: { kind: 'BLOCKED', stage },
+    });
   }
 
   private async activeStep(tx: Prisma.TransactionClient, request: Awaited<ReturnType<LeaveService['ensureRequest']>>, actorUserId: string) {

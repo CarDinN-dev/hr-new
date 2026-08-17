@@ -1588,20 +1588,38 @@ model DocumentSequence {
 }
 
 model Notification {
-  id           String    @id @default(uuid())
-  userId       String
-  type         String    @db.VarChar(100)
-  title        String    @db.VarChar(200)
-  message      String    @db.VarChar(1000)
-  resourceType String?   @db.VarChar(100)
-  resourceId   String?
-  readAt       DateTime?
-  createdAt    DateTime  @default(now())
+  id            String         @id @default(uuid())
+  userId        String
+  type          String         @db.VarChar(100)
+  title         String         @db.VarChar(200)
+  message       String         @db.VarChar(1000)
+  resourceType  String?        @db.VarChar(100)
+  resourceId    String?
+  readAt        DateTime?
+  createdAt     DateTime       @default(now())
+  emailDelivery EmailDelivery?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
   @@index([resourceType, resourceId])
+}
+
+model EmailDelivery {
+  id             String        @id @default(uuid())
+  notificationId String        @unique
+  recipientEmail String        @db.VarChar(320)
+  subject        String        @db.VarChar(300)
+  htmlBody       String        @db.Text
+  attempts       Int           @default(0)
+  nextAttemptAt  DateTime      @default(now())
+  sentAt         DateTime?
+  lastError      String?       @db.VarChar(1000)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  notification   Notification  @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([sentAt, nextAttemptAt, createdAt])
 }
 
 model IdempotencyRecord {
