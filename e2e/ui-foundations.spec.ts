@@ -238,16 +238,16 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const logo = page.locator(".brand-block img");
-  expect(await logo.evaluate(image => ({ width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ width: 300, transform: "none" });
+  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg", width: 840, transform: "none" });
   const [sidebarLogo, heroLogo] = await Promise.all([
     page.locator(".logo-crop.wordmark").boundingBox(),
     page.locator(".hero-logo-crop").boundingBox(),
   ]);
-  expect(sidebarLogo).toMatchObject({ width: 112, height: 90 });
+  expect(sidebarLogo).toMatchObject({ width: 201, height: 58 });
   expect(heroLogo).toMatchObject({ width: 176, height: 141 });
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.getByText("MedTech HR ERP", { exact: true })).toBeVisible();
+  await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
 

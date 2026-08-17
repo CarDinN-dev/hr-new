@@ -602,11 +602,7 @@ function App() {
         hidden={!compactNavigation && sidebarCollapsed}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
-          <div>
-            <strong>MedTech HR ERP</strong>
-            <span>People and payroll</span>
-          </div>
+          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg" alt="MedTech Corporation Trading W.L.L." /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
