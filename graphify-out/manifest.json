@@ -925,8 +925,8 @@
     "semantic_hash": ""
   },
   "e2e/system-page.spec.ts": {
-    "mtime": 1786951249.498634,
-    "ast_hash": "e4d099603c85cf67d849eef2ec534631",
+    "mtime": 1786954428.0394661,
+    "ast_hash": "7ffaa6c23a469f054eb08e8cc26c465d",
     "semantic_hash": ""
   },
   "ops/backup.sh": {
@@ -1110,8 +1110,8 @@
     "semantic_hash": "5fccf9f367b51fefd0727409f545cf3e"
   },
   "src/main.tsx": {
-    "mtime": 1786950738.3130417,
-    "ast_hash": "615a4e091ee1b5c9cf3df010102ce5a8",
+    "mtime": 1786952808.34594,
+    "ast_hash": "8b59b09ecf6aa2f6ea3fc4c5054bf887",
     "semantic_hash": ""
   },
   "src/normalizedSync.ts": {
@@ -1415,8 +1415,8 @@
     "semantic_hash": ""
   },
   "src/features/hierarchy-page.tsx": {
-    "mtime": 1786608321.1854641,
-    "ast_hash": "0c6dcafdc5c3fac5944459287e6a5d79",
+    "mtime": 1786954297.8282132,
+    "ast_hash": "232d3dd0d20bdc796245034e4b684dbb",
     "semantic_hash": ""
   },
   "backend/prisma/migrations/20260728000000_custom_role_inheritance/migration.sql": {
@@ -1445,8 +1445,8 @@
     "semantic_hash": ""
   },
   "e2e/ui-foundations.spec.ts": {
-    "mtime": 1786951106.6321676,
-    "ast_hash": "a55a30a33d9345081992fc5df6d68869",
+    "mtime": 1786954478.304552,
+    "ast_hash": "eb970fd544bd23e89f0e12bfbc518a8e",
     "semantic_hash": ""
   },
   "src/dialog.tsx": {

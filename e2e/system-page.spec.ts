@@ -449,7 +449,7 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
   await page.getByLabel("Switch to dark mode").click();
   await expect(target.getByText("Taylor Target")).toBeVisible();
-  await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(16, 23, 34)");
+  await expect.poll(() => flowViewport.evaluate(element => getComputedStyle(element).backgroundColor)).toBe("rgb(15, 27, 45)");
   await page.getByLabel("Switch to light mode").click();
 
   const download = page.waitForEvent("download");

@@ -27,11 +27,15 @@ async function installUiApi(page: Page, employees: unknown[] = [], extraPermissi
   }, { value: session, permissions: extraPermissions });
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
-    const data = pathname === "/api/v1/employees" ? employees : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }] : [];
+    const data = pathname === "/api/v1/employees" ? employees
+      : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }]
+      : pathname === "/api/v1/approvals/inbox" ? { leave: [], certificates: [], payroll: [] }
+      : pathname === "/api/v1/payroll/preflight" ? { ready: true, runType: "REGULAR", policy: { prorationBasis: "CALENDAR_DAYS", requireBankDetails: false, requireAttendance: false, varianceThreshold: "0" }, summary: { employees: 0, errors: 0, warnings: 0, grossPay: "0", deductions: "0", netPay: "0", adjustments: 0 }, issues: [] }
+      : [];
     return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data, meta: { total: data.length, page: 1, limit: 100, totalPages: 1, unread: pathname === "/api/v1/notifications" ? 1 : undefined } })
+      body: JSON.stringify({ success: true, data, meta: { total: Array.isArray(data) ? data.length : 0, page: 1, limit: 100, totalPages: 1, unread: pathname === "/api/v1/notifications" ? 1 : undefined } })
     });
   });
 }
@@ -54,6 +58,69 @@ test("every application route renders with a specific document title", async ({ 
   await expect(page.getByRole("link", { name: "Business Trips" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(0);
 });
+
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 1024, height: 768 },
+  { width: 768, height: 900 },
+  { width: 390, height: 844 },
+] as const) {
+  test(`all application routes retain aligned clinical geometry at ${viewport.width}px`, async ({ page }) => {
+    test.setTimeout(60_000);
+    await installUiApi(page);
+    await page.setViewportSize(viewport);
+    for (const [name, path] of Object.entries(navPaths)) {
+      await test.step(`${name} at ${viewport.width}px`, async () => {
+        await page.goto(path);
+        await expect(page.locator(".content")).toBeVisible();
+        const pageOverflow = await page.evaluate(() => ({
+          fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          width: document.documentElement.scrollWidth,
+          viewport: document.documentElement.clientWidth,
+          offenders: [...document.querySelectorAll<HTMLElement>("body *")]
+            .filter(element => {
+              const rect = element.getBoundingClientRect();
+              return rect.width > 0 && rect.right > document.documentElement.clientWidth + 1;
+            })
+            .slice(0, 8)
+            .map(element => ({ className: element.className, right: Math.round(element.getBoundingClientRect().right), width: Math.round(element.getBoundingClientRect().width) })),
+        }));
+        expect(pageOverflow.fits, JSON.stringify(pageOverflow)).toBe(true);
+        expect(pageOverflow.width).toBe(pageOverflow.viewport);
+
+        const content = await page.evaluate(() => {
+          const element = document.querySelector(".content");
+          if (!element) return null;
+          const rect = element.getBoundingClientRect();
+          return { x: rect.x, width: rect.width };
+        });
+        expect(content).not.toBeNull();
+        expect(content!.x).toBeGreaterThanOrEqual(0);
+        expect(content!.x + content!.width).toBeLessThanOrEqual(viewport.width + 1);
+
+        const firstSurface = page.locator(".panel, .metric, .report-card, .employee-card, .payroll-tile").first();
+        if (await firstSurface.count()) {
+          const surface = await firstSurface.evaluate(element => {
+            const rect = element.getBoundingClientRect();
+            return { x: rect.x, width: rect.width, borderRadius: getComputedStyle(element).borderRadius };
+          });
+          expect(surface).not.toBeNull();
+          expect(surface!.x).toBeGreaterThanOrEqual(0);
+          expect(surface!.x + surface!.width).toBeLessThanOrEqual(viewport.width + 1);
+          expect(surface!.borderRadius).toBe("12px");
+        }
+      });
+    }
+
+    if (viewport.width === 1440) {
+      await page.goto(navPaths.Recruitment);
+      const pipeline = page.locator(".recruitment-pipeline");
+      await expect(pipeline).toBeVisible();
+      expect(await pipeline.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    }
+  });
+}
 
 test("mobile dashboard, wide tables and shared dialog retain usable geometry", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -119,6 +186,22 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.goto("/");
   const logo = page.locator(".brand-block img");
   expect(await logo.evaluate(image => ({ width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ width: 300, transform: "none" });
+  const [sidebarLogo, heroLogo] = await Promise.all([
+    page.locator(".logo-crop.wordmark").boundingBox(),
+    page.locator(".hero-logo-crop").boundingBox(),
+  ]);
+  expect(sidebarLogo).toMatchObject({ width: 60, height: 48 });
+  expect(heroLogo).toMatchObject({ width: 80, height: 64 });
+  await expect(page.getByText("MedTech HR ERP", { exact: true })).toBeVisible();
+  await expect(page.locator(".mobile-menu")).toBeHidden();
+  await expect(page.locator(".sidebar-close")).toBeHidden();
+
+  const primaryColors = await page.getByRole("button", { name: "Add employee" }).evaluate(element => ({
+    background: getComputedStyle(element).backgroundColor,
+    color: getComputedStyle(element).color,
+    height: element.getBoundingClientRect().height,
+  }));
+  expect(primaryColors).toEqual({ background: "rgb(198, 22, 46)", color: "rgb(255, 255, 255)", height: 42 });
   const lightPanel = await page.locator(".panel").first().evaluate(element => getComputedStyle(element).backgroundColor);
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -129,6 +212,25 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.goto("/");
   const transitionSeconds = await page.getByRole("button", { name: "Add employee" }).evaluate(element => parseFloat(getComputedStyle(element).transitionDuration));
   expect(transitionSeconds).toBeLessThanOrEqual(.001);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const [mobileHeroLogo, mobileHeaderLogo] = await Promise.all([
+    page.locator(".hero-logo-crop").boundingBox(),
+    page.locator(".topbar-brand-mark").boundingBox(),
+  ]);
+  expect(mobileHeroLogo).toMatchObject({ width: 64, height: 52 });
+  expect(mobileHeaderLogo).toMatchObject({ width: 32, height: 26 });
+  await expect(page.getByRole("heading", { name: "Today at MedTech" })).toHaveCSS("color", "rgb(255, 255, 255)");
+});
+
+test("login uses the full uncropped brand mark", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const logo = page.locator(".login-logo");
+  await expect(logo).toBeVisible();
+  expect(await logo.boundingBox()).toMatchObject({ width: 112, height: 90 });
+  await expect(logo.locator("img")).toHaveCSS("transform", "none");
 });
 
 test("unknown URLs show an explicit not-found page", async ({ page }) => {

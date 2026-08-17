@@ -129,7 +129,6 @@ import { Dialog } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
 import "./styles.css";
-import "./professional.css";
 
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
@@ -557,13 +556,13 @@ function App() {
   const pageHint = pageDescription(nav);
 
   return (
-    <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className="app">
+    <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <aside id="main-navigation" className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Main navigation" hidden={sidebarCollapsed}>
         <div className="brand-block">
           <span className="logo-crop wordmark"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
           <div>
-            <strong>HR ERP</strong>
-            <span>HR and payroll</span>
+            <strong>MedTech HR ERP</strong>
+            <span>People and payroll</span>
           </div>
           <button className="sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
@@ -597,6 +596,7 @@ function App() {
         <header className="topbar">
           <button className="mobile-menu" aria-label="Open menu" onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
           <div className="topbar-heading">
+            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/brand-mark.svg" alt="" /></span>
             <button
               className="desktop-sidebar-toggle"
               type="button"
