@@ -114,8 +114,15 @@ async function stopServer(child) {
 function assertManagerProjection(employee) {
   for (const field of [
     'salary', 'salaryRecords', 'bankAccount', 'dateOfBirth', 'gender', 'address', 'profile', 'benefits',
-    'credentials', 'education', 'emergencyContactName', 'emergencyContactPhone', 'user', 'documents', 'sessions',
+    'credentials', 'education', 'emergencyContactName', 'emergencyContactPhone', 'documents', 'sessions',
   ]) assert.equal(Object.hasOwn(employee, field), false, `manager projection exposed ${field}`);
+  if (employee.user) {
+    assert.deepEqual(Object.keys(employee.user), ['roles']);
+    employee.user.roles.forEach((assignment) => {
+      assert.deepEqual(Object.keys(assignment), ['role']);
+      assert.deepEqual(Object.keys(assignment.role).sort(), ['code', 'displayName']);
+    });
+  }
 }
 
 function qatarDay() {
