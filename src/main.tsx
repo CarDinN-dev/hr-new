@@ -621,7 +621,6 @@ function App() {
         hidden={!compactNavigation && sidebarCollapsed}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -894,7 +893,6 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="section-label">Dashboard</p>
-          <span className="hero-logo-crop"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
           <h2>Today at MedTech</h2>
           <p>Review attendance, leave requests, payroll and employee records.</p>
         </div>

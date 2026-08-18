@@ -4517,27 +4517,9 @@ summary:focus-visible,
 }
 
 .app .brand-block {
-  min-height: 96px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 2px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.11);
+  display: none;
 }
 
-.app .logo-crop.wordmark {
-  width: 100%;
-  height: 72px;
-  padding: 4px 6px;
-  border: 1px solid rgba(35, 50, 106, 0.14);
-  border-radius: 12px;
-  background: #f5f5f7;
-  box-shadow: 0 8px 20px rgba(8, 15, 36, 0.14);
-}
-
-.app .logo-crop img,
-.hero-logo-crop img,
 .topbar-brand-mark img {
   display: block;
   width: 100%;
@@ -4649,7 +4631,7 @@ summary:focus-visible,
 }
 
 .topbar-brand-mark {
-  display: none;
+  display: inline-flex;
   width: 184px;
   height: 50px;
   flex: 0 0 auto;
@@ -4660,14 +4642,12 @@ summary:focus-visible,
 }
 
 :root[data-theme="dark"] .app .topbar-brand-mark {
-  padding: 2px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 12px;
-  background: #f5f5f7;
+  width: 50px;
+  height: 50px;
 }
 
-.sidebar-collapsed .topbar-brand-mark {
-  display: inline-flex;
+:root[data-theme="dark"] .app .topbar-brand-mark img {
+  content: url("/logos/brand-mark.svg?v=4");
 }
 
 .app .page-title {
@@ -5899,23 +5879,6 @@ summary:focus-visible,
   color: var(--brand-red);
 }
 
-.dashboard-layout .hero-logo-crop {
-  width: min(360px, 100%);
-  height: 99px;
-  margin-bottom: 12px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-:root[data-theme="dark"] .dashboard-layout .hero-logo-crop {
-  padding: 5px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 12px;
-  background: #f5f5f7;
-}
-
 .dashboard-layout .hero-panel h2 {
   margin: 0;
   color: var(--text);
@@ -6678,7 +6641,8 @@ summary:focus-visible,
     display: inline-flex;
   }
 
-  .app .topbar-brand-mark {
+  .app .topbar-brand-mark,
+  :root[data-theme="dark"] .app .topbar-brand-mark {
     width: 60px;
     height: 48px;
   }
@@ -6690,6 +6654,15 @@ summary:focus-visible,
 
   .app .sidebar-close {
     display: inline-flex;
+  }
+
+  .app .brand-block {
+    min-height: 68px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 12px 2px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.11);
   }
 
   .app .desktop-sidebar-toggle,
@@ -6759,12 +6732,6 @@ summary:focus-visible,
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
-  }
-
-  .dashboard-layout .hero-logo-crop {
-    width: min(320px, 100%);
-    height: 88px;
-    margin-bottom: 6px;
   }
 
   .dashboard-layout .hero-copy .section-label {
