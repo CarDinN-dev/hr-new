@@ -376,14 +376,117 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await expect(page.locator(".sidebar-close")).toBeHidden();
 });
 
-test("login uses the full uncropped brand mark", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+test("login keeps the exact brand assets, hero and controls responsive", async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.clear();
+    localStorage.removeItem("medtech-hr-theme");
+  });
+  await page.route("**/api/v1/auth/me", route => route.fulfill({
+    status: 401,
+    contentType: "application/json",
+    body: JSON.stringify({ success: false, error: { code: "UNAUTHENTICATED", message: "Sign in required" } })
+  }));
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
+    await test.step(`${viewport.width}x${viewport.height}`, async () => {
+      await page.setViewportSize(viewport);
+      await page.goto("/", { waitUntil: "networkidle" });
+
+      const mobile = viewport.width < 720;
+      const stage = page.locator(".login-stage");
+      const mobileLogo = page.locator(".login-mobile-logo");
+      const themeButton = page.getByRole("button", { name: "Switch to dark mode" });
+      await expect(stage)[mobile ? "toBeHidden" : "toBeVisible"]();
+      await expect(mobileLogo)[mobile ? "toBeVisible" : "toBeHidden"]();
+      await expect(themeButton).toHaveCSS("height", "44px");
+
+      if (mobile) {
+        await expect(mobileLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg");
+        expect(await mobileLogo.boundingBox()).toMatchObject({ width: 210, height: 58 });
+        await expect(mobileLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        expect(await page.evaluate(() => performance.getEntriesByType("resource").some(entry => entry.name.includes("login-medtech-hero.webp")))).toBe(false);
+        await themeButton.click();
+        await expect(mobileLogo.locator("img")).toHaveCSS("content", /medtech-lockup-on-navy\.svg/);
+      } else {
+        const stageLogo = page.locator(".login-stage-logo");
+        await expect(stageLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup-on-navy.svg");
+        expect((await stageLogo.boundingBox())!.width).toBe(viewport.width === 1440 ? 420 : 320);
+        await expect(stageLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
+        expect(await page.evaluate(() => performance.getEntriesByType("resource").some(entry => entry.name.includes("login-medtech-hero.webp")))).toBe(true);
+      }
+
+      await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
+      await expect(page.getByLabel("Email")).toHaveCSS("height", "52px");
+      await expect(page.getByLabel("Password")).toHaveCSS("height", "52px");
+      await page.getByLabel("Email").focus();
+      expect(await page.getByLabel("Email").evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    });
+  }
+
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator(".login-stage")).toBeVisible();
+  const contrast = await page.evaluate(() => {
+    const luminance = (color: string) => {
+      const values = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(value => value / 255)
+        .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * values[0] + 0.7152 * values[1] + 0.0722 * values[2];
+    };
+    const ratio = (foreground: Element, background: Element) => {
+      const lighter = Math.max(luminance(getComputedStyle(foreground).color), luminance(getComputedStyle(background).backgroundColor));
+      const darker = Math.min(luminance(getComputedStyle(foreground).color), luminance(getComputedStyle(background).backgroundColor));
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    return {
+      heading: ratio(document.querySelector(".login-intro h1")!, document.querySelector(".login-card")!),
+      action: ratio(document.querySelector(".login-card .primary")!, document.querySelector(".login-card .primary")!)
+    };
+  });
+  expect(contrast.heading).toBeGreaterThanOrEqual(4.5);
+  expect(contrast.action).toBeGreaterThanOrEqual(4.5);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator(".login-card")).toHaveCSS("animation-name", "none");
+  await expect(page.locator(".login-stage-art")).toHaveCSS("animation-name", "none");
+});
+
+test("local login preserves validation, busy state and backend session flow", async ({ page }) => {
+  let loginBody: unknown;
+  await page.addInitScript(() => sessionStorage.clear());
+  await page.route("**/api/v1/**", async route => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/v1/auth/me") {
+      return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false }) });
+    }
+    if (pathname === "/api/v1/auth/login") {
+      loginBody = route.request().postDataJSON();
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const { csrfToken, ...user } = session;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: { csrfToken, user } })
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: [], meta: { total: 0, page: 1, limit: 100, totalPages: 1 } })
+    });
+  });
+
   await page.goto("/");
-  const logo = page.locator(".login-logo");
-  await expect(logo).toBeVisible();
-  expect(await logo.boundingBox()).toMatchObject({ width: 200, height: 160 });
-  await expect(logo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(logo.locator("img")).toHaveCSS("transform", "none");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByLabel("Email")).toHaveAttribute("required", "");
+  await expect(page.getByLabel("Email")).toBeFocused();
+
+  await page.getByLabel("Email").fill("ui.admin@example.invalid");
+  await page.getByLabel("Password").fill("valid-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Signing in..." })).toBeDisabled();
+  await expect(page.locator(".app")).toBeVisible();
+  expect(loginBody).toEqual({ email: "ui.admin@example.invalid", password: "valid-password" });
 });
 
 test("unknown URLs show an explicit not-found page", async ({ page }) => {

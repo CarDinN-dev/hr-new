@@ -152,7 +152,6 @@ const employeeFieldOptions: Record<string, readonly string[]> = {
   "Company Food": ["Yes", "No"],
   "Company Fuel Card": ["Yes", "No"]
 };
-const LoginScene = React.lazy(() => importWithReleaseRetry("login-scene", () => import("./LoginScene")));
 const SystemAccessPage = React.lazy(() => importWithReleaseRetry("system-access", () => import("./features/system-access").then(module => ({ default: module.SystemAccessPage }))));
 const HierarchyPage = React.lazy(() => importWithReleaseRetry("hierarchy-page", () => import("./features/hierarchy-page").then(module => ({ default: module.HierarchyPage }))));
 const AuditHistoryPage = React.lazy(() => importWithReleaseRetry("audit-page", () => import("./features/audit-page").then(module => ({ default: module.AuditHistoryPage }))));
@@ -263,32 +262,52 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
 
   return (
     <main className="login-shell">
-      <section className="login-card">
-        <div className="login-brand">
-          <span className="login-logo"><img src="/logos/brand-mark.svg" alt="MedTech" /></span>
-          <span><ShieldCheck size={18} /> HR sign in</span>
+      <section className="login-card" aria-labelledby="login-title">
+        <header className="login-header">
+          <div className="login-product">
+            <img src="/logos/brand-mark.svg" alt="" aria-hidden="true" />
+            <span>HR sign in</span>
+          </div>
+          <button
+            className="theme-login"
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </header>
+
+        <div className="login-content">
+          <div className="login-mobile-logo">
+            <img src="/logos/medtech-lockup.svg" alt="MedTech Corporation Trading W.L.L." />
+          </div>
+          <div className="login-intro">
+            <span className="login-eyebrow"><ShieldCheck size={15} /> Secure HR access</span>
+            <h1 id="login-title">Welcome back</h1>
+            <p>Sign in with your MedTech work account.</p>
+          </div>
+          <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
+            <ShieldCheck size={17} /> Sign in with Microsoft
+          </button>
+          <div className="login-divider" aria-hidden="true"><span>or</span></div>
+          <form className="login-form" onSubmit={submit}>
+            <label htmlFor="login-email"><span>Email</span><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+            <label htmlFor="login-password"><span>Password</span><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
+            <button className="primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
+          </form>
+          <div className="login-assurance"><ShieldCheck size={15} /><span>Role-based access. Protected activity is audited.</span></div>
         </div>
-        <div>
-          <p className="section-label">MedTech Corporation Trading W.L.L.</p>
-          <h1>MedTech HR</h1>
-          <p className="muted">Sign in to manage employee records, attendance, leave and payroll.</p>
-        </div>
-        <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
-          <ShieldCheck size={17} /> Sign in with Microsoft
-        </button>
-        <div className="login-divider" aria-hidden="true"><span>or</span></div>
-        <form className="login-form" onSubmit={submit}>
-          <label htmlFor="login-email">Email<input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
-          <label htmlFor="login-password">Password<input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
-          <button className="primary" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
-        </form>
-        <button className="theme-login" type="button" onClick={toggleTheme}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Light mode" : "Dark mode"}</button>
+
+        <footer className="login-footer">MedTech Corporation Trading W.L.L.</footer>
       </section>
       <section className="login-stage" aria-label="MedTech HR system">
-        <React.Suspense fallback={<div className="login-scene-fallback" />}><LoginScene /></React.Suspense>
+        <div className="login-stage-art" aria-hidden="true" />
+        <div className="login-stage-logo"><img src="/logos/medtech-lockup-on-navy.svg" alt="MedTech Corporation Trading W.L.L." /></div>
         <div className="login-stage-copy">
           <span>HR and payroll</span>
-          <strong>Employee records in one place.</strong>
+          <strong>People, payroll, and attendance. One secure workspace.</strong>
           <small>Access is limited to the work assigned to you.</small>
         </div>
       </section>
