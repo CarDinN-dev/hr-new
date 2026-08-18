@@ -4528,11 +4528,12 @@ summary:focus-visible,
 
 .app .logo-crop.wordmark {
   width: 100%;
-  height: 66px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  height: 72px;
+  padding: 4px 6px;
+  border: 1px solid rgba(35, 50, 106, 0.14);
+  border-radius: 12px;
+  background: #f5f5f7;
+  box-shadow: 0 8px 20px rgba(8, 15, 36, 0.14);
 }
 
 .app .logo-crop img,
@@ -4543,13 +4544,6 @@ summary:focus-visible,
   height: 100%;
   object-fit: contain;
   transform: none;
-}
-
-.app .sidebar .logo-crop img,
-:root[data-theme="dark"] .app .hero-logo-crop img,
-:root[data-theme="dark"] .app .topbar-brand-mark img {
-  content: url("/logos/medtech-lockup-on-navy.svg?v=3");
-  filter: none;
 }
 
 .app .nav-list {
@@ -4645,19 +4639,6 @@ summary:focus-visible,
   gap: 12px;
 }
 
-.app .desktop-sidebar-toggle,
-.app .mobile-menu,
-.app .icon-button,
-.app .sidebar-close,
-.app .modal-close {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0;
-  border-radius: var(--control-radius);
-}
-
 .app :is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close, .modal-close):hover:not(:disabled) {
   transform: none;
 }
@@ -4676,6 +4657,13 @@ summary:focus-visible,
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+:root[data-theme="dark"] .app .topbar-brand-mark {
+  padding: 2px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 12px;
+  background: #f5f5f7;
 }
 
 .sidebar-collapsed .topbar-brand-mark {
@@ -4732,11 +4720,6 @@ summary:focus-visible,
 .app .account-menu--topbar .account-trigger {
   display: inline-grid;
   place-items: center;
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
   background: var(--surface);
@@ -4988,6 +4971,22 @@ summary:focus-visible,
   box-shadow: none;
   font-size: 0.8rem;
   font-weight: 680;
+}
+
+.app button:is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close, .modal-close),
+.app .account-menu--topbar > button.account-trigger,
+:root[data-theme="dark"] .app button:is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close, .modal-close),
+:root[data-theme="dark"] .app .account-menu--topbar > button.account-trigger {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  padding: 0;
+}
+
+.app button:is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close, .modal-close) > svg {
+  flex: 0 0 auto;
 }
 
 .app button:hover:not(:disabled):not(.scrim),
@@ -5721,8 +5720,13 @@ summary:focus-visible,
 }
 
 .login-stage-logo {
-  width: clamp(320px, 32vw, 420px);
+  width: clamp(348px, 34vw, 448px);
   max-width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 12px;
+  background: #f5f5f7;
+  box-shadow: 0 16px 38px rgba(4, 9, 25, 0.2);
   animation: login-copy-reveal 620ms 110ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -5793,7 +5797,7 @@ summary:focus-visible,
   }
 
   .login-stage-logo {
-    width: min(320px, 100%);
+    width: min(348px, 100%);
   }
 }
 
@@ -5830,8 +5834,13 @@ summary:focus-visible,
     margin-bottom: 18px;
   }
 
-  :root[data-theme="dark"] .login-mobile-logo img {
-    content: url("/logos/medtech-lockup-on-navy.svg?v=3");
+  :root[data-theme="dark"] .login-mobile-logo {
+    width: 226px;
+    height: 70px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 12px;
+    background: #f5f5f7;
   }
 
   .login-card h1 {
@@ -5898,6 +5907,13 @@ summary:focus-visible,
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+:root[data-theme="dark"] .dashboard-layout .hero-logo-crop {
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 12px;
+  background: #f5f5f7;
 }
 
 .dashboard-layout .hero-panel h2 {
@@ -6641,7 +6657,8 @@ summary:focus-visible,
     transition: visibility 0s linear var(--motion-standard), transform var(--motion-standard);
   }
 
-  .app .sidebar.open {
+  .app .sidebar.open,
+  :root[data-theme="dark"] .app .sidebar.open {
     visibility: visible;
     pointer-events: auto;
     transform: translateX(0);
@@ -6668,7 +6685,7 @@ summary:focus-visible,
 
   .app .topbar-brand-mark img,
   :root[data-theme="dark"] .app .topbar-brand-mark img {
-    content: url("/logos/brand-mark.svg?v=3");
+    content: url("/logos/brand-mark.svg?v=4");
   }
 
   .app .sidebar-close {
@@ -6697,20 +6714,6 @@ summary:focus-visible,
   .app .topbar-actions {
     grid-column: 3;
     grid-row: 1;
-  }
-
-  .app :is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close) {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
-  }
-
-  .app .account-menu--topbar .account-trigger {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
   }
 
   .app .content {

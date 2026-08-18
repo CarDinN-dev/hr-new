@@ -265,7 +265,7 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
       <section className="login-card" aria-labelledby="login-title">
         <header className="login-header">
           <div className="login-product">
-            <img src="/logos/brand-mark.svg?v=3" alt="" aria-hidden="true" />
+            <img src="/logos/brand-mark.svg?v=4" alt="" aria-hidden="true" />
             <span>HR sign in</span>
           </div>
           <button
@@ -281,7 +281,7 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
 
         <div className="login-content">
           <div className="login-mobile-logo">
-            <img src="/logos/medtech-lockup.svg?v=3" alt="MedTech Corporation Trading W.L.L." />
+            <img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." />
           </div>
           <div className="login-intro">
             <span className="login-eyebrow"><ShieldCheck size={15} /> Secure HR access</span>
@@ -304,7 +304,7 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
       <section className="login-stage" aria-label="MedTech HR system">
         <div className="login-stage-art" aria-hidden="true" />
         <div className="login-stage-content">
-          <div className="login-stage-logo"><img src="/logos/medtech-lockup-on-navy.svg?v=3" alt="MedTech Corporation Trading W.L.L." /></div>
+          <div className="login-stage-logo"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></div>
           <div className="login-stage-copy">
             <span>HR and payroll</span>
             <strong>People, payroll, and attendance. One secure workspace.</strong>
@@ -621,7 +621,7 @@ function App() {
         hidden={!compactNavigation && sidebarCollapsed}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=3" alt="MedTech Corporation Trading W.L.L." /></span>
+          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -646,7 +646,7 @@ function App() {
         <header className="topbar">
           <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
           <div className="topbar-heading">
-            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-lockup.svg?v=3" alt="" /></span>
+            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-lockup.svg?v=4" alt="" /></span>
             <button
               className="desktop-sidebar-toggle"
               type="button"
@@ -894,7 +894,7 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="section-label">Dashboard</p>
-          <span className="hero-logo-crop"><img src="/logos/medtech-lockup.svg?v=3" alt="MedTech Corporation Trading W.L.L." /></span>
+          <span className="hero-logo-crop"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
           <h2>Today at MedTech</h2>
           <p>Review attendance, leave requests, payroll and employee records.</p>
         </div>
