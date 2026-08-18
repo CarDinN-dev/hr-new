@@ -399,6 +399,8 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
       await expect(stage)[mobile ? "toBeHidden" : "toBeVisible"]();
       await expect(mobileLogo)[mobile ? "toBeVisible" : "toBeHidden"]();
       await expect(themeButton).toHaveCSS("height", "44px");
+      await expect(page.getByText("Role-based access. Protected activity is audited.", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Access is limited to the work assigned to you.", { exact: true })).toHaveCount(0);
 
       if (mobile) {
         await expect(mobileLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg");
@@ -408,10 +410,18 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
         await themeButton.click();
         await expect(mobileLogo.locator("img")).toHaveCSS("content", /medtech-lockup-on-navy\.svg/);
       } else {
+        const headerMark = page.locator(".login-product img");
         const stageLogo = page.locator(".login-stage-logo");
+        const stageCopy = page.locator(".login-stage-copy");
+        expect(await headerMark.boundingBox()).toMatchObject({ width: 56, height: 45 });
         await expect(stageLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup-on-navy.svg");
         expect((await stageLogo.boundingBox())!.width).toBe(viewport.width === 1440 ? 420 : 320);
         await expect(stageLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(stageLogo).toHaveCSS("opacity", "1");
+        await expect(stageCopy).toHaveCSS("opacity", "1");
+        const logoBox = (await stageLogo.boundingBox())!;
+        const copyBox = (await stageCopy.boundingBox())!;
+        expect(copyBox.y - (logoBox.y + logoBox.height)).toBeGreaterThanOrEqual(27);
         await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
         expect(await page.evaluate(() => performance.getEntriesByType("resource").some(entry => entry.name.includes("login-medtech-hero.webp")))).toBe(true);
       }
@@ -424,6 +434,10 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     });
   }
+
+  const stageLogoAsset = await page.evaluate(async () => (await fetch("/logos/medtech-lockup-on-navy.svg")).text());
+  expect(stageLogoAsset).toContain("#D7A7BE");
+  expect(stageLogoAsset).not.toContain("rgb(96.078431%, 97.647059%, 100%)");
 
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

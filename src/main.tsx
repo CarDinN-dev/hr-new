@@ -297,18 +297,18 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
             <label htmlFor="login-password"><span>Password</span><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
             <button className="primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
           </form>
-          <div className="login-assurance"><ShieldCheck size={15} /><span>Role-based access. Protected activity is audited.</span></div>
         </div>
 
         <footer className="login-footer">MedTech Corporation Trading W.L.L.</footer>
       </section>
       <section className="login-stage" aria-label="MedTech HR system">
         <div className="login-stage-art" aria-hidden="true" />
-        <div className="login-stage-logo"><img src="/logos/medtech-lockup-on-navy.svg" alt="MedTech Corporation Trading W.L.L." /></div>
-        <div className="login-stage-copy">
-          <span>HR and payroll</span>
-          <strong>People, payroll, and attendance. One secure workspace.</strong>
-          <small>Access is limited to the work assigned to you.</small>
+        <div className="login-stage-content">
+          <div className="login-stage-logo"><img src="/logos/medtech-lockup-on-navy.svg" alt="MedTech Corporation Trading W.L.L." /></div>
+          <div className="login-stage-copy">
+            <span>HR and payroll</span>
+            <strong>People, payroll, and attendance. One secure workspace.</strong>
+          </div>
         </div>
       </section>
     </main>

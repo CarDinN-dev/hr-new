@@ -5508,8 +5508,8 @@ summary:focus-visible,
 }
 
 .login-product img {
-  width: 42px;
-  height: 34px;
+  width: 56px;
+  height: 45px;
   display: block;
   object-fit: contain;
 }
@@ -5672,26 +5672,6 @@ summary:focus-visible,
   border-top: 1px solid var(--login-line);
 }
 
-.login-assurance {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 2px;
-  color: var(--login-muted);
-  font-size: 0.72rem;
-  line-height: 1.55;
-}
-
-.login-assurance svg {
-  margin-top: 1px;
-  flex: 0 0 auto;
-  color: #23326a;
-}
-
-:root[data-theme="dark"] .login-assurance svg {
-  color: #ff8b9a;
-}
-
 .login-footer {
   color: var(--login-muted);
   font-size: 0.68rem;
@@ -5731,12 +5711,18 @@ summary:focus-visible,
   animation: login-stage-reveal 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.login-stage-logo {
+.login-stage-content {
   position: absolute;
   left: clamp(44px, 6vw, 112px);
-  bottom: clamp(205px, 23vh, 265px);
-  width: min(420px, calc(100% - 88px));
-  height: 116px;
+  bottom: clamp(52px, 7vh, 82px);
+  width: min(540px, calc(100% - 88px));
+  display: grid;
+  gap: 28px;
+}
+
+.login-stage-logo {
+  width: clamp(320px, 32vw, 420px);
+  max-width: 100%;
   animation: login-copy-reveal 620ms 110ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -5749,18 +5735,18 @@ summary:focus-visible,
   object-position: left center;
 }
 
+.login-stage-logo img {
+  height: auto;
+}
+
 .login-stage-copy {
-  position: absolute;
-  left: clamp(44px, 6vw, 112px);
-  bottom: clamp(52px, 7vh, 82px);
-  width: min(540px, calc(100% - 88px));
+  width: 100%;
   color: #ffffff;
   animation: login-copy-reveal 620ms 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .login-stage-copy span,
-.login-stage-copy strong,
-.login-stage-copy small {
+.login-stage-copy strong {
   display: block;
 }
 
@@ -5779,13 +5765,6 @@ summary:focus-visible,
   font-weight: 650;
   letter-spacing: -0.045em;
   line-height: 1.06;
-}
-
-.login-stage-copy small {
-  margin-top: 14px;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 0.82rem;
-  line-height: 1.55;
 }
 
 @keyframes login-stage-reveal {
@@ -5808,15 +5787,13 @@ summary:focus-visible,
     padding: 32px;
   }
 
-  .login-stage-logo {
-    width: min(320px, calc(100% - 64px));
-    height: 88px;
-    left: 48px;
-  }
-
-  .login-stage-copy {
+  .login-stage-content {
     left: 48px;
     width: calc(100% - 80px);
+  }
+
+  .login-stage-logo {
+    width: min(320px, 100%);
   }
 }
 
