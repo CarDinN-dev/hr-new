@@ -246,7 +246,7 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
   expect(heroLogo).toMatchObject({ width: 360, height: 99 });
   await expect(page.locator(".hero-logo-crop img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
@@ -413,8 +413,8 @@ test("compact header controls keep their geometry through dark-mode changes", as
   await page.waitForTimeout(250);
   expect(await headerMetrics()).toEqual(expected);
 
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
-  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgb(245, 245, 247)");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");

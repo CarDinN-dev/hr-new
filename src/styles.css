@@ -4532,7 +4532,7 @@ summary:focus-visible,
   padding: 4px 6px;
   border: 1px solid rgba(35, 50, 106, 0.14);
   border-radius: 12px;
-  background: #f5f5f7;
+  background: transparent;
   box-shadow: 0 8px 20px rgba(8, 15, 36, 0.14);
 }
 
@@ -5913,7 +5913,7 @@ summary:focus-visible,
   padding: 5px 8px;
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 12px;
-  background: #f5f5f7;
+  background: transparent;
 }
 
 .dashboard-layout .hero-panel h2 {
