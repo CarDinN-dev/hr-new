@@ -237,12 +237,18 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  const headerLogo = page.locator(".topbar-brand-mark img");
-  expect(await headerLogo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg?v=4", width: 840, transform: "none" });
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 184, height: 50 });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCount(0);
-  await expect(page.locator(".hero-logo-crop")).toHaveCount(0);
+  const logo = page.locator(".brand-block img");
+  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg?v=4", width: 840, transform: "none" });
+  const [sidebarLogo, heroLogo] = await Promise.all([
+    page.locator(".logo-crop.wordmark").boundingBox(),
+    page.locator(".hero-logo-crop").boundingBox(),
+  ]);
+  expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
+  expect(heroLogo).toMatchObject({ width: 360, height: 99 });
+  await expect(page.locator(".hero-logo-crop img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
+  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
 
@@ -267,11 +273,14 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.goto("/");
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  const mobileHeaderLogo = await page.locator(".topbar-brand-mark").boundingBox();
+  const [mobileHeroLogo, mobileHeaderLogo] = await Promise.all([
+    page.locator(".hero-logo-crop").boundingBox(),
+    page.locator(".topbar-brand-mark").boundingBox(),
+  ]);
+  expect(mobileHeroLogo).toMatchObject({ width: 320, height: 88 });
   expect(mobileHeaderLogo).toMatchObject({ width: 60, height: 48 });
   await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=4/);
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".hero-logo-crop")).toHaveCount(0);
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
   const darkDashboardColors = await page.evaluate(() => {
     const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
     return { heading: getComputedStyle(document.querySelector<HTMLElement>(".hero-panel h2")!).color, snapshot: getComputedStyle(snapshot).color, surface: getComputedStyle(snapshot).backgroundColor };
@@ -404,13 +413,11 @@ test("compact header controls keep their geometry through dark-mode changes", as
   await page.waitForTimeout(250);
   expect(await headerMetrics()).toEqual(expected);
 
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCount(0);
-  await expect(page.locator(".hero-logo-crop")).toHaveCount(0);
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 50, height: 50 });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=4/);
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
+  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgb(245, 245, 247)");
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
 
   await page.setViewportSize({ width: 1024, height: 768 });
@@ -424,7 +431,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
     const iconBox = button.querySelector("svg")!.getBoundingClientRect();
     return { button: [buttonBox.width, buttonBox.height], icon: [iconBox.width, iconBox.height], padding: getComputedStyle(button).padding };
   })).toEqual({ button: [44, 44], icon: [20, 20], padding: "0px" });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
   await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=4/);
 
   await menu.click();

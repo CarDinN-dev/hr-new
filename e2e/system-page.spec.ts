@@ -475,7 +475,7 @@ test("Sidebar surfaces and topbar account menu follow the selected theme", async
 
   const color = (selector: string, property: "backgroundColor" | "color" | "backgroundImage") => page.locator(selector).evaluate((element, propertyName) => getComputedStyle(element)[propertyName], property);
   await expect.poll(() => color(".sidebar", "backgroundImage")).toContain("linear-gradient");
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCount(0);
+  await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgb(245, 245, 247)");
   await expect(page.locator(".sidebar .account-menu")).toHaveCount(0);
   const accountTrigger = page.getByRole("button", { name: "Open account menu" });
   await expect(accountTrigger).toBeVisible();
@@ -488,7 +488,7 @@ test("Sidebar surfaces and topbar account menu follow the selected theme", async
   await expect(page.getByRole("menu", { name: "Account options" })).toBeHidden();
   await accountTrigger.click();
   await expect(page.getByRole("menu", { name: "Account options" })).toBeVisible();
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCount(0);
+  await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgb(245, 245, 247)");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(accountTrigger).toHaveCSS("width", "44px");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
