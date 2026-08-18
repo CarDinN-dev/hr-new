@@ -238,14 +238,14 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const logo = page.locator(".brand-block img");
-  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg", width: 840, transform: "none" });
+  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg?v=3", width: 840, transform: "none" });
   const [sidebarLogo, heroLogo] = await Promise.all([
     page.locator(".logo-crop.wordmark").boundingBox(),
     page.locator(".hero-logo-crop").boundingBox(),
   ]);
-  expect(sidebarLogo).toMatchObject({ width: 201, height: 58 });
-  expect(heroLogo).toMatchObject({ width: 320, height: 88 });
-  await expect(page.locator(".hero-logo-crop img")).toHaveAttribute("src", "/logos/medtech-lockup.svg");
+  expect(sidebarLogo).toMatchObject({ width: 229, height: 66 });
+  expect(heroLogo).toMatchObject({ width: 360, height: 99 });
+  await expect(page.locator(".hero-logo-crop img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=3");
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
@@ -278,7 +278,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     page.locator(".topbar-brand-mark").boundingBox(),
   ]);
   expect(mobileHeroLogo).toMatchObject({ width: 320, height: 88 });
-  expect(mobileHeaderLogo).toMatchObject({ width: 64, height: 52 });
+  expect(mobileHeaderLogo).toMatchObject({ width: 60, height: 48 });
+  await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=3/);
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const darkDashboardColors = await page.evaluate(() => {
     const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
@@ -331,7 +332,7 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await expect(desktopToggle).toHaveCSS("width", "40px");
   await desktopToggle.click();
   await expect(sidebar).toBeHidden();
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 164, height: 46 });
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 184, height: 50 });
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
@@ -403,7 +404,7 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
       await expect(page.getByText("Access is limited to the work assigned to you.", { exact: true })).toHaveCount(0);
 
       if (mobile) {
-        await expect(mobileLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg");
+        await expect(mobileLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=3");
         expect(await mobileLogo.boundingBox()).toMatchObject({ width: 210, height: 58 });
         await expect(mobileLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
         expect(await page.evaluate(() => performance.getEntriesByType("resource").some(entry => entry.name.includes("login-medtech-hero.webp")))).toBe(false);
@@ -413,8 +414,8 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
         const headerMark = page.locator(".login-product img");
         const stageLogo = page.locator(".login-stage-logo");
         const stageCopy = page.locator(".login-stage-copy");
-        expect(await headerMark.boundingBox()).toMatchObject({ width: 56, height: 45 });
-        await expect(stageLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup-on-navy.svg");
+        expect(await headerMark.boundingBox()).toMatchObject({ width: 72, height: 58 });
+        await expect(stageLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup-on-navy.svg?v=3");
         expect((await stageLogo.boundingBox())!.width).toBe(viewport.width === 1440 ? 420 : 320);
         await expect(stageLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
         await expect(stageLogo).toHaveCSS("opacity", "1");
@@ -435,7 +436,7 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
     });
   }
 
-  const stageLogoAsset = await page.evaluate(async () => (await fetch("/logos/medtech-lockup-on-navy.svg")).text());
+  const stageLogoAsset = await page.evaluate(async () => (await fetch("/logos/medtech-lockup-on-navy.svg?v=3")).text());
   expect(stageLogoAsset).toContain("#D7A7BE");
   expect(stageLogoAsset).not.toContain("rgb(96.078431%, 97.647059%, 100%)");
 

@@ -4501,8 +4501,8 @@ summary:focus-visible,
 
 .app .sidebar,
 :root[data-theme="dark"] .app .sidebar {
-  width: 252px;
-  flex: 0 0 252px;
+  width: 272px;
+  flex: 0 0 272px;
   padding: 0 14px 14px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background:
@@ -4517,18 +4517,18 @@ summary:focus-visible,
 }
 
 .app .brand-block {
-  min-height: 88px;
+  min-height: 96px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 14px 6px;
+  padding: 14px 2px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.11);
 }
 
 .app .logo-crop.wordmark {
   width: 100%;
-  height: 58px;
+  height: 66px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -4548,7 +4548,7 @@ summary:focus-visible,
 .app .sidebar .logo-crop img,
 :root[data-theme="dark"] .app .hero-logo-crop img,
 :root[data-theme="dark"] .app .topbar-brand-mark img {
-  content: url("/logos/medtech-lockup-on-navy.svg");
+  content: url("/logos/medtech-lockup-on-navy.svg?v=3");
   filter: none;
 }
 
@@ -4669,8 +4669,8 @@ summary:focus-visible,
 
 .topbar-brand-mark {
   display: none;
-  width: 164px;
-  height: 46px;
+  width: 184px;
+  height: 50px;
   flex: 0 0 auto;
   padding: 0;
   border: 0;
@@ -5500,7 +5500,7 @@ summary:focus-visible,
 .login-product {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 13px;
   color: var(--login-muted);
   font-size: 0.78rem;
   font-weight: 720;
@@ -5508,8 +5508,8 @@ summary:focus-visible,
 }
 
 .login-product img {
-  width: 56px;
-  height: 45px;
+  width: 72px;
+  height: 58px;
   display: block;
   object-fit: contain;
 }
@@ -5831,7 +5831,7 @@ summary:focus-visible,
   }
 
   :root[data-theme="dark"] .login-mobile-logo img {
-    content: url("/logos/medtech-lockup-on-navy.svg");
+    content: url("/logos/medtech-lockup-on-navy.svg?v=3");
   }
 
   .login-card h1 {
@@ -5891,8 +5891,8 @@ summary:focus-visible,
 }
 
 .dashboard-layout .hero-logo-crop {
-  width: min(320px, 100%);
-  height: 88px;
+  width: min(360px, 100%);
+  height: 99px;
   margin-bottom: 12px;
   padding: 0;
   border: 0;
@@ -6662,8 +6662,13 @@ summary:focus-visible,
   }
 
   .app .topbar-brand-mark {
-    width: 64px;
-    height: 52px;
+    width: 60px;
+    height: 48px;
+  }
+
+  .app .topbar-brand-mark img,
+  :root[data-theme="dark"] .app .topbar-brand-mark img {
+    content: url("/logos/brand-mark.svg?v=3");
   }
 
   .app .sidebar-close {
