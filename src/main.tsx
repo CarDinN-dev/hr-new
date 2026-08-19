@@ -1065,6 +1065,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
   const searchResults = usePageSearchList<{ id: string }>("employees", "/employees");
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
+  const [page, setPage] = useState(1);
   const activeCount = state.employees.filter(employee => employee.status === "Active").length;
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
@@ -1076,6 +1077,11 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
     employee => employee.id,
     match => match.id,
   ), [state.employees, searchActive, searchResults.data, department, status]);
+  const totalPages = Math.max(1, Math.ceil(employees.length / 20));
+  const pageEmployees = employees.slice((page - 1) * 20, page * 20);
+
+  useEffect(() => { setPage(1); }, [department, status, searchActive, searchResults.data]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   function edit(employee?: EmployeeRecord) {
     setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
@@ -1103,7 +1109,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
         <div>
           <p className="section-label">Employees</p>
           <h3>Employee Directory</h3>
-          <span>{employees.length} shown / {state.employees.length} total records</span>
+          <span>{employees.length} matched / {state.employees.length} total records</span>
         </div>
         <div className="employee-hero-actions">
           {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("employee_directory", state, new Date().getFullYear(), new Date().getMonth() + 1), "employee_directory"))}><Download size={16} /> Directory PDF</button>}
@@ -1126,7 +1132,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
         </div>
         {employees.length ? (
           <div className="employee-card-grid">
-            {employees.map(employee => {
+            {pageEmployees.map(employee => {
               const salary = employeeSalary(employee);
               return (
                 <article className="employee-card" key={employee.id}>
@@ -1162,6 +1168,13 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
             })}
           </div>
         ) : <div className="empty">No employees match the filters.</div>}
+        {employees.length > 20 && <div className="audit-pagination">
+          <span className="muted" aria-live="polite">Page {page} of {totalPages} · 20 employees per page</span>
+          <div className="inline-controls">
+            <button disabled={page <= 1} onClick={() => setPage(current => current - 1)}>Previous</button>
+            <button disabled={page >= totalPages} onClick={() => setPage(current => current + 1)}>Next</button>
+          </div>
+        </div>}
       </div>
     </section>
   );
