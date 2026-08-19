@@ -1,16 +1,18 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createPrivateKey, createSign, randomUUID, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const graphOrigin = 'https://graph.microsoft.com';
-const senderEmail = 'no-reply@med-tech.com';
 const requestTimeoutMs = 15_000;
 const retryDelaysSeconds = [60, 300, 900, 3_600] as const;
 const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const certificateThumbprintPattern = /^[0-9a-f]{40}$/i;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type LeaveEmailKind = 'SUBMITTED' | 'APPROVAL_REQUIRED' | 'REASSIGNED' | 'RETURNED' | 'FINAL' | 'BLOCKED' | 'WORKFLOW_UPDATED';
+export type LeaveEmailKind = 'SUBMITTED' | 'APPROVAL_REQUIRED' | 'PROGRESS' | 'REASSIGNED' | 'RETURNED' | 'FINAL' | 'BLOCKED' | 'WORKFLOW_UPDATED';
 
 export type LeaveEmailContext = {
   kind: LeaveEmailKind;
@@ -24,7 +26,6 @@ export type LeaveEmailContext = {
   stage?: string | null;
   previousStage?: string | null;
   status?: string | null;
-  reason?: string;
 };
 
 class GraphMailError extends Error {
@@ -39,7 +40,9 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
   private readonly emailEnabled: boolean;
   private readonly tenantId?: string;
   private readonly clientId?: string;
-  private readonly clientSecret?: string;
+  private readonly senderEmail?: string;
+  private readonly certificateThumbprint?: string;
+  private readonly privateKey?: KeyObject;
   private readonly leaveUrl?: string;
   private readonly logoBytes?: string;
   private token?: { value: string; expiresAt: number };
@@ -50,12 +53,15 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     this.emailEnabled = config.get<string>('LEAVE_EMAIL_ENABLED', 'false').toLowerCase() === 'true';
     if (!this.emailEnabled) return;
 
-    this.tenantId = this.requiredGuid(config, 'MICROSOFT_TENANT_ID');
-    this.clientId = this.requiredGuid(config, 'MICROSOFT_CLIENT_ID');
-    this.clientSecret = config.getOrThrow<string>('MICROSOFT_CLIENT_SECRET');
-    if (this.clientSecret.length < 16) throw new Error('MICROSOFT_CLIENT_SECRET is invalid.');
-    const redirect = new URL(config.getOrThrow<string>('MICROSOFT_REDIRECT_URI'));
-    this.leaveUrl = new URL('/leave', redirect.origin).href;
+    this.tenantId = this.requiredGuid(config, 'MAIL_GRAPH_TENANT_ID');
+    this.clientId = this.requiredGuid(config, 'MAIL_GRAPH_CLIENT_ID');
+    this.senderEmail = this.requiredEmail(config, 'MAIL_FROM');
+    this.certificateThumbprint = this.requiredCertificateThumbprint(config);
+    this.privateKey = this.loadPrivateKey(config.getOrThrow<string>('MAIL_GRAPH_CERT_PATH'));
+    const erpUrl = new URL(config.getOrThrow<string>('HR_ERP_URL'));
+    if (erpUrl.protocol !== 'https:') throw new Error('HR_ERP_URL must use HTTPS.');
+    erpUrl.pathname = '/leave'; erpUrl.search = ''; erpUrl.hash = '';
+    this.leaveUrl = erpUrl.href;
     this.logoBytes = readFileSync(resolve(process.cwd(), 'assets/recruitment-templates/brand-mark.png')).toString('base64');
   }
 
@@ -86,11 +92,14 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
 
     if (context.kind === 'SUBMITTED') {
       subject = `Leave request submitted — ${leaveType}`;
-      lead = `Your ${this.escape(context.leaveType)} request has been submitted${stage ? ` and is pending ${this.escape(stage)} review` : ''}. You will receive another email if a correction is required or when a final decision is made.`;
+      lead = `Your ${this.escape(context.leaveType)} request has been submitted${stage ? ` and is pending ${this.escape(stage)} review` : ''}. You will receive an update after each approval stage and when a final decision is made.`;
     } else if (context.kind === 'APPROVAL_REQUIRED') {
       subject = `Action required: ${employeeName}’s leave request`;
       lead = `${previousStage ? `The ${this.escape(previousStage)} review is complete. ` : ''}${this.escape(context.employeeName)} (${this.escape(context.employeeCode)}) has a leave request awaiting your ${this.escape(stage)} decision.`;
       action = 'Review leave request';
+    } else if (context.kind === 'PROGRESS') {
+      subject = `Leave request progressed — ${leaveType}`;
+      lead = `Your leave request has been approved by the ${this.escape(previousStage)} stage and is now awaiting ${this.escape(stage)} review.`;
     } else if (context.kind === 'REASSIGNED') {
       subject = `Leave approval reassigned to you — ${employeeName}`;
       lead = `This request has been reassigned to you and now requires your ${this.escape(stage)} decision.`;
@@ -111,20 +120,18 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
       lead = `This leave workflow has been updated and your approval is no longer required${status ? ` because the request is now ${this.escape(status)}` : ''}.`;
     }
 
-    const reason = context.reason?.trim();
     const detailRows = [
       ['Employee', `${context.employeeName} (${context.employeeCode})`],
       ['Leave type', context.leaveType],
       ['Dates', `${this.date(context.startDate)} – ${this.date(context.endDate)}`],
       ['Duration', this.duration(context.totalDays)],
       ...(stage ? [['Stage', stage]] : []),
-      ...(reason && ['RETURNED', 'FINAL', 'WORKFLOW_UPDATED'].includes(context.kind) ? [['Decision reason', reason]] : []),
     ].map(([label, value]) => `<tr><td style="padding:8px 12px;color:#667085;font-size:13px;border-bottom:1px solid #eaecf0;white-space:nowrap">${this.escape(label)}</td><td style="padding:8px 12px;color:#101828;font-size:13px;font-weight:600;border-bottom:1px solid #eaecf0">${this.escape(value)}</td></tr>`).join('');
     const safeUrl = this.escape(this.leaveUrl ?? '');
 
     return {
       subject: this.subjectText(subject).slice(0, 300),
-      htmlBody: `<div style="margin:0;padding:24px;background:#f7f8fa;font-family:Arial,Helvetica,sans-serif;color:#101828"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eaecf0;border-radius:12px"><tr><td style="padding:24px 28px;border-bottom:1px solid #eaecf0"><table role="presentation" cellspacing="0" cellpadding="0"><tr><td><img src="cid:medtech-logo" width="72" alt="MedTech logo" style="display:block;width:72px;height:auto"></td><td style="padding-left:14px;font-size:20px;font-weight:700;color:#24366f">MedTech HR ERP</td></tr></table></td></tr><tr><td style="padding:28px"><p style="margin:0 0 16px;font-size:16px;line-height:24px">Hi ${this.escape(context.recipientName || 'there')},</p><p style="margin:0 0 20px;font-size:15px;line-height:23px;color:#344054">${lead}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;border:1px solid #eaecf0;border-radius:8px;border-collapse:separate;border-spacing:0">${detailRows}</table><a href="${safeUrl}" style="display:inline-block;padding:11px 18px;background:#9e1b50;color:#ffffff;text-decoration:none;border-radius:7px;font-size:14px;font-weight:700">${this.escape(action)}</a><p style="margin:18px 0 0;font-size:12px;line-height:18px;color:#667085">If the button does not open, visit ${safeUrl}</p></td></tr><tr><td style="padding:18px 28px;background:#f9fafb;border-top:1px solid #eaecf0;font-size:12px;line-height:18px;color:#667085">This is an automated message from MedTech HR ERP. Replies to ${senderEmail} are not monitored.</td></tr></table></div>`,
+      htmlBody: `<div style="margin:0;padding:24px;background:#f7f8fa;font-family:Arial,Helvetica,sans-serif;color:#101828"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eaecf0;border-radius:12px"><tr><td style="padding:24px 28px;border-bottom:1px solid #eaecf0"><table role="presentation" cellspacing="0" cellpadding="0"><tr><td><img src="cid:medtech-logo" width="72" alt="MedTech logo" style="display:block;width:72px;height:auto"></td><td style="padding-left:14px;font-size:20px;font-weight:700;color:#24366f">MedTech HR ERP</td></tr></table></td></tr><tr><td style="padding:28px"><p style="margin:0 0 16px;font-size:16px;line-height:24px">Hi ${this.escape(context.recipientName || 'there')},</p><p style="margin:0 0 20px;font-size:15px;line-height:23px;color:#344054">${lead}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;border:1px solid #eaecf0;border-radius:8px;border-collapse:separate;border-spacing:0">${detailRows}</table><a href="${safeUrl}" style="display:inline-block;padding:11px 18px;background:#9e1b50;color:#ffffff;text-decoration:none;border-radius:7px;font-size:14px;font-weight:700">${this.escape(action)}</a><p style="margin:18px 0 0;font-size:12px;line-height:18px;color:#667085">If the button does not open, visit ${safeUrl}</p></td></tr><tr><td style="padding:18px 28px;background:#f9fafb;border-top:1px solid #eaecf0;font-size:12px;line-height:18px;color:#667085">This is an automated message from MedTech HR ERP. Replies to ${this.escape(this.senderEmail)} are not monitored.</td></tr></table></div>`,
     };
   }
 
@@ -162,7 +169,7 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     const token = await this.accessToken();
     let response: Response;
     try {
-      response = await fetch(`${graphOrigin}/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`, {
+      response = await fetch(`${graphOrigin}/v1.0/users/${encodeURIComponent(this.senderEmail!)}/sendMail`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -195,7 +202,13 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
       response = await fetch(`https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: this.clientId!, client_secret: this.clientSecret!, scope: `${graphOrigin}/.default`, grant_type: 'client_credentials' }),
+        body: new URLSearchParams({
+          client_id: this.clientId!,
+          client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+          client_assertion: this.clientAssertion(),
+          scope: `${graphOrigin}/.default`,
+          grant_type: 'client_credentials',
+        }),
         signal: AbortSignal.timeout(requestTimeoutMs),
       });
     } catch {
@@ -212,6 +225,39 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     const value = config.getOrThrow<string>(name);
     if (!guidPattern.test(value)) throw new Error(`${name} must be a valid GUID.`);
     return value;
+  }
+
+  private requiredEmail(config: ConfigService, name: string) {
+    const value = config.getOrThrow<string>(name).trim();
+    if (!emailPattern.test(value)) throw new Error(`${name} must be a valid email address.`);
+    return value;
+  }
+
+  private requiredCertificateThumbprint(config: ConfigService) {
+    const value = config.getOrThrow<string>('MAIL_GRAPH_CERT_THUMBPRINT').replace(/[\s:]/g, '');
+    if (!certificateThumbprintPattern.test(value)) throw new Error('MAIL_GRAPH_CERT_THUMBPRINT must be a SHA-1 certificate thumbprint.');
+    return Buffer.from(value, 'hex').toString('base64url');
+  }
+
+  private loadPrivateKey(path: string) {
+    try {
+      const key = createPrivateKey(readFileSync(path, 'utf8'));
+      if (key.asymmetricKeyType !== 'rsa') throw new Error('not RSA');
+      return key;
+    } catch {
+      throw new Error('MAIL_GRAPH_CERT_PATH must point to a readable RSA private key.');
+    }
+  }
+
+  private clientAssertion() {
+    const now = Math.floor(Date.now() / 1000);
+    const audience = `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`;
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', x5t: this.certificateThumbprint })).toString('base64url');
+    const claims = Buffer.from(JSON.stringify({ aud: audience, iss: this.clientId, sub: this.clientId, jti: randomUUID(), nbf: now - 60, exp: now + 600 })).toString('base64url');
+    const input = `${header}.${claims}`;
+    const signer = createSign('RSA-SHA256');
+    signer.update(input); signer.end();
+    return `${input}.${signer.sign(this.privateKey!).toString('base64url')}`;
   }
 
   private escape(value: unknown) {

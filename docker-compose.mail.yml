@@ -1,0 +1,19 @@
+services:
+  api:
+    environment:
+      MAIL_FROM: ${MAIL_FROM:?set MAIL_FROM in .env}
+      HR_ERP_URL: ${HR_ERP_URL:?set HR_ERP_URL in .env}
+      MAIL_GRAPH_TENANT_ID: ${MAIL_GRAPH_TENANT_ID:?set MAIL_GRAPH_TENANT_ID in .env}
+      MAIL_GRAPH_CLIENT_ID: ${MAIL_GRAPH_CLIENT_ID:?set MAIL_GRAPH_CLIENT_ID in .env}
+      MAIL_GRAPH_CERT_THUMBPRINT: ${MAIL_GRAPH_CERT_THUMBPRINT:?set MAIL_GRAPH_CERT_THUMBPRINT in .env}
+      MAIL_GRAPH_CERT_PATH: /run/secrets/mail_graph_private_key
+    secrets:
+      - source: mail_graph_private_key
+        target: mail_graph_private_key
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+
+secrets:
+  mail_graph_private_key:
+    file: ${MAIL_GRAPH_PRIVATE_KEY_FILE:?set MAIL_GRAPH_PRIVATE_KEY_FILE in .env}

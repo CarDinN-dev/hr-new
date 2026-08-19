@@ -555,12 +555,12 @@ export class LeaveService {
       await this.notifications.createLeave(tx, {
         userIds: subjectRecipients, type: 'LEAVE_STATUS', title: 'Leave request cancelled',
         message: 'Your leave request was cancelled.', requestId: id,
-        email: { kind: 'FINAL', stage: request.currentStage, status: LeaveRequestStatus.CANCELLED, reason: dto.reason },
+        email: { kind: 'FINAL', stage: request.currentStage, status: LeaveRequestStatus.CANCELLED },
       });
       await this.notifications.createLeave(tx, {
         userIds: pendingSteps.flatMap(({ assignees }) => assignees.map(({ userId }) => userId)).filter((userId) => userId !== user.id && !subjectRecipients.includes(userId)),
         type: 'LEAVE_CANCELLED', title: 'Leave request cancelled', message: 'This leave request was cancelled and no longer requires your approval.', requestId: id,
-        email: { kind: 'WORKFLOW_UPDATED', stage: request.currentStage, status: LeaveRequestStatus.CANCELLED, reason: dto.reason },
+        email: { kind: 'WORKFLOW_UPDATED', stage: request.currentStage, status: LeaveRequestStatus.CANCELLED },
       });
       await this.audit.record(tx, user, { action: AuditAction.TRANSITION, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: request.currentStage ?? undefined, workflowStatus: LeaveRequestStatus.CANCELLED, summary: 'Leave request cancelled', reason: dto.reason, subjectEmployeeId: request.employeeId, changes: [{ field: 'status', previousValue: request.status, nextValue: LeaveRequestStatus.CANCELLED }] });
       await this.saveIdempotency(tx, user, 'leave.cancel', key, { id, dto }, id);
@@ -665,12 +665,12 @@ export class LeaveService {
       await this.notifications.createLeave(tx, {
         userIds: subjectRecipients, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden',
         message: `Your leave request is now ${dto.targetStatus.replaceAll('_', ' ').toLowerCase()}.`, requestId: id,
-        email: { kind: 'FINAL', stage: request.currentStage, status: dto.targetStatus, reason: dto.reason },
+        email: { kind: 'FINAL', stage: request.currentStage, status: dto.targetStatus },
       });
       await this.notifications.createLeave(tx, {
         userIds: affectedRecipients, type: 'LEAVE_OVERRIDE', title: 'Leave workflow overridden',
         message: superOverride ? 'A Super Administrator changed a leave workflow decision.' : 'HR approved a leave request by override.', requestId: id,
-        email: { kind: 'WORKFLOW_UPDATED', stage: request.currentStage, status: dto.targetStatus, reason: dto.reason },
+        email: { kind: 'WORKFLOW_UPDATED', stage: request.currentStage, status: dto.targetStatus },
       });
       await this.audit.record(tx, user, { action: AuditAction.OVERRIDE, resourceType: 'LeaveRequest', resourceId: id, workflowId: id, workflowStage: request.currentStage ?? undefined, workflowStatus: dto.targetStatus, summary: 'Leave workflow overridden', reason: dto.reason, subjectEmployeeId: request.employeeId, isOverride: true, before: { status: request.status, currentStage: request.currentStage, version: request.version }, after: { status: dto.targetStatus, currentStage: null, version: request.version + 1 }, metadata: { skippedStages: pendingSteps.map((pending) => pending.stage), affectedUserIds: recipients }, changes: [{ field: 'status', previousValue: request.status, nextValue: dto.targetStatus }] });
       await this.saveIdempotency(tx, user, 'leave.override', key, { id, dto }, id);
@@ -750,8 +750,11 @@ export class LeaveService {
     const subject = await tx.employee.findUnique({ where: { id: request.employeeId }, select: { userId: true } });
     const recipients = [...new Set([request.requesterUserId, subject?.userId])].filter((userId): userId is string => Boolean(userId));
     const employeeEmail = nextStatus === LeaveRequestStatus.RETURNED_FOR_CORRECTION
-      ? { kind: 'RETURNED' as const, stage: step.stage, status: nextStatus, reason }
-      : terminal ? { kind: 'FINAL' as const, stage: step.stage, status: nextStatus, reason } : undefined;
+      ? { kind: 'RETURNED' as const, stage: step.stage, status: nextStatus }
+      : terminal ? { kind: 'FINAL' as const, stage: step.stage, status: nextStatus }
+      : type === LeaveDecisionType.APPROVE && nextStep && nextStatus !== LeaveRequestStatus.BLOCKED_APPROVER_MISSING
+        ? { kind: 'PROGRESS' as const, stage: nextStep.stage, previousStage: step.stage, status: nextStatus }
+        : undefined;
     await this.notifications.createLeave(tx, {
       userIds: recipients, type: 'LEAVE_STATUS', title: 'Leave request updated',
       message: `Your leave request is now ${nextStatus.replaceAll('_', ' ').toLowerCase()}.`, requestId: request.id,

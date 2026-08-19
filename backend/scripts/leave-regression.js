@@ -1,4 +1,8 @@
 const assert = require('node:assert/strict');
+const { generateKeyPairSync } = require('node:crypto');
+const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 const test = require('node:test');
 const { ApproverMode, DocumentScanStatus, Gender, LeaveApprovalStage, LeaveRequestStatus, Prisma } = require('@prisma/client');
 const { ConfigService } = require('@nestjs/config');
@@ -13,6 +17,10 @@ const leaveType = (code, allowance, isPaid = true, requiresAttachment = false) =
 });
 const employee = (gender = Gender.FEMALE, hireDate = '2024-01-01') => ({ gender, hireDate: new Date(`${hireDate}T00:00:00Z`) });
 const service = () => new LeaveService({}, {}, {}, {}, {});
+const mailKeyDirectory = mkdtempSync(join(tmpdir(), 'medtech-mail-test-'));
+const mailKeyPath = join(mailKeyDirectory, 'private-key.pem');
+writeFileSync(mailKeyPath, generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+test.after(() => rmSync(mailKeyDirectory, { recursive: true, force: true }));
 
 test('canonical leave policies calculate paid and unpaid days on the correct calendars', () => {
   const leave = service();
@@ -94,15 +102,17 @@ test('required attachments must scan clean and remain hidden from ordinary manag
 
 const emailService = (prisma = {}) => new EmailDeliveryService(new ConfigService({
   LEAVE_EMAIL_ENABLED: 'true',
-  MICROSOFT_TENANT_ID: '11111111-1111-4111-8111-111111111111',
-  MICROSOFT_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
-  MICROSOFT_CLIENT_SECRET: 'test-client-secret-value',
-  MICROSOFT_REDIRECT_URI: 'https://hr.example.test/api/v1/auth/microsoft/callback',
+  MAIL_FROM: 'no-reply@med-tech.com',
+  HR_ERP_URL: 'https://hr.example.test',
+  MAIL_GRAPH_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+  MAIL_GRAPH_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+  MAIL_GRAPH_CERT_THUMBPRINT: '1111111111111111111111111111111111111111',
+  MAIL_GRAPH_CERT_PATH: mailKeyPath,
 }), prisma);
 
 test('leave email copy escapes dynamic HTML and keeps the branded leave link', () => {
   assert.equal(new EmailDeliveryService(new ConfigService({ LEAVE_EMAIL_ENABLED: 'false' }), {}).enabled(), false);
-  assert.throws(() => new EmailDeliveryService(new ConfigService({ LEAVE_EMAIL_ENABLED: 'true' }), {}), /MICROSOFT_TENANT_ID/);
+  assert.throws(() => new EmailDeliveryService(new ConfigService({ LEAVE_EMAIL_ENABLED: 'true' }), {}), /MAIL_GRAPH_TENANT_ID/);
   const mail = emailService();
   const rendered = mail.renderLeave({
     kind: 'RETURNED', recipientName: '<Manager>', employeeName: 'A&B <Test>', employeeCode: 'EMP<7>',
@@ -112,7 +122,7 @@ test('leave email copy escapes dynamic HTML and keeps the branded leave link', (
   assert.equal(rendered.subject, 'Action required: leave request returned for correction');
   assert.match(rendered.htmlBody, /Hi &lt;Manager&gt;/);
   assert.match(rendered.htmlBody, /A&amp;B &lt;Test&gt;/);
-  assert.match(rendered.htmlBody, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
+  assert.doesNotMatch(rendered.htmlBody, /Decision reason|script/);
   assert.doesNotMatch(rendered.htmlBody, /<script>/);
   assert.match(rendered.htmlBody, /cid:medtech-logo/);
   assert.match(rendered.htmlBody, /alt="MedTech logo"/);
@@ -121,6 +131,12 @@ test('leave email copy escapes dynamic HTML and keeps the branded leave link', (
     kind: 'APPROVAL_REQUIRED', recipientName: 'Manager', employeeName: 'Pat\r\nBcc: bad@example.test', employeeCode: 'EMP-7',
     leaveType: 'Annual', startDate: new Date('2026-08-13T00:00:00Z'), endDate: new Date('2026-08-13T00:00:00Z'), totalDays: '1', stage: 'MANAGER',
   }).subject, /^Action required: Pat Bcc: bad@example\.test’s leave request$/);
+  const progress = mail.renderLeave({
+    kind: 'PROGRESS', recipientName: 'Pat', employeeName: 'Pat Lee', employeeCode: 'EMP-7', leaveType: 'Annual',
+    startDate: new Date('2026-08-13T00:00:00Z'), endDate: new Date('2026-08-14T00:00:00Z'), totalDays: '2', previousStage: 'LINE_MANAGER', stage: 'MANAGER',
+  });
+  assert.match(progress.subject, /^Leave request progressed — Annual$/);
+  assert.match(progress.htmlBody, /approved by the Line Manager stage and is now awaiting Manager review/);
 });
 
 test('leave notifications queue one transactional email per unique recipient only when requested', async () => {
@@ -147,8 +163,9 @@ test('leave notifications queue one transactional email per unique recipient onl
   assert.match(created[0].emailDelivery.create.subject, /^Leave request submitted — Annual$/);
   await notifications.createLeave(tx, {
     userIds: ['employee-user'], type: 'LEAVE_STATUS', title: 'Updated', message: 'Intermediate approval', requestId: 'leave-1',
+    email: { kind: 'PROGRESS', previousStage: 'LINE_MANAGER', stage: 'MANAGER' },
   });
-  assert.equal(created[1].emailDelivery, undefined);
+  assert.match(created[1].emailDelivery.create.subject, /^Leave request progressed — Annual$/);
   const disabled = new NotificationsService({}, new EmailDeliveryService(new ConfigService({ LEAVE_EMAIL_ENABLED: 'false' }), {}));
   await disabled.createLeave(tx, {
     userIds: ['employee-user'], type: 'LEAVE_SUBMITTED', title: 'Submitted', message: 'Submitted', requestId: 'leave-1',
@@ -214,6 +231,9 @@ test('Graph mail accepts 202 and retries auth, timeout, throttling, and server f
         : new Response(null, { status: 202 });
     });
     assert.ok(success.sentAt instanceof Date);
+    const authBody = new URLSearchParams(calls[0][1].body);
+    assert.equal(authBody.get('client_secret'), null);
+    assert.ok(authBody.get('client_assertion'));
     assert.equal(calls[1][0], 'https://graph.microsoft.com/v1.0/users/no-reply%40med-tech.com/sendMail');
     const graphBody = JSON.parse(calls[1][1].body);
     assert.equal(graphBody.message.attachments[0].contentId, 'medtech-logo');

@@ -29,6 +29,12 @@ MICROSOFT_PROVISIONING_CLIENT_SECRET:hr-erp-microsoft-provisioning-client-secret
 SECRETS
 }
 
+configure_compose() {
+  grep -qx 'LEAVE_EMAIL_ENABLED=true' "$runtime_env" || return 0
+  [[ -f "$project_dir/docker-compose.mail.yml" ]] || { echo 'Mail compose overlay is missing.' >&2; exit 1; }
+  compose+=(-f "$project_dir/docker-compose.mail.yml")
+}
+
 preflight() {
   [[ $EUID -eq 0 ]] || { echo 'Run as root.' >&2; exit 1; }
   cd "$project_dir"
@@ -129,9 +135,9 @@ restore_drill() {
 }
 
 case ${1:-} in
-  preflight) trap cleanup_runtime_env EXIT; load_runtime_env; preflight ;;
-  backup) trap cleanup_runtime_env EXIT; load_runtime_env; preflight; backup ;;
-  deploy) trap cleanup_runtime_env EXIT; load_runtime_env; deploy ;;
+  preflight) trap cleanup_runtime_env EXIT; load_runtime_env; configure_compose; preflight ;;
+  backup) trap cleanup_runtime_env EXIT; load_runtime_env; configure_compose; preflight; backup ;;
+  deploy) trap cleanup_runtime_env EXIT; load_runtime_env; configure_compose; deploy ;;
   restore-drill) shift; restore_drill "$@" ;;
   *) echo 'Usage: production.sh preflight|backup|deploy|restore-drill DUMP MANIFEST' >&2; exit 2 ;;
 esac
