@@ -5725,7 +5725,7 @@ summary:focus-visible,
   padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 12px;
-  background: #f5f5f7;
+  background: transparent;
   box-shadow: 0 16px 38px rgba(4, 9, 25, 0.2);
   animation: login-copy-reveal 620ms 110ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -5840,7 +5840,7 @@ summary:focus-visible,
     padding: 6px 8px;
     border: 1px solid rgba(255, 255, 255, 0.72);
     border-radius: 12px;
-    background: #f5f5f7;
+    background: transparent;
   }
 
   .login-card h1 {
