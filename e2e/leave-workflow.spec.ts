@@ -23,6 +23,7 @@ function envelope(data: unknown) {
 
 async function installLeaveApi(page: Page) {
   const hr = { id: "hr-user", email: "hr@example.invalid", displayName: "HR User", roles: ["HR"], permissions: ["session.self.read", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.manage", "leave.hr.override"], departmentScopeIds: [], sessionId: "hr-session", authProvider: "local", authorizationVersion: 1, employeeId: "hr-employee" };
+  let storedAttachments: Array<{ id: string; fileName: string; fileUrl: string; contentType: string; sizeBytes: number; scanStatus: string; createdAt: string }> = [];
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
@@ -31,13 +32,18 @@ async function installLeaveApi(page: Page) {
     const json = (data: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(envelope(data)) });
     if (path === "/auth/me") return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false, message: "Not signed in" }) });
     if (path === "/auth/login") return json({ csrfToken: "csrf-token", user: hr }, 201);
-    if (path === "/leave/requests") return json([leave]);
+    if (path === "/leave/requests") return json([{ ...leave, attachments: storedAttachments }]);
     if (path === "/leave/inbox") return json([]);
     if (path === "/leave/types") return json(leaveTypes);
     if (path === "/employees") return json([employee]);
     if (path === "/leave/balances") return json(balances(String(new URL(request.url()).searchParams.get("employeeId"))));
     if (path === "/leave/preview") return json({ totalDays: "1", paidDays: body?.leaveTypeId === "compassionate" ? "1" : "1", unpaidDays: "0", eligible: true, requiresAttachment: body?.leaveTypeId === "sick", availableDays: "27", noBalanceRequired: false });
     if (path === "/leave/submit" && request.method() === "POST") return json({ ...leave, id: "submitted-leave", requesterUserId: hr.id }, 201);
+    if (path === "/leave/leave-1/attachment" && request.method() === "POST") {
+      const fileName = request.postData()?.match(/filename="([^"]+)"/)?.[1] || "attachment.pdf";
+      storedAttachments = [{ id: "attachment-1", fileName, fileUrl: `/attachments/${fileName}`, contentType: "application/pdf", sizeBytes: 1024, scanStatus: "CLEAN", createdAt: "2099-04-01T00:00:00.000Z" }];
+      return json({ ...leave, attachments: storedAttachments });
+    }
     if (path === "/leave/leave-1/override" && request.method() === "POST") return json({ ...leave, status: "APPROVED", currentStage: null }, 201);
     return json([]);
   });
@@ -57,6 +63,10 @@ test("HR submits for an employee and immediately approves without a password", a
   await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
   await page.getByLabel("Leave type").selectOption("sick");
   await expect(page.getByLabel("Attachment (required)")).toBeVisible();
+  await page.getByLabel("Attachment (required)").setInputFiles({ name: "medical-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("medical note") });
+  await expect(page.getByText("medical-note.pdf", { exact: true })).toBeVisible();
+  await expect(page.getByText("Ready to save with this request", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Remove selected attachment" }).click();
   await page.getByLabel("Leave type").selectOption("compassionate");
   await expect(page.getByLabel("Duration")).toBeDisabled();
   await page.getByLabel("Leave type").selectOption("annual");
@@ -73,6 +83,29 @@ test("HR submits for an employee and immediately approves without a password", a
   const overridden = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/leave-1/override") && request.method() === "POST");
   await dialog.getByRole("button", { name: "Confirm" }).click();
   expect(JSON.parse((await overridden).postData() || "{}")).toMatchObject({ targetStatus: "APPROVED", reason: "Immediate HR approval" });
+});
+
+test("leave attachments stay on the existing persistence paths", async ({ page }) => {
+  await installLeaveApi(page);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("hr@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Leave" }).click();
+
+  await page.getByLabel("Employee").fill("Amina");
+  await page.getByRole("option", { name: "EMP-002 — Amina Saleh" }).click();
+  await page.getByLabel("Leave type").selectOption("sick");
+  await page.getByLabel("Attachment (required)").setInputFiles({ name: "medical-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("medical note") });
+  await expect(page.getByText("Your attachment will be saved with this request.")).toBeVisible();
+  const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
+  await page.getByRole("button", { name: "Submit request" }).click();
+  expect((await submitted).postData()).toContain('filename="medical-note.pdf"');
+
+  const saved = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/leave-1/attachment") && request.method() === "POST");
+  await page.getByLabel("Add attachment for Annual leave request").setInputFiles({ name: "manager-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("manager note") });
+  expect((await saved).postData()).toContain('filename="manager-note.pdf"');
+  await expect(page.getByRole("link", { name: "manager-note.pdf" })).toBeVisible();
 });
 
 test("employee submits their own leave and uses My HR and Settings safely", async ({ page }) => {

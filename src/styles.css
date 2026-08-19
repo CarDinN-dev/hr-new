@@ -6426,38 +6426,535 @@ summary:focus-visible,
 
 .app .leave-workspace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(420px, 1.1fr);
-  align-items: stretch;
+  grid-template-columns: minmax(320px, 0.78fr) minmax(540px, 1.22fr);
+  align-items: start;
   gap: var(--layout-gap);
-  height: clamp(620px, calc(100dvh - 170px), 760px);
 }
 
 .app .leave-workspace-grid > .panel {
   min-height: 0;
-  height: 100%;
-  overflow-y: auto;
+  height: auto;
+  overflow: visible;
 }
 
-.app .leave-balance-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.app .leave-balance-panel .leave-balance-grid {
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
+.app .leave-balance-panel,
+.app .leave-request-panel,
+.app .leave-requests-panel {
+  border-radius: 16px;
 }
 
 .app .leave-balance-panel .leave-balance-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
+  margin-top: 0;
+  overflow: visible;
 }
 
 .app .leave-balance-panel .leave-balance-card {
   min-height: 0;
-  padding: 14px;
+  gap: 0.8rem;
+  padding: 16px;
+  border-radius: 14px;
   box-shadow: none;
+}
+
+.app .leave-balance-card__available strong {
+  font-size: clamp(2.1rem, 3vw, 2.75rem);
+}
+
+.app .leave-balance-card__state {
+  min-height: 104px;
+  padding: 0.82rem;
+  border-radius: 11px;
+}
+
+.app .leave-balance-empty,
+.app .leave-balance-skeleton {
+  min-height: 178px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--surface-subtle), color-mix(in srgb, var(--surface-subtle) 72%, var(--surface)));
+}
+
+.app .leave-balance-empty strong {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.app .leave-balance-empty span {
+  max-width: 30rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.app .leave-balance-skeleton {
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.app .leave-balance-skeleton span {
+  min-height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--surface-subtle) 25%, color-mix(in srgb, var(--surface-subtle) 72%, var(--surface)) 50%, var(--surface-subtle) 75%);
+  background-size: 220% 100%;
+  animation: leave-balance-loading 1.35s ease-in-out infinite;
+}
+
+@keyframes leave-balance-loading {
+  to { background-position: -220% 0; }
+}
+
+.app .leave-request-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.app .leave-form-section {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+
+.app .leave-form-section__heading {
+  margin: 0 0 12px;
+}
+
+.app .leave-form-section__heading h4,
+.app .leave-request-estimate__heading strong {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+}
+
+.app .leave-form-section__heading p,
+.app .leave-request-estimate__heading span {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.app .leave-request-grid {
+  gap: 12px;
+}
+
+.app .leave-request-panel .employee-picker__options {
+  z-index: 30;
+  border-radius: 12px;
+  box-shadow: var(--clinical-shadow-raised);
+}
+
+.app .leave-file-field {
+  display: grid;
+  gap: 8px;
+}
+
+.app .leave-file-picker {
+  position: relative;
+  min-height: 88px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 15px;
+  border: 1px dashed color-mix(in srgb, var(--brand-red) 42%, var(--border-strong));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--brand-red) 3%, var(--surface));
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.app .leave-file-picker:hover {
+  border-color: var(--brand-red);
+  background: color-mix(in srgb, var(--brand-red) 6%, var(--surface));
+}
+
+.app .leave-file-picker:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--brand-red) 26%, transparent);
+  outline-offset: 2px;
+}
+
+.app .leave-file-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.app .leave-file-picker svg {
+  padding: 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand-red) 11%, var(--surface));
+  color: var(--brand-red);
+}
+
+.app .leave-file-picker span,
+.app .leave-selected-file span,
+.app .leave-attached-file span,
+.app .leave-request-person,
+.app .leave-request-type,
+.app .leave-request-status {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.app .leave-file-picker strong,
+.app .leave-selected-file strong,
+.app .leave-attached-file strong,
+.app .leave-request-person strong,
+.app .leave-request-type strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app .leave-file-picker small,
+.app .leave-selected-file small,
+.app .leave-attached-file small,
+.app .leave-request-person span,
+.app .leave-request-type span,
+.app .leave-request-status small {
+  color: var(--text-muted);
+  font-size: 0.73rem;
+}
+
+.app .leave-selected-file {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--good) 30%, var(--border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--good-bg) 62%, var(--surface));
+}
+
+.app .leave-selected-file > svg {
+  color: var(--good);
+}
+
+.app .leave-selected-file button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.app .leave-selected-file button:hover {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  color: var(--bad);
+  transform: none;
+}
+
+.app .leave-reason-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.app .leave-reason-field textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.app .leave-request-estimate {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.app .leave-request-estimate__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.app .leave-request-estimate .settlement-preview {
+  gap: 8px;
+}
+
+.app .leave-request-estimate .settlement-preview div {
+  min-height: 74px;
+  padding: 11px;
+  border-radius: 10px;
+}
+
+.app .leave-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.app .leave-submit-row > span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.app .leave-submit-row .form-actions {
+  margin: 0;
+}
+
+.app .leave-submit-row .primary {
+  min-width: 148px;
+}
+
+.app .leave-requests-panel .panel-head {
+  margin-bottom: 8px;
+}
+
+.app .leave-requests-panel .table-wrap {
+  overflow: visible;
+}
+
+.app .leave-requests-panel table {
+  table-layout: auto;
+}
+
+.app .leave-request-row td {
+  padding-block: 13px;
+}
+
+.app .leave-request-days {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.app .leave-request-days small {
+  color: var(--text-muted);
+}
+
+.app .leave-request-attachments {
+  display: grid;
+  gap: 7px;
+}
+
+.app .leave-attached-file {
+  min-width: 170px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.app .leave-attached-file:hover {
+  border-color: color-mix(in srgb, var(--brand-red) 48%, var(--border));
+  background: color-mix(in srgb, var(--brand-red) 4%, var(--surface));
+}
+
+.app .leave-attached-file > svg {
+  color: var(--brand-red);
+}
+
+.app .leave-no-attachment {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.app .leave-replace-attachment {
+  width: fit-content;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.app .leave-replace-attachment:hover {
+  border-color: var(--brand-red);
+  background: color-mix(in srgb, var(--brand-red) 5%, var(--surface));
+}
+
+.app .leave-replace-attachment input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.app .leave-replace-attachment:has(input:focus-visible) {
+  outline: 3px solid color-mix(in srgb, var(--brand-red) 26%, transparent);
+  outline-offset: 2px;
+}
+
+.app .leave-request-status {
+  justify-items: start;
+}
+
+.app .leave-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.app .leave-request-actions > button,
+.app .leave-request-more-actions > summary {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+}
+
+.app .leave-request-more-actions {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.app .leave-request-more-actions > summary {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+
+.app .leave-request-more-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.app .leave-request-more-actions > summary::after {
+  margin-left: 6px;
+  color: var(--text-muted);
+  content: "···";
+  letter-spacing: 0.08em;
+}
+
+.app .leave-request-more-actions > div {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 40;
+  min-width: 160px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: var(--clinical-shadow-raised);
+}
+
+.app .leave-request-more-actions > div button {
+  width: 100%;
+  min-height: 34px;
+  justify-content: flex-start;
+  padding: 6px 9px;
+  font-size: 0.75rem;
+}
+
+@container (max-width: 1100px) {
+  .app .leave-requests-panel .table-wrap,
+  .app .leave-request-row {
+    overflow: visible;
+  }
+
+  .app .leave-requests-panel .table-wide tbody {
+    padding-inline: 0;
+  }
+
+  .app .leave-request-row td {
+    padding-block: 10px;
+  }
+
+  .app .leave-attached-file {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .app .leave-form-section,
+  .app .leave-request-estimate {
+    padding: 12px;
+  }
+
+  .app .leave-request-estimate__heading,
+  .app .leave-submit-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .app .leave-submit-row,
+  .app .leave-submit-row .form-actions,
+  .app .leave-submit-row .primary {
+    width: 100%;
+  }
+
+  .app .leave-request-actions {
+    align-items: stretch;
+  }
+
+  .app .leave-request-actions > button,
+  .app .leave-request-more-actions > summary {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .app .leave-request-more-actions > div {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    top: auto;
+    min-width: 0;
+  }
+
+  .app .leave-request-more-actions > div button {
+    min-height: 42px;
+  }
 }
 
 .app .payroll-run-panel {

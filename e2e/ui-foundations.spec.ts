@@ -162,7 +162,7 @@ for (const viewport of [
           expect(surface).not.toBeNull();
           expect(surface!.x).toBeGreaterThanOrEqual(0);
           expect(surface!.x + surface!.width).toBeLessThanOrEqual(viewport.width + 1);
-          expect(surface!.borderRadius).toBe(name === "Dashboard" ? "16px" : "12px");
+          expect(surface!.borderRadius).toBe(name === "Dashboard" || name === "Leave" ? "16px" : "12px");
         }
       });
     }
@@ -320,7 +320,8 @@ test("dashboard composition and leave workspace use aligned semantic surfaces", 
   expect(balance).not.toBeNull();
   expect(request).not.toBeNull();
   expect(Math.abs(balance!.y - request!.y)).toBeLessThanOrEqual(1);
-  expect(Math.abs(balance!.height - request!.height)).toBeLessThanOrEqual(1);
+  expect(request!.height).toBeGreaterThan(balance!.height);
+  await expect(page.locator(".leave-balance-panel .leave-balance-grid")).not.toHaveCSS("overflow-y", "auto");
 });
 
 const roleDashboardEmployee = {
