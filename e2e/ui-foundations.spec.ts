@@ -555,6 +555,7 @@ test("login keeps the exact brand assets, centered composition and controls resp
       await expect(stage).toBeVisible();
       await expect(brand.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
       await expect(themeButton).toHaveCSS("height", "44px");
+      await expect(themeButton).toHaveCSS("position", "absolute");
       await expect(page.getByText("Role-based access. Protected activity is audited.", { exact: true })).toHaveCount(0);
       await expect(page.getByText("Access is limited to the work assigned to you.", { exact: true })).toHaveCount(0);
 
@@ -565,6 +566,8 @@ test("login keeps the exact brand assets, centered composition and controls resp
       expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(viewport.height + 1);
       if (viewport.width > 720) expect(Math.abs(cardBox.x + cardBox.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
       await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
+      await expect(page.locator(".login-stage-art")).toHaveCSS("mask-image", /radial-gradient/);
+      await expect(page.locator(".login-stage-art")).toHaveCSS("mix-blend-mode", "normal");
       await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
       await expect(page.locator(".microsoft-mark")).toHaveCSS("width", "16px");
       await expect(page.getByLabel("Email").locator("xpath=.." )).toHaveCSS("height", "52px");

@@ -272,17 +272,15 @@ function LoginPage({ onLogin, theme, toggleTheme }: { onLogin: (session: Backend
         <div className="login-stage-art" />
       </div>
       <section className="login-card" aria-labelledby="login-title">
-        <header className="login-header">
-          <button
-            className="theme-login"
-            type="button"
-            onClick={toggleTheme}
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </header>
+        <button
+          className="theme-login"
+          type="button"
+          onClick={toggleTheme}
+          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? "Light mode" : "Dark mode"}
+        >
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
 
         <div className="login-content">
           <div className="login-brand">
