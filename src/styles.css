@@ -6429,6 +6429,14 @@ summary:focus-visible,
   box-shadow: var(--clinical-shadow-raised);
 }
 
+.app .leave-request-panel .employee-picker :is(.employee-picker__toggle, .employee-picker__clear) {
+  min-height: 0;
+  padding: 0.2rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .app .leave-file-field {
   display: grid;
   gap: 8px;
@@ -6543,17 +6551,6 @@ summary:focus-visible,
   background: color-mix(in srgb, var(--bad) 10%, transparent);
   color: var(--bad);
   transform: none;
-}
-
-.app .leave-reason-field {
-  display: grid;
-  gap: 6px;
-  margin-top: 14px;
-}
-
-.app .leave-reason-field textarea {
-  min-height: 104px;
-  resize: vertical;
 }
 
 .app .leave-request-estimate {

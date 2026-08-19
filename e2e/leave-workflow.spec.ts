@@ -63,6 +63,8 @@ test("HR submits for an employee and immediately approves without a password", a
   await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
   await page.getByLabel("Leave type").selectOption("sick");
   await expect(page.getByLabel("Attachment (required)")).toBeVisible();
+  await expect(page.getByLabel("Attachment (required)")).toHaveAttribute("accept", ".pdf,.jpg,.jpeg,.png,.webp");
+  await expect(page.getByLabel("Reason")).toHaveCount(0);
   await page.getByLabel("Attachment (required)").setInputFiles({ name: "medical-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("medical note") });
   await expect(page.getByText("medical-note.pdf", { exact: true })).toBeVisible();
   await expect(page.getByText("Ready to save with this request", { exact: false })).toBeVisible();
@@ -70,7 +72,6 @@ test("HR submits for an employee and immediately approves without a password", a
   await page.getByLabel("Leave type").selectOption("compassionate");
   await expect(page.getByLabel("Duration")).toBeDisabled();
   await page.getByLabel("Leave type").selectOption("annual");
-  await page.getByLabel("Reason").first().fill("HR submitted leave for employee");
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
   await page.getByRole("button", { name: "Submit request" }).click();
   expect((await submitted).postData()).toContain(employee.id);
@@ -138,7 +139,7 @@ test("employee submits their own leave and uses My HR and Settings safely", asyn
   await page.getByRole("link", { name: "Leave", exact: true }).click();
 
   await expect(page.getByLabel("Employee")).toHaveCount(0);
-  await page.getByLabel("Reason").first().fill("Annual leave request");
+  await expect(page.getByLabel("Reason")).toHaveCount(0);
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
   await page.getByRole("button", { name: "Submit request" }).click();
   expect((await submitted).postData()).not.toContain('name="employeeId"');

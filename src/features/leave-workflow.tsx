@@ -27,7 +27,7 @@ type EligibleAssignee = { id: string; email: string; employee?: { firstName: str
 type DecisionAction = "approve" | "self-approve" | "reject" | "return" | "cancel" | "reassign" | "override" | "correct-resubmit";
 type Decision = { request: LeaveRecord; action: DecisionAction; reasonRequired: boolean };
 
-const attachmentAccept = ".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx";
+const attachmentAccept = ".pdf,.jpg,.jpeg,.png,.webp";
 const finalStatuses = ["APPROVED", "REJECTED", "CANCELLED"];
 
 function codeOf(type?: Pick<LeaveTypeRecord, "code" | "name">) {
@@ -52,14 +52,14 @@ function fileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
-function requestBody(form: { employeeId?: string; leaveTypeId: string; startDate: string; endDate: string; isHalfDay: boolean; reason: string }, file?: File | null, expectedVersion?: number) {
+function requestBody(form: { employeeId?: string; leaveTypeId: string; startDate: string; endDate: string; isHalfDay: boolean; reason?: string }, file?: File | null, expectedVersion?: number) {
   const body = new FormData();
   if (form.employeeId) body.set("employeeId", form.employeeId);
   body.set("leaveTypeId", form.leaveTypeId);
   body.set("startDate", form.startDate);
   body.set("endDate", form.endDate);
   body.set("isHalfDay", String(form.isHalfDay));
-  if (form.reason.trim()) body.set("reason", form.reason.trim());
+    if (form.reason?.trim()) body.set("reason", form.reason.trim());
   if (expectedVersion !== undefined) body.set("expectedVersion", String(expectedVersion));
   if (file) body.set("file", file);
   return body;
@@ -91,7 +91,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   usePageSearchStatus("leave-inbox", { count: inbox.data?.length, loading: inbox.isFetching, error: inbox.error?.message });
   const leaveTypes = useQuery({ queryKey: workflowKey(session, "leave-types"), queryFn: () => apiList<LeaveTypeRecord>("/leave/types") });
   const employees = useQuery({ queryKey: workflowKey(session, "leave-employees"), queryFn: () => apiList<LeaveEmployee>("/employees?limit=1000"), enabled: canSubmitForEmployee });
-  const [form, setForm] = useState({ employeeId: "", leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false, reason: "" });
+  const [form, setForm] = useState({ employeeId: "", leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false });
   const [attachment, setAttachment] = useState<File | null>(null);
   const selectedType = leaveTypes.data?.find(type => type.id === form.leaveTypeId) ?? leaveTypes.data?.[0];
   const selectedLeaveTypeId = selectedType?.id ?? "";
@@ -122,7 +122,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   ]);
   const submit = useMutation({
     mutationFn: () => apiRequest<LeaveRecord>("/leave/submit", { method: "POST", csrfToken: session.csrfToken, headers: idempotencyHeaders(), body: requestBody({ ...form, employeeId: canSubmitForEmployee ? targetEmployeeId : undefined, leaveTypeId: selectedLeaveTypeId }, attachment) }),
-    onSuccess: async () => { await invalidate(); setForm(previous => ({ ...previous, reason: "" })); setAttachment(null); notify("Leave request submitted."); },
+    onSuccess: async () => { await invalidate(); setAttachment(null); notify("Leave request submitted."); },
   });
   const replaceAttachment = useMutation({
     mutationFn: ({ request, file }: { request: LeaveRecord; file: File }) => { const body = new FormData(); body.set("file", file); return apiRequest<LeaveRecord>(`/leave/${request.id}/attachment`, { method: "POST", csrfToken: session.csrfToken, body }); },
@@ -170,10 +170,9 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
             <label>To<input type="date" value={form.endDate} onChange={event => setForm(previous => ({ ...previous, endDate: event.target.value }))} /></label>
             <label className="wide">Duration<select value={form.isHalfDay ? "half" : "full"} disabled={halfDayDisabled(selectedType)} onChange={event => setForm(previous => ({ ...previous, isHalfDay: event.target.value === "half" }))}><option value="full">Full day(s)</option><option value="half">Half day</option></select></label>
           </div></section>
-          <section className="leave-form-section" aria-labelledby="leave-request-supporting"><div className="leave-form-section__heading"><h4 id="leave-request-supporting">Reason and supporting document</h4><p>Add context for approvers and include a document when this leave type requires one.</p></div>
-            {(preview.data?.requiresAttachment || selectedType?.requiresAttachment) && <div className="leave-file-field"><label className="leave-file-picker"> <input key={attachment ? `${attachment.name}-${attachment.lastModified}` : "new-attachment"} type="file" accept={attachmentAccept} aria-label="Attachment (required)" onChange={event => setAttachment(event.target.files?.[0] ?? null)} /><Upload size={18} aria-hidden="true" /><span><strong>{attachment ? "Choose a different attachment" : "Add required attachment"}</strong><small>PDF, image, Word, or Excel · up to 10 MB</small></span></label>{attachment && <div className="leave-selected-file" role="status"><FileText size={18} aria-hidden="true" /><span><strong>{attachment.name}</strong><small>{fileSize(attachment.size)} · Ready to save with this request</small></span><button type="button" aria-label="Remove selected attachment" onClick={() => setAttachment(null)}><X size={16} /></button></div>}</div>}
-            <label className="leave-reason-field">Reason<textarea maxLength={2000} value={form.reason} onChange={event => setForm(previous => ({ ...previous, reason: event.target.value }))} /></label>
-          </section>
+          {(preview.data?.requiresAttachment || selectedType?.requiresAttachment) && <section className="leave-form-section" aria-labelledby="leave-request-supporting"><div className="leave-form-section__heading"><h4 id="leave-request-supporting">Supporting document</h4><p>Add a PDF or image for this leave type. It must pass virus scanning before approval.</p></div>
+            <div className="leave-file-field"><label className="leave-file-picker"> <input key={attachment ? `${attachment.name}-${attachment.lastModified}` : "new-attachment"} type="file" accept={attachmentAccept} aria-label="Attachment (required)" onChange={event => setAttachment(event.target.files?.[0] ?? null)} /><Upload size={18} aria-hidden="true" /><span><strong>{attachment ? "Choose a different attachment" : "Add required attachment"}</strong><small>PDF, JPG, PNG, or WebP · up to 10 MB</small></span></label>{attachment && <div className="leave-selected-file" role="status"><FileText size={18} aria-hidden="true" /><span><strong>{attachment.name}</strong><small>{fileSize(attachment.size)} · Ready to save with this request</small></span><button type="button" aria-label="Remove selected attachment" onClick={() => setAttachment(null)}><X size={16} /></button></div>}</div>
+          </section>}
         </div>
         {preview.data && <div className="leave-request-estimate"><div className="leave-request-estimate__heading"><strong>Request estimate</strong><span>Calculated from your current selection</span></div><div className="settlement-preview"><div><span>Total</span><strong>{days(preview.data.totalDays)}</strong></div><div><span>Paid</span><strong>{days(preview.data.paidDays)}</strong></div><div><span>Unpaid</span><strong>{days(preview.data.unpaidDays)}</strong></div><div><span>Available</span><strong>{preview.data.noBalanceRequired ? "No balance required" : days(preview.data.availableDays)}</strong></div></div></div>}
         {preview.data && !preview.data.eligible && <p className="sync-alert" role="alert">{preview.data.message || "This leave request is not eligible."}</p>}
