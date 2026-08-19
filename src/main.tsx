@@ -2377,7 +2377,7 @@ function Documents({ state, session, notify, savePdf }: { state: HrState; sessio
   const authorization = useAuthorization();
   const canGenerate = authorization.hasPermission("document.hr.manage");
   const active = activeEmployees(state.employees);
-  const [employeeId, setEmployeeId] = useState(active[0]?.id || "");
+  const [employeeId, setEmployeeId] = useState("");
   const [template, setTemplate] = useState<PdfTemplate>("offer_letter");
   const [payslipPeriod, setPayslipPeriod] = useState(() => {
     const today = new Date();
