@@ -365,6 +365,24 @@ test("multi-role dashboard precedence chooses the highest permitted persona", as
   await expect(page.locator(".dashboard-layout")).toHaveAttribute("data-dashboard-persona", "cpo");
 });
 
+test("dashboard reuses the approval inbox actions", async ({ page }) => {
+  const approvalRequests: string[] = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (request.method() === "POST") approvalRequests.push(url.pathname);
+  });
+  await installUiApi(page, [roleDashboardEmployee], ["leave.hr.approve"]);
+  await page.route("**/api/v1/approvals/inbox", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ success: true, data: { leave: [{ id: "leave-1", employee: { firstName: "Team", lastName: "Member" }, leaveType: { name: "Annual leave" }, currentStage: "HR", startDate: "2026-08-20", endDate: "2026-08-20", totalDays: "1", version: 1 }], certificates: [], payroll: [] } }),
+  }));
+  await page.goto(navPaths.Dashboard);
+  await expect(page.getByRole("heading", { name: "Approval inbox" })).toBeVisible();
+  await page.getByRole("button", { name: "Approve" }).click();
+  await expect.poll(() => approvalRequests).toContain("/api/v1/leave/leave-1/approve");
+});
+
 test("dashboard actions retain their existing destinations", async ({ page }) => {
   await installUiApi(page, [roleDashboardEmployee], ["leave.self.create"]);
   await page.goto(navPaths.Dashboard);
