@@ -478,6 +478,7 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
         await themeButton.click();
         expect(await mobileLogo.boundingBox()).toMatchObject({ width: 226, height: 70 });
         await expect(mobileLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(mobileLogo).toHaveCSS("border-top-width", "0px");
       } else {
         const headerMark = page.locator(".login-product img");
         const stageLogo = page.locator(".login-stage-logo");
@@ -486,6 +487,8 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
         await expect(stageLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
         expect((await stageLogo.boundingBox())!.width).toBe(viewport.width === 1440 ? 448 : 348);
         await expect(stageLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(stageLogo).toHaveCSS("border-top-width", "0px");
+        await expect(stageLogo).toHaveCSS("box-shadow", "none");
         await expect(stageLogo).toHaveCSS("opacity", "1");
         await expect(stageCopy).toHaveCSS("opacity", "1");
         const logoBox = (await stageLogo.boundingBox())!;

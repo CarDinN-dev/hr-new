@@ -5723,10 +5723,9 @@ summary:focus-visible,
   width: clamp(348px, 34vw, 448px);
   max-width: 100%;
   padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 12px;
+  border: 0;
   background: transparent;
-  box-shadow: 0 16px 38px rgba(4, 9, 25, 0.2);
+  box-shadow: none;
   animation: login-copy-reveal 620ms 110ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -5838,8 +5837,7 @@ summary:focus-visible,
     width: 226px;
     height: 70px;
     padding: 6px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.72);
-    border-radius: 12px;
+    border: 0;
     background: transparent;
   }
 
