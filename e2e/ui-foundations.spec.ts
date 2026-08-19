@@ -20,16 +20,18 @@ const session = {
   ]
 };
 
-async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = [], initialTheme: "light" | "dark" = "light") {
-  await page.addInitScript(({ value, permissions, theme }) => {
-    sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, permissions: [...value.permissions, ...permissions] }));
+async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = [], initialTheme: "light" | "dark" = "light", sessionOverride: Partial<typeof session> = {}) {
+  await page.addInitScript(({ value, permissions, theme, override }) => {
+    sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, ...override, permissions: [...(override.permissions || value.permissions), ...permissions] }));
     localStorage.setItem("medtech-hr-theme", theme);
-  }, { value: session, permissions: extraPermissions, theme: initialTheme });
+  }, { value: session, permissions: extraPermissions, theme: initialTheme, override: sessionOverride });
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
-    const data = pathname === "/api/v1/employees" ? employees
+    const data = pathname === "/api/v1/employees/me" ? employees[0] ?? { id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE" }
+      : pathname === "/api/v1/employees" ? employees
       : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }]
       : pathname === "/api/v1/approvals/inbox" ? { leave: [], certificates: [], payroll: [] }
+      : pathname === "/api/v1/attendance/reports/summary" ? { summary: { totalRecords: 6, byStatus: { PRESENT: 5, LATE: 1, ABSENT: 0 } } }
       : pathname === "/api/v1/payroll/preflight" ? { ready: true, runType: "REGULAR", policy: { prorationBasis: "CALENDAR_DAYS", requireBankDetails: false, requireAttendance: false, varianceThreshold: "0" }, summary: { employees: 0, errors: 0, warnings: 0, grossPay: "0", deductions: "0", netPay: "0", adjustments: 0 }, issues: [] }
       : [];
     return route.fulfill({
@@ -160,7 +162,7 @@ for (const viewport of [
           expect(surface).not.toBeNull();
           expect(surface!.x).toBeGreaterThanOrEqual(0);
           expect(surface!.x + surface!.width).toBeLessThanOrEqual(viewport.width + 1);
-          expect(surface!.borderRadius).toBe("12px");
+          expect(surface!.borderRadius).toBe(name === "Dashboard" ? "16px" : "12px");
         }
       });
     }
@@ -181,7 +183,7 @@ test("mobile dashboard, wide tables and shared dialog retain usable geometry", a
   await page.goto("/");
 
   const hero = await page.locator(".hero-copy").boundingBox();
-  const heading = await page.getByRole("heading", { name: "Today at MedTech" }).boundingBox();
+  const heading = await page.getByRole("heading", { name: /^(Good morning|Good afternoon|Good evening), UI Admin/ }).boundingBox();
   expect(hero).not.toBeNull();
   expect(heading).not.toBeNull();
   expect(heading!.width).toBeGreaterThan(260);
@@ -239,15 +241,15 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.goto("/");
   const logo = page.locator(".brand-block img");
   expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg?v=4", width: 840, transform: "none" });
-  const [sidebarLogo, heroLogo] = await Promise.all([
+  const [sidebarLogo, dashboardMark] = await Promise.all([
     page.locator(".logo-crop.wordmark").boundingBox(),
-    page.locator(".hero-logo-crop").boundingBox(),
+    page.locator(".dashboard-brand-mark").boundingBox(),
   ]);
   expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
-  expect(heroLogo).toMatchObject({ width: 360, height: 99 });
-  await expect(page.locator(".hero-logo-crop img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+  expect(dashboardMark).toMatchObject({ width: 40, height: 40 });
+  await expect(page.locator(".dashboard-brand-mark img")).toHaveAttribute("src", "/logos/brand-mark.svg?v=4");
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".dashboard-brand-mark")).toHaveCSS("background-color", "rgb(248, 250, 252)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
@@ -273,11 +275,11 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.goto("/");
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  const [mobileHeroLogo, mobileHeaderLogo] = await Promise.all([
-    page.locator(".hero-logo-crop").boundingBox(),
+  const [mobileDashboardMark, mobileHeaderLogo] = await Promise.all([
+    page.locator(".dashboard-brand-mark").boundingBox(),
     page.locator(".topbar-brand-mark").boundingBox(),
   ]);
-  expect(mobileHeroLogo).toMatchObject({ width: 320, height: 88 });
+  expect(mobileDashboardMark).toMatchObject({ width: 40, height: 40 });
   expect(mobileHeaderLogo).toMatchObject({ width: 60, height: 48 });
   await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=4/);
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
@@ -319,6 +321,74 @@ test("dashboard composition and leave workspace use aligned semantic surfaces", 
   expect(request).not.toBeNull();
   expect(Math.abs(balance!.y - request!.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(balance!.height - request!.height)).toBeLessThanOrEqual(1);
+});
+
+const roleDashboardEmployee = {
+  id: "employee-1", employeeCode: "MTC001", firstName: "Role", lastName: "Fixture",
+  email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",
+  department: { id: "department-1", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR-SPEC" },
+};
+
+const roleDashboardCases = [
+  { name: "Employee", persona: "employee", roles: ["EMPLOYEE"], permissions: ["session.self.read", "employee.self.read", "leave.self.read", "leave.self.create", "document.self.read", "announcement.read", "service_request.self.read", "service_request.self.create"], attendance: false },
+  { name: "Line Manager", persona: "line-manager", roles: ["LINE_MANAGER"], permissions: ["session.self.read", "employee.self.read", "employee.team.read", "leave.self.read", "leave.team.read", "leave.team.approve_line_manager", "document.self.read"], attendance: false },
+  { name: "Manager", persona: "manager", roles: ["MANAGER"], permissions: ["session.self.read", "employee.self.read", "employee.management.read", "leave.self.read", "leave.management.read", "leave.management.approve_manager", "document.self.read"], attendance: false },
+  { name: "HR", persona: "hr", roles: ["HR"], permissions: ["session.self.read", "employee.self.read", "employee.hr.read", "employee.hr.create", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.approve", "attendance.hr.read", "payroll.read", "recruitment.read", "document.hr.read"], attendance: true },
+  { name: "CPO", persona: "cpo", roles: ["CPO"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_cpo", "attendance.read_all", "recruitment.read", "document.self.read"], attendance: true },
+  { name: "COO", persona: "coo", roles: ["COO"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_coo", "attendance.read_all", "document.self.read"], attendance: true },
+] as const;
+
+for (const roleCase of roleDashboardCases) {
+  test(`${roleCase.name} receives only its role-safe dashboard requests`, async ({ page }) => {
+    const requests: string[] = [];
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith("/api/v1/")) requests.push(`${url.pathname}${url.search}`);
+    });
+    await installUiApi(page, [roleDashboardEmployee], [], "light", { roles: [...roleCase.roles], permissions: [...roleCase.permissions] });
+    await page.goto(navPaths.Dashboard);
+
+    await expect(page.locator(".dashboard-layout")).toHaveAttribute("data-dashboard-persona", roleCase.persona);
+    await page.waitForLoadState("networkidle");
+    expect(requests.some(path => path.startsWith("/api/v1/attendance/reports/summary"))).toBe(roleCase.attendance);
+    expect(requests.some(path => path.startsWith("/api/v1/payroll/runs"))).toBe(roleCase.persona === "hr");
+    if (!roleCase.attendance) expect(requests.some(path => path.startsWith("/api/v1/approvals/inbox"))).toBe(roleCase.persona !== "employee");
+  });
+}
+
+test("multi-role dashboard precedence chooses the highest permitted persona", async ({ page }) => {
+  await installUiApi(page, [roleDashboardEmployee], [], "light", {
+    roles: ["EMPLOYEE", "HR", "CPO"],
+    permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_cpo", "attendance.read_all", "recruitment.read"],
+  });
+  await page.goto(navPaths.Dashboard);
+  await expect(page.locator(".dashboard-layout")).toHaveAttribute("data-dashboard-persona", "cpo");
+});
+
+test("dashboard actions retain their existing destinations", async ({ page }) => {
+  await installUiApi(page, [roleDashboardEmployee], ["leave.self.create"]);
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("button", { name: "Apply leave" }).click();
+  await expect(page).toHaveURL(navPaths.Leave);
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("button", { name: "My profile" }).click();
+  await expect(page).toHaveURL(navPaths["My HR"]);
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("button", { name: /Run payroll|View payroll/ }).click();
+  await expect(page).toHaveURL(navPaths.Payroll);
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("button", { name: "View employees" }).click();
+  await expect(page).toHaveURL(navPaths.Employees);
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("button", { name: "View attendance" }).click();
+  await expect(page).toHaveURL(navPaths.Attendance);
+});
+
+test("employee dashboard certificate action retains the documents destination", async ({ page }) => {
+  await installUiApi(page, [roleDashboardEmployee], [], "light", { roles: ["EMPLOYEE"], permissions: ["session.self.read", "employee.self.read", "leave.self.read", "leave.self.create", "document.self.read", "service_request.self.read"] });
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("button", { name: "Request certificate" }).click();
+  await expect(page).toHaveURL(navPaths.Documents);
 });
 
 test("navigation drawer cannot block header controls across the 1080px breakpoint", async ({ page }) => {
@@ -414,7 +484,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
   expect(await headerMetrics()).toEqual(expected);
 
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".hero-logo-crop")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".dashboard-brand-mark")).toBeVisible();
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
@@ -444,7 +514,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
   })).toEqual({ button: [44, 44], icon: [18, 18], padding: "0px" });
 });
 
-test("login keeps the exact brand assets, hero and controls responsive", async ({ page }) => {
+test("login keeps the exact brand assets, centered composition and controls responsive", async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.clear();
     localStorage.removeItem("medtech-hr-theme");
@@ -455,61 +525,41 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
     body: JSON.stringify({ success: false, error: { code: "UNAUTHENTICATED", message: "Sign in required" } })
   }));
 
-  for (const viewport of [{ width: 390, height: 844 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1024, height: 768 }, { width: 1280, height: 800 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
     await test.step(`${viewport.width}x${viewport.height}`, async () => {
       await page.setViewportSize(viewport);
       await page.goto("/", { waitUntil: "networkidle" });
 
-      const mobile = viewport.width < 720;
       const stage = page.locator(".login-stage");
-      const mobileLogo = page.locator(".login-mobile-logo");
+      const card = page.locator(".login-card");
+      const brand = page.locator(".login-brand");
       const themeButton = page.getByRole("button", { name: "Switch to dark mode" });
-      await expect(stage)[mobile ? "toBeHidden" : "toBeVisible"]();
-      await expect(mobileLogo)[mobile ? "toBeVisible" : "toBeHidden"]();
+      await expect(stage).toBeVisible();
+      await expect(brand.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
       await expect(themeButton).toHaveCSS("height", "44px");
       await expect(page.getByText("Role-based access. Protected activity is audited.", { exact: true })).toHaveCount(0);
       await expect(page.getByText("Access is limited to the work assigned to you.", { exact: true })).toHaveCount(0);
 
-      if (mobile) {
-        await expect(mobileLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
-        expect(await mobileLogo.boundingBox()).toMatchObject({ width: 210, height: 58 });
-        await expect(mobileLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-        expect(await page.evaluate(() => performance.getEntriesByType("resource").some(entry => entry.name.includes("login-medtech-hero.webp")))).toBe(false);
-        await themeButton.click();
-        expect(await mobileLogo.boundingBox()).toMatchObject({ width: 226, height: 70 });
-        await expect(mobileLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-        await expect(mobileLogo).toHaveCSS("border-top-width", "0px");
-      } else {
-        const headerMark = page.locator(".login-product img");
-        const stageLogo = page.locator(".login-stage-logo");
-        const stageCopy = page.locator(".login-stage-copy");
-        expect(await headerMark.boundingBox()).toMatchObject({ width: 72, height: 58 });
-        await expect(stageLogo.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
-        expect((await stageLogo.boundingBox())!.width).toBe(viewport.width === 1440 ? 448 : 348);
-        await expect(stageLogo).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-        await expect(stageLogo).toHaveCSS("border-top-width", "0px");
-        await expect(stageLogo).toHaveCSS("box-shadow", "none");
-        await expect(stageLogo).toHaveCSS("opacity", "1");
-        await expect(stageCopy).toHaveCSS("opacity", "1");
-        const logoBox = (await stageLogo.boundingBox())!;
-        const copyBox = (await stageCopy.boundingBox())!;
-        expect(copyBox.y - (logoBox.y + logoBox.height)).toBeGreaterThanOrEqual(27);
-        await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
-        expect(await page.evaluate(() => performance.getEntriesByType("resource").some(entry => entry.name.includes("login-medtech-hero.webp")))).toBe(true);
-      }
-
+      const cardBox = (await card.boundingBox())!;
+      expect(cardBox.x).toBeGreaterThanOrEqual(0);
+      expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width);
+      expect(cardBox.y).toBeGreaterThanOrEqual(0);
+      expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(viewport.height + 1);
+      if (viewport.width > 720) expect(Math.abs(cardBox.x + cardBox.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
+      await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
       await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
-      await expect(page.getByLabel("Email")).toHaveCSS("height", "52px");
-      await expect(page.getByLabel("Password")).toHaveCSS("height", "52px");
+      await expect(page.locator(".microsoft-mark")).toHaveCSS("width", "16px");
+      await expect(page.getByLabel("Email").locator("xpath=.." )).toHaveCSS("height", "52px");
+      await expect(page.getByLabel("Password").locator("xpath=.." )).toHaveCSS("height", "52px");
       await page.getByLabel("Email").focus();
-      expect(await page.getByLabel("Email").evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
+      expect(await page.locator(".login-input").first().evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     });
   }
 
-  const stageLogoAsset = await page.evaluate(async () => (await fetch("/logos/medtech-lockup.svg?v=4")).text());
-  expect((stageLogoAsset.match(/rgb\(13\.725281%, 19\.607544%, 41\.567993%\)/g) ?? []).length).toBe(16);
-  expect(stageLogoAsset).not.toMatch(/<rect\b|<image\b|#D7A7BE/);
+  const logoAsset = await page.evaluate(async () => (await fetch("/logos/medtech-lockup.svg?v=4")).text());
+  expect((logoAsset.match(/rgb\(13\.725281%, 19\.607544%, 41\.567993%\)/g) ?? []).length).toBe(16);
+  expect(logoAsset).not.toMatch(/<rect\b|<image\b|#D7A7BE/);
 
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -526,12 +576,11 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
       return (lighter + 0.05) / (darker + 0.05);
     };
     return {
-      heading: ratio(document.querySelector(".login-intro h1")!, document.querySelector(".login-card")!),
-      action: ratio(document.querySelector(".login-card .primary")!, document.querySelector(".login-card .primary")!)
+      heading: ratio(document.querySelector(".login-intro h1")!, document.querySelector(".login-card")!)
     };
   });
   expect(contrast.heading).toBeGreaterThanOrEqual(4.5);
-  expect(contrast.action).toBeGreaterThanOrEqual(4.5);
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toHaveCSS("color", "rgb(255, 255, 255)");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(page.locator(".login-card")).toHaveCSS("animation-name", "none");
   await expect(page.locator(".login-stage-art")).toHaveCSS("animation-name", "none");
@@ -539,6 +588,7 @@ test("login keeps the exact brand assets, hero and controls responsive", async (
 
 test("local login preserves validation, busy state and backend session flow", async ({ page }) => {
   let loginBody: unknown;
+  let attempts = 0;
   await page.addInitScript(() => sessionStorage.clear());
   await page.route("**/api/v1/**", async route => {
     const pathname = new URL(route.request().url()).pathname;
@@ -547,7 +597,13 @@ test("local login preserves validation, busy state and backend session flow", as
     }
     if (pathname === "/api/v1/auth/login") {
       loginBody = route.request().postDataJSON();
+      attempts += 1;
       await new Promise(resolve => setTimeout(resolve, 150));
+      if (attempts === 1) return route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ success: false, error: { code: "INVALID_CREDENTIALS", message: "Incorrect email or password." } })
+      });
       const { csrfToken, ...user } = session;
       return route.fulfill({
         status: 200,
@@ -555,6 +611,11 @@ test("local login preserves validation, busy state and backend session flow", as
         body: JSON.stringify({ success: true, data: { csrfToken, user } })
       });
     }
+    if (pathname === "/api/v1/attendance/reports/summary") return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: { summary: { totalRecords: 0, byStatus: {} } } })
+    });
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -570,9 +631,23 @@ test("local login preserves validation, busy state and backend session flow", as
   await page.getByLabel("Email").fill("ui.admin@example.invalid");
   await page.getByLabel("Password").fill("valid-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("API request failed (401)");
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("button", { name: "Signing in..." })).toBeDisabled();
   await expect(page.locator(".app")).toBeVisible();
   expect(loginBody).toEqual({ email: "ui.admin@example.invalid", password: "valid-password" });
+});
+
+test("Microsoft login keeps the existing start route", async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.clear());
+  await page.route("**/api/v1/auth/me", route => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false }) }));
+  await page.route("**/api/v1/auth/microsoft/start", route => route.fulfill({ status: 204 }));
+  await page.goto("/");
+
+  const start = page.waitForRequest(request => new URL(request.url()).pathname === "/api/v1/auth/microsoft/start");
+  await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+  await start;
 });
 
 test("unknown URLs show an explicit not-found page", async ({ page }) => {

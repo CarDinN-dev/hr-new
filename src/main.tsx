@@ -22,7 +22,9 @@ import {
   HandCoins,
   ImagePlus,
   LayoutDashboard,
+  LockKeyhole,
   LogOut,
+  Mail,
   Menu,
   Moon,
   PanelLeftClose,
@@ -102,6 +104,7 @@ import {
   ApiError,
   apiDownload,
   apiList,
+  apiPage,
   apiRequest,
   hasAllPermissions,
   hasAnyPermission,
@@ -123,6 +126,7 @@ import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
+import { workflowKey } from "./features/workflow-utils";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
@@ -243,18 +247,20 @@ function accountInitials(value: string) {
   return value.split("@")[0].split(/[.\s_-]+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join("") || "HR";
 }
 
-function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session: BackendSession) => void; notify: (message: string) => void; theme: Theme; toggleTheme: () => void }) {
+function LoginPage({ onLogin, theme, toggleTheme }: { onLogin: (session: BackendSession) => void; theme: Theme; toggleTheme: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    setError("");
     setBusy(true);
     try {
       onLogin(await loginBackend(email, password));
     } catch (error) {
-      notify(errorMessage(error));
+      setError(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -262,12 +268,11 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
 
   return (
     <main className="login-shell">
+      <div className="login-stage" aria-hidden="true">
+        <div className="login-stage-art" />
+      </div>
       <section className="login-card" aria-labelledby="login-title">
         <header className="login-header">
-          <div className="login-product">
-            <img src="/logos/brand-mark.svg?v=4" alt="" aria-hidden="true" />
-            <span>HR sign in</span>
-          </div>
           <button
             className="theme-login"
             type="button"
@@ -280,7 +285,7 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
         </header>
 
         <div className="login-content">
-          <div className="login-mobile-logo">
+          <div className="login-brand">
             <img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." />
           </div>
           <div className="login-intro">
@@ -289,27 +294,19 @@ function LoginPage({ onLogin, notify, theme, toggleTheme }: { onLogin: (session:
             <p>Sign in with your MedTech work account.</p>
           </div>
           <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
-            <ShieldCheck size={17} /> Sign in with Microsoft
+            <span className="microsoft-mark" aria-hidden="true"><i /><i /><i /><i /></span>
+            <span>Sign in with Microsoft</span>
           </button>
           <div className="login-divider" aria-hidden="true"><span>or</span></div>
-          <form className="login-form" onSubmit={submit}>
-            <label htmlFor="login-email"><span>Email</span><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
-            <label htmlFor="login-password"><span>Password</span><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
-            <button className="primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
+          <form className="login-form" onSubmit={submit} aria-busy={busy}>
+            <label htmlFor="login-email"><span>Email</span><span className="login-input"><Mail size={18} aria-hidden="true" /><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></span></label>
+            <label htmlFor="login-password"><span>Password</span><span className="login-input"><LockKeyhole size={18} aria-hidden="true" /><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></span></label>
+            {error && <p className="login-error" id="login-error" role="alert"><span aria-hidden="true">!</span>{error}</p>}
+            <button className="primary" type="submit" disabled={busy} aria-busy={busy}>{busy ? "Signing in..." : "Sign in"}</button>
           </form>
         </div>
 
-        <footer className="login-footer">MedTech Corporation Trading W.L.L.</footer>
-      </section>
-      <section className="login-stage" aria-label="MedTech HR system">
-        <div className="login-stage-art" aria-hidden="true" />
-        <div className="login-stage-content">
-          <div className="login-stage-logo"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></div>
-          <div className="login-stage-copy">
-            <span>HR and payroll</span>
-            <strong>People, payroll, and attendance. One secure workspace.</strong>
-          </div>
-        </div>
+        <footer className="login-footer"><ShieldCheck size={14} aria-hidden="true" /> Protected sign-in · MedTech Corporation Trading W.L.L.</footer>
       </section>
     </main>
   );
@@ -580,7 +577,7 @@ function App() {
   if (backendSession === null) {
     return (
       <>
-        <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} notify={notify} theme={theme} toggleTheme={toggleTheme} />
+        <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} theme={theme} toggleTheme={toggleTheme} />
         {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
       </>
     );
@@ -681,7 +678,7 @@ function App() {
         </header>
 
         <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
-          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
+          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} notify={notify} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
@@ -840,45 +837,93 @@ function TeamPage({ state, session, notify }: { state: HrState; session: Backend
 type DashboardAttendanceReport = { summary: { totalRecords: number; byStatus: Record<string, number> } };
 type DashboardLeave = { id: string; status: string; startDate: string; endDate: string; totalDays: string; employee: { firstName: string; lastName: string }; leaveType: { name: string } };
 type DashboardPayrollRun = { id: string; year: number; month: number; status: string; _count?: { payrolls: number } };
-type DashboardPayslip = { id: string; netPay: string };
-type DashboardBirthday = { id: string; firstName: string; lastName: string; department: string | null; profilePhoto: string | null; date: string; daysUntil: number };
+type DashboardLeaveBalance = { leaveType: { name: string }; availableDays: string | number; totalDays: string | number; usedDays: string | number; pendingDays: string | number; eligible: boolean; noBalanceRequired: boolean };
+type DashboardServiceRequest = { id: string; requestType: string; status: string; createdAt: string };
+type DashboardAnnouncement = { id: string; title: string; content: string; publishedAt: string | null; createdAt: string };
+type DashboardApprovalInbox = { leave: unknown[]; certificates: unknown[]; payroll: unknown[] };
+type DashboardPagination = { total: number };
+type DashboardPersona = "employee" | "line-manager" | "manager" | "hr" | "cpo" | "coo";
 
-function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
+const dashboardPersonaPriority: Array<[string, DashboardPersona]> = [
+  ["COO", "coo"], ["CPO", "cpo"], ["HR", "hr"], ["MANAGER", "manager"], ["LINE_MANAGER", "line-manager"], ["EMPLOYEE", "employee"],
+];
+
+function dashboardPersona(session: BackendSession): DashboardPersona {
+  if (session.roles.includes("SUPER_ADMIN") || session.roles.includes("ADMIN")) return "hr";
+  return dashboardPersonaPriority.find(([role]) => session.roles.includes(role))?.[1] || "employee";
+}
+
+function dashboardGreeting() {
+  const hour = new Date().getHours();
+  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}
+
+function dashboardRoleCopy(persona: DashboardPersona) {
+  return ({
+    employee: ["Employee", "Here’s your personal leave, document and request update."],
+    "line-manager": ["Line Manager", "Here’s what your team needs from you today."],
+    manager: ["Manager", "Here’s your department’s leave and approval overview."],
+    hr: ["Human Resources", "Here’s the operational people snapshot for today."],
+    cpo: ["Chief People Officer", "Here’s the people strategy snapshot for today."],
+    coo: ["Chief Operating Officer", "Here’s the organization overview for today."],
+  } as const)[persona];
+}
+
+function dashboardPending(items: DashboardLeave[]) {
+  return items.filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
+}
+
+function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; notify: (message: string) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
   const { search, active: searchActive } = usePageSearch();
-  const sectionSearch = useSectionSearch("dashboard");
   const employeeSearch = usePageSearchList<{ id: string }>("dashboard-employees", "/employees");
+  const persona = dashboardPersona(session);
+  const [roleLabel, roleSubtitle] = dashboardRoleCopy(persona);
+  const personalDashboard = persona === "employee";
+  const managementDashboard = persona === "line-manager" || persona === "manager";
+  const operationalDashboard = persona === "hr";
+  const executiveDashboard = persona === "cpo" || persona === "coo";
   const active = activeEmployees(state.employees);
   const matchingActive = rankedPageSearchItems(active, employeeSearch.data, searchActive, employee => employee.id, match => match.id);
-  const today = state.attendance[todayISO()] || {};
-  const fallbackAttendance = attendanceDaySummary(state.employees, today);
   const todayValue = todayISO();
-  const canReadAttendanceSummary = hasAnyPermission(session, "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.audit.read", "attendance.read_all");
+  const canReadScopedEmployees = !personalDashboard && hasAnyPermission(session, "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
+  const canReadAttendanceSummary = (operationalDashboard || executiveDashboard) && hasAnyPermission(session, "attendance.hr.read", "attendance.audit.read", "attendance.read_all");
   const attendance = useQuery({ queryKey: ["dashboard-attendance", session.sessionId, session.authorizationVersion, todayValue], queryFn: () => apiRequest<DashboardAttendanceReport>(`/attendance/reports/summary?dateFrom=${todayValue}&dateTo=${todayValue}&limit=100`), enabled: canReadAttendanceSummary });
   const canReadLeave = hasAnyPermission(session, "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
-  const broadLeave = hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
+  const broadLeave = !personalDashboard && hasAnyPermission(session, "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
+  const canLoadDashboardLeave = personalDashboard ? canReadLeave : broadLeave;
   const leavePath = broadLeave ? "/leave/requests" : "/leave/mine";
-  const leaveRecords = useQuery({ queryKey: ["dashboard-leave", session.sessionId, session.authorizationVersion, broadLeave], queryFn: () => apiList<DashboardLeave>(leavePath), enabled: canReadLeave });
-  const searchedLeaveRecords = useQuery({ queryKey: ["dashboard-leave-search", session.sessionId, session.authorizationVersion, broadLeave, search], queryFn: () => apiList<DashboardLeave>(pageSearchPath(leavePath, search)), enabled: canReadLeave && searchActive });
+  const leaveRecords = useQuery({ queryKey: ["dashboard-leave", session.sessionId, session.authorizationVersion, broadLeave], queryFn: () => apiList<DashboardLeave>(leavePath), enabled: canLoadDashboardLeave });
+  const searchedLeaveRecords = useQuery({ queryKey: ["dashboard-leave-search", session.sessionId, session.authorizationVersion, broadLeave, search], queryFn: () => apiList<DashboardLeave>(pageSearchPath(leavePath, search)), enabled: canLoadDashboardLeave && searchActive });
+  const canOpenApprovalInbox = !personalDashboard && hasAnyPermission(session, "leave.team.approve_line_manager", "leave.management.approve_manager", "leave.hr.approve", "leave.executive.approve_cpo", "leave.executive.approve_coo", "leave.executive.self_approve_coo");
+  const approvalInbox = useQuery({ queryKey: [...workflowKey(session, "approval-inbox"), search], queryFn: () => apiRequest<DashboardApprovalInbox>(`/approvals/inbox${search ? `?search=${encodeURIComponent(search)}` : ""}`), enabled: canOpenApprovalInbox });
+  const canReadPersonalBalances = personalDashboard && Boolean(session.employeeId) && hasPermission(session, "leave.self.read");
+  const canReadPersonalRequests = personalDashboard && hasPermission(session, "service_request.self.read");
+  const canReadAnnouncements = personalDashboard && hasPermission(session, "announcement.read");
+  const canReadPersonalDocuments = personalDashboard && hasPermission(session, "document.self.read");
+  const balances = useQuery({ queryKey: [...workflowKey(session, "dashboard-leave-balances", new Date().getFullYear())], queryFn: () => apiList<DashboardLeaveBalance>(`/leave/balances?employeeId=${encodeURIComponent(session.employeeId || "")}&year=${new Date().getFullYear()}`), enabled: canReadPersonalBalances });
+  const serviceRequests = useQuery({ queryKey: [...workflowKey(session, "dashboard-service-requests"), search], queryFn: () => apiPage<DashboardServiceRequest, DashboardPagination>(`/service-requests?page=1&limit=4${search ? `&search=${encodeURIComponent(search)}` : ""}`), enabled: canReadPersonalRequests });
+  const announcements = useQuery({ queryKey: [...workflowKey(session, "dashboard-announcements")], queryFn: () => apiPage<DashboardAnnouncement>("/announcements?page=1&limit=3"), enabled: canReadAnnouncements });
   const currentYear = new Date().getFullYear(); const currentMonth = new Date().getMonth() + 1;
-  const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasAnyPermission(session, "payroll.read", "payroll.audit.read") });
-  const payrollSlips = useQuery({ queryKey: ["dashboard-payroll-slips", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayslip>(`/payroll/payslips?year=${currentYear}&month=${currentMonth}`), enabled: canOpenPayroll && hasPermission(session, "payroll.payslip.read_all") });
-  const birthdays = useQuery({ queryKey: ["dashboard-birthdays", session.sessionId, session.authorizationVersion], queryFn: () => apiRequest<DashboardBirthday[]>("/employees/upcoming-birthdays") });
-  const attendanceSummary = attendance.data?.summary;
-  const byStatus = attendanceSummary?.byStatus;
-  const todaySummary = byStatus ? { P: (byStatus.PRESENT || 0) + (byStatus.LATE || 0), A: byStatus.ABSENT || 0, H: byStatus.HALF_DAY || 0, L: 0, unmarked: Math.max(0, active.length - attendanceSummary.totalRecords) } : fallbackAttendance;
-  const pendingLeave = (leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
-  const visiblePendingLeave = (searchActive && searchedLeaveRecords.data !== undefined ? searchedLeaveRecords.data : leaveRecords.data ?? []).filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
+  const canReadPayrollDashboard = operationalDashboard && canOpenPayroll && hasAnyPermission(session, "payroll.read", "payroll.audit.read");
+  const payrollRuns = useQuery({ queryKey: ["dashboard-payroll-runs", session.sessionId, session.authorizationVersion, currentYear, currentMonth], queryFn: () => apiList<DashboardPayrollRun>(`/payroll/runs?year=${currentYear}&month=${currentMonth}`), enabled: canReadPayrollDashboard });
+  const visibleLeaves = searchActive && searchedLeaveRecords.data !== undefined ? searchedLeaveRecords.data : leaveRecords.data ?? [];
+  const pendingLeave = dashboardPending(visibleLeaves);
+  const approvedLeave = visibleLeaves.filter(item => item.status === "APPROVED");
+  const onLeaveToday = approvedLeave.filter(item => item.startDate <= todayValue && item.endDate >= todayValue);
+  const upcomingLeave = approvedLeave.filter(item => item.endDate >= todayValue).sort((left, right) => left.startDate.localeCompare(right.startDate));
+  const approvalCount = (approvalInbox.data?.leave.length ?? 0) + (approvalInbox.data?.certificates.length ?? 0) + (approvalInbox.data?.payroll.length ?? 0);
+  const attendanceStatus = attendance.data?.summary.byStatus;
+  const attendancePresent = (attendanceStatus?.PRESENT ?? 0) + (attendanceStatus?.LATE ?? 0);
+  const attendanceAbsent = attendanceStatus?.ABSENT ?? 0;
+  const attendanceLate = attendanceStatus?.LATE ?? 0;
   const currentPayroll = payrollRuns.data ?? [];
-  const expiringDocs = state.employees.filter(employee => daysUntil(employee.fields["QID Expiry Date"]) <= 60 || daysUntil(employee.fields["Passport Expiry Date"]) <= 60);
+  const canReadRecruitment = executiveDashboard && hasPermission(session, "recruitment.read");
   const openJobs = state.jobs.filter(job => job.status === "Open" && !recruitmentJobVacancies(job, state.candidates).isFilled);
   const openPositions = openJobs.reduce((total, job) => total + recruitmentJobVacancies(job, state.candidates).remaining, 0);
-  const pipelineCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" && candidate.stage !== "Rejected");
-  const payrollTotal = (payrollSlips.data ?? []).reduce((sum, slip) => sum + Number(slip.netPay), 0);
-  const headcount = state.settings.departments.map(department => ({
+  const headcount = [...new Set(matchingActive.map(employee => employee.fields.Department || "Unassigned"))].map(department => ({
     department,
-    count: matchingActive.filter(employee => employee.fields.Department === department).length
+    count: matchingActive.filter(employee => (employee.fields.Department || "Unassigned") === department).length
   })).filter(item => item.count > 0);
-  const upcomingBirthdays = rankedPageSearchItems(birthdays.data ?? [], employeeSearch.data, searchActive, item => item.id, match => match.id);
   const recentJoiners = rankedPageSearchItems(
     [...state.employees].sort((a, b) => (b.fields["Joining Date"] || "").localeCompare(a.fields["Joining Date"] || "")),
     employeeSearch.data,
@@ -887,99 +932,112 @@ function Dashboard({ state, session, setNav, onAddEmployee, canAddEmployee, canR
     match => match.id,
   )
     .slice(0, 6);
-  const showSection = (id: string, hasMatches: boolean) => !searchActive || sectionSearch.query.isPending || hasMatches || sectionSearch.ids.has(id);
+  const leaveDistribution = [
+    { department: "Approved", count: approvedLeave.length },
+    { department: "Pending", count: pendingLeave.length },
+    { department: "Rejected", count: visibleLeaves.filter(item => item.status === "REJECTED").length },
+    { department: "Cancelled", count: visibleLeaves.filter(item => item.status === "CANCELLED").length },
+  ].filter(item => item.count > 0);
+  const availableLeaveDays = (balances.data ?? []).filter(balance => balance.eligible && !balance.noBalanceRequired).reduce((sum, balance) => sum + Number(balance.availableDays), 0);
+  const latestDocument = canReadPersonalDocuments ? [...state.documents].sort((left, right) => right.generatedOn.localeCompare(left.generatedOn))[0] : undefined;
+  const canOpenLeave = canAccessRoute(session, "Leave") && hasPermission(session, "leave.self.create");
+  const canOpenMyHr = canAccessRoute(session, "My HR");
+  const canOpenDocuments = canAccessRoute(session, "Documents");
+  const canOpenAttendance = operationalDashboard && canAccessRoute(session, "Attendance");
+  const canOpenEmployees = operationalDashboard && canAccessRoute(session, "Employees");
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout" data-dashboard-persona={persona}>
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="section-label">Dashboard</p>
-          <span className="hero-logo-crop"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
-          <h2>Today at MedTech</h2>
-          <p>Review attendance, leave requests, payroll and employee records.</p>
+          <p className="section-label">{roleLabel} dashboard</p>
+          <span className="dashboard-brand-mark" aria-hidden="true"><img src="/logos/brand-mark.svg?v=4" alt="" /></span>
+          <h2>{dashboardGreeting()}, {session.displayName || session.email} <span aria-hidden="true">👋</span></h2>
+          <p>{roleSubtitle}</p>
         </div>
         <div className="dashboard-snapshot">
-          <span>Today's snapshot</span>
+          <span>Today’s brief</span>
           <strong>{formatDate(todayISO())}</strong>
           <dl>
-            <div><dt>Attendance</dt><dd>{todaySummary.P} present, {todaySummary.A} absent</dd></div>
-            <div><dt>Leave approvals</dt><dd>{pendingLeave.length}</dd></div>
-            <div><dt>Compliance alerts</dt><dd>{expiringDocs.length}</dd></div>
+            {personalDashboard ? <>
+              {canReadLeave && <div><dt>Leave requests</dt><dd>{pendingLeave.length} pending</dd></div>}
+              {canReadPersonalDocuments && <div><dt>Documents</dt><dd>{state.documents.length} available</dd></div>}
+            </> : <>
+              {canOpenApprovalInbox && <div><dt>Approvals</dt><dd>{approvalCount} assigned</dd></div>}
+              {broadLeave && <div><dt>Leave today</dt><dd>{onLeaveToday.length} people</dd></div>}
+              {canReadAttendanceSummary && <div><dt>Attendance</dt><dd>{attendance.isPending ? "Loading…" : `${attendancePresent} present`}</dd></div>}
+            </>}
           </dl>
         </div>
         <div className="hero-actions">
-          {canAddEmployee && <button className="primary" onClick={onAddEmployee}><UserRoundPlus size={17} /> Add employee</button>}
-          {canOpenPayroll && <button onClick={() => setNav("Payroll")}><WalletCards size={17} /> {canRunPayroll ? "Run payroll" : "View payslips"}</button>}
+          {canOpenLeave && <button className="primary" onClick={() => setNav("Leave")}><CalendarCheck size={17} /> Apply leave</button>}
+          {canOpenMyHr && <button onClick={() => setNav("My HR")}>My profile</button>}
+          {managementDashboard && <button onClick={() => setNav("Leave")}>Review leave</button>}
+          {canAddEmployee && <button onClick={onAddEmployee}><UserRoundPlus size={17} /> Add employee</button>}
+          {operationalDashboard && canOpenPayroll && <button onClick={() => setNav("Payroll")}><WalletCards size={17} /> {canRunPayroll ? "Run payroll" : "View payroll"}</button>}
         </div>
       </section>
 
       <section className="metric-grid">
-        <Metric label="Active employees" value={active.length} hint={`${state.employees.length - active.length} inactive records`} />
-        <Metric label="Present today" value={todaySummary.P} hint={`${todaySummary.A} absent · ${todaySummary.H} half-day · ${todaySummary.L} leave · ${todaySummary.unmarked} unmarked`} tone={todaySummary.A ? "warn" : "ok"} />
-        <Metric label="Pending leave" value={pendingLeave.length} hint="awaiting approval" tone={pendingLeave.length ? "warn" : "ok"} />
-        <Metric label="Open positions" value={openPositions} hint={`${pipelineCandidates.length} candidates in pipeline`} />
-        <Metric label="Payroll this month" value={payrollSlips.isSuccess ? formatMoney(payrollTotal, state.settings.company.currency) : `${currentPayroll.length} run(s)`} hint={`${payrollSlips.data?.length ?? currentPayroll.reduce((sum, run) => sum + (run._count?.payrolls ?? 0), 0)} payslips`} />
-        <Metric label="Docs expiring" value={expiringDocs.length} hint="next 60 days" tone={expiringDocs.length ? "warn" : "ok"} />
+        {personalDashboard ? <>
+          {canReadPersonalBalances && <Metric label="Leave balance" value={balances.isPending ? "…" : `${availableLeaveDays} days`} hint="across eligible leave types" icon={<CalendarCheck size={17} />} />}
+          {canReadLeave && <Metric label="Pending leave" value={pendingLeave.length} hint="personal requests in progress" tone={pendingLeave.length ? "warn" : "ok"} icon={<LayoutDashboard size={17} />} />}
+          {canReadPersonalDocuments && <Metric label="Latest document" value={latestDocument ? formatDate(latestDocument.generatedOn) : "—"} hint={latestDocument?.filename || "No documents yet"} icon={<FileText size={17} />} />}
+          {canReadPersonalRequests && <Metric label="Certificate requests" value={serviceRequests.data?.meta?.total ?? "—"} hint="salary, experience and clearance" icon={<BriefcaseBusiness size={17} />} />}
+        </> : <>
+          {canReadScopedEmployees && <Metric label={persona === "line-manager" ? "Team members" : persona === "manager" ? "Department headcount" : "Total employees"} value={active.length} hint={managementDashboard ? "within your current scope" : `${state.employees.length - active.length} inactive records`} icon={<UsersRound size={17} />} />}
+          {canOpenApprovalInbox && <Metric label={persona === "coo" ? "Final approvals" : persona === "cpo" ? "Executive approvals" : "Pending actions"} value={approvalInbox.isPending ? "…" : approvalCount} hint="currently assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
+          {broadLeave && <Metric label="On leave today" value={onLeaveToday.length} hint="approved leave within your scope" icon={<CalendarCheck size={17} />} />}
+          {operationalDashboard && canReadScopedEmployees && <Metric label="New joiners" value={recentJoiners.length} hint="latest employee records" icon={<UserRoundPlus size={17} />} />}
+          {persona === "cpo" && canReadRecruitment && <Metric label="Open positions" value={openPositions} hint="active recruitment vacancies" icon={<BriefcaseBusiness size={17} />} />}
+          {persona === "coo" && canReadScopedEmployees && <Metric label="Departments" value={headcount.length} hint="organizational units in scope" icon={<LayoutDashboard size={17} />} />}
+          {canReadPayrollDashboard && <Metric label="Payroll runs" value={payrollRuns.isPending ? "…" : currentPayroll.length} hint="for the current month" icon={<WalletCards size={17} />} />}
+          {canReadAttendanceSummary && <Metric label="Attendance today" value={attendance.isPending ? "…" : attendancePresent} hint={`${attendanceAbsent} absent · ${attendanceLate} late`} tone={attendanceAbsent ? "warn" : "ok"} icon={<CalendarCheck size={17} />} />}
+        </>}
       </section>
 
-      <section className="two-col">
-        {showSection("headcount", headcount.length > 0) && <div className="panel headcount-panel">
-          <div className="panel-head"><h3>Headcount by Department</h3><span>{active.length} active</span></div>
-          <HeadcountDonut items={headcount} />
+      {personalDashboard ? <>
+        <div className="dashboard-row dashboard-row--two">
+          {canReadPersonalBalances && <section className="panel dashboard-balance-panel"><div className="panel-head"><div><h3>My leave balance</h3><span>Current-year availability by leave type.</span></div><button type="button" onClick={() => setNav("Leave")}>View Leave</button></div>
+            {balances.isPending ? <div className="empty">Loading leave balances…</div> : balances.isError ? <div className="empty">Leave balances could not be loaded.</div> : <div className="dashboard-balance-list">{balances.data?.filter(balance => balance.eligible).map(balance => <div key={balance.leaveType.name}><span>{balance.leaveType.name}</span><strong>{balance.noBalanceRequired ? "No balance required" : `${balance.availableDays} days`}</strong><small>{balance.noBalanceRequired ? "Not deducted from annual allowance" : `${balance.usedDays} used · ${balance.pendingDays} pending`}</small></div>)}{!balances.data?.filter(balance => balance.eligible).length && <div className="empty compact">No available leave balances.</div>}</div>}
+          </section>}
+          {canReadLeave && <div className="dashboard-embedded-panel"><MyLeaveStatusPanel session={session} onOpenLeave={() => setNav("Leave")} /></div>}
+        </div>
+        <div className="dashboard-row dashboard-row--two">
+          {canReadPersonalRequests && <section className="panel"><div className="panel-head"><div><h3>My recent requests</h3><span>Leave and certificate activity that belongs to you.</span></div>{canOpenDocuments && <button type="button" onClick={() => setNav("Documents")}>Request certificate</button>}</div>
+            {serviceRequests.isPending ? <div className="empty">Loading requests…</div> : serviceRequests.isError ? <div className="empty">Requests could not be loaded.</div> : <DataTable label="Recent personal requests" empty="No certificate requests yet." columns={["Type", "Requested", "Status"]} rows={(serviceRequests.data?.data ?? []).map(request => [request.requestType.replaceAll("_", " "), formatDate(request.createdAt), <Badge key={request.id} value={request.status} />])} />}
+          </section>}
+          {canReadAnnouncements && <section className="panel"><div className="panel-head"><div><h3>Announcements</h3><span>Company updates relevant to you.</span></div></div>
+            {announcements.isPending ? <div className="empty">Loading announcements…</div> : announcements.isError ? <div className="empty">Announcements could not be loaded.</div> : <div className="dashboard-announcements">{announcements.data?.data.map(item => <article key={item.id}><strong>{item.title}</strong><p>{item.content}</p><small>{formatDate(item.publishedAt || item.createdAt)}</small></article>)}{!announcements.data?.data.length && <div className="empty compact">No current announcements.</div>}</div>}
+          </section>}
+        </div>
+      </> : <>
+        {(canReadScopedEmployees || broadLeave) && <div className={`dashboard-row ${canReadScopedEmployees && broadLeave ? "dashboard-row--two" : "dashboard-row--single"}`}>
+          {canReadScopedEmployees && <section className="panel headcount-panel"><div className="panel-head"><div><h3>{managementDashboard ? "People in your scope" : persona === "coo" ? "Organization snapshot" : "Workforce distribution"}</h3><span>{active.length} active employees</span></div></div>{headcount.length ? <HeadcountDonut items={headcount} label={managementDashboard ? "in scope" : "active"} noun="employees" /> : <div className="empty">No employee distribution is available.</div>}</section>}
+          {broadLeave && <section className="panel"><div className="panel-head"><div><h3>{managementDashboard ? "Team availability" : persona === "coo" ? "Executive leave summary" : "Leave overview"}</h3><span>{upcomingLeave.length} approved record(s)</span></div></div>
+            <DataTable label="Approved leave availability" empty="No current or upcoming approved leave." columns={["Employee", "Leave type", "Dates", "Days"]} rows={upcomingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} – ${formatDate(leave.endDate)}`, leave.totalDays])} />
+          </section>}
         </div>}
-        {showSection("leave-approvals", visiblePendingLeave.length > 0) && <div className="panel">
-          <div className="panel-head"><h3>Pending Leave Approvals</h3><span>{visiblePendingLeave.length} open</span></div>
-          <DataTable
-            label="Pending leave approvals"
-            empty="No pending leave requests."
-            columns={["Employee", "Type", "Dates", "Days", "Status"]}
-            rows={visiblePendingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} - ${formatDate(leave.endDate)}`, leave.totalDays, leave.status.replaceAll("_", " ")])}
-          />
+        {(operationalDashboard || executiveDashboard) && (broadLeave || canReadAttendanceSummary) && <div className={`dashboard-row ${broadLeave && canReadAttendanceSummary ? "dashboard-row--two" : "dashboard-row--single"}`}>
+          {broadLeave && <section className="panel"><div className="panel-head"><div><h3>Leave distribution</h3><span>Requests visible within your current scope.</span></div></div>{leaveDistribution.length ? <HeadcountDonut items={leaveDistribution} label="requests" noun="records" /> : <div className="empty">No leave requests are available.</div>}</section>}
+          {canReadAttendanceSummary && <section className="panel dashboard-attendance-panel"><div className="panel-head"><div><h3>Attendance overview</h3><span>High-level organization summary only.</span></div>{canOpenAttendance && <button type="button" onClick={() => setNav("Attendance")}>View attendance</button>}</div>
+            {attendance.isPending ? <div className="empty">Loading attendance…</div> : attendance.isError ? <div className="empty">Attendance could not be loaded.</div> : <div className="dashboard-attendance-summary"><div><span>Present</span><strong>{attendancePresent}</strong></div><div><span>Absent</span><strong>{attendanceAbsent}</strong></div><div><span>Late</span><strong>{attendanceLate}</strong></div></div>}
+          </section>}
         </div>}
-      </section>
-
-      <section className="two-col dashboard-secondary">
-        {showSection("birthdays", birthdays.isPending || birthdays.isError || upcomingBirthdays.length > 0) && <div className="panel">
-          <div className="panel-head"><h3>Birthdays - next 30 days</h3><span>{upcomingBirthdays.length} upcoming</span></div>
-          {birthdays.isPending ? <div className="empty">Loading birthdays…</div>
-            : birthdays.isError ? <div className="empty">Birthdays could not be loaded.</div>
-            : upcomingBirthdays.length ? (
-            <div className="event-list">
-              {upcomingBirthdays.slice(0, 8).map(item => (
-                <div className="event-row" key={item.id}>
-                  <span className="avatar small">{item.profilePhoto ? <img src={item.profilePhoto} alt="" /> : `${item.firstName} ${item.lastName}`.split(/\s+/).slice(0, 2).map(name => name[0]).join("").toUpperCase()}</span>
-                  <div>
-                    <strong>{`${item.firstName} ${item.lastName}`.trim()}</strong>
-                    <span>{item.department || "Unassigned"}</span>
-                  </div>
-                  <Badge value={item.daysUntil === 0 ? "Today" : formatDate(item.date).replace(/\s\d{4}$/, "")} />
-                </div>
-              ))}
-            </div>
-          ) : <div className="empty">No upcoming birthdays.</div>}
+        {operationalDashboard && (canReadScopedEmployees || broadLeave || canReadPayrollDashboard) && <div className="dashboard-row dashboard-row--two">
+          {canReadScopedEmployees && <section className="panel"><div className="panel-head"><div><h3>Recent joiners</h3><span>Latest employee records.</span></div>{canOpenEmployees && <button type="button" onClick={() => setNav("Employees")}>View employees</button>}</div>
+            <DataTable label="Recent joiners" empty="No employees yet." columns={["Name", "Designation", "Joined", "Status"]} rows={recentJoiners.map(employee => [<strong key="name">{employeeName(employee)}</strong>, employee.fields.Designation || "-", formatDate(employee.fields["Joining Date"]), <Badge key="status" value={employee.status} />])} />
+          </section>}
+          {(broadLeave || canReadPayrollDashboard) && <section className="panel"><div className="panel-head"><div><h3>Operational focus</h3><span>Real-time priorities from the existing workspace.</span></div></div><div className="dashboard-focus-list">{broadLeave && <><div><span>Approved leave today</span><strong>{onLeaveToday.length}</strong></div><div><span>Pending requests</span><strong>{pendingLeave.length}</strong></div></>}{canReadPayrollDashboard && <div><span>Current-month payroll runs</span><strong>{currentPayroll.length}</strong></div>}</div></section>}
         </div>}
-
-        {showSection("recent-joiners", recentJoiners.length > 0) && <div className="panel">
-          <div className="panel-head"><h3>Recent Joiners</h3><span>latest employee records</span></div>
-          <DataTable
-            label="Recent joiners"
-            empty="No employees yet."
-            columns={["Name", "Designation", "Joined", "Status"]}
-            rows={recentJoiners.map(employee => [
-              <strong key="name">{employeeName(employee)}</strong>,
-              employee.fields.Designation || "-",
-              formatDate(employee.fields["Joining Date"]),
-              <Badge key="status" value={employee.status} />
-            ])}
-          />
-        </div>}
-      </section>
+        {canOpenApprovalInbox && <div className="dashboard-row dashboard-row--single"><ApprovalInboxPanel session={session} notify={notify} /></div>}
+      </>}
     </div>
   );
 }
 
-function Metric({ label, value, hint, tone }: { label: string; value: React.ReactNode; hint: string; tone?: "warn" | "ok" }) {
-  return <div className={`metric ${tone || ""}`}><span>{label}</span><strong>{value}</strong><p>{hint}</p></div>;
+function Metric({ label, value, hint, tone, icon }: { label: string; value: React.ReactNode; hint: string; tone?: "warn" | "ok"; icon?: React.ReactNode }) {
+  return <div className={`metric ${tone || ""}`}>{icon && <span className="metric-icon" aria-hidden="true">{icon}</span>}<span>{label}</span><strong>{value}</strong><p>{hint}</p></div>;
 }
 
 function EmployeeAvatar({ employee, small = false }: { employee: EmployeeRecord; small?: boolean }) {
@@ -2480,7 +2538,7 @@ function DataTable({ columns, rows, empty, label = "Data table" }: { columns: Re
   return <div className={`table-wrap${wide ? " table-wide" : ""}${actions ? " table-actions" : ""}`} role="region" aria-label={label}><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td data-label={typeof columns[cellIndex] === "string" ? columns[cellIndex] : `Field ${cellIndex + 1}`} key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
-function HeadcountDonut({ items }: { items: Array<{ department: string; count: number }> }) {
+function HeadcountDonut({ items, label = "assigned", noun = "employees" }: { items: Array<{ department: string; count: number }>; label?: string; noun?: string }) {
   const ordered = [...items].sort((left, right) => right.count - left.count || left.department.localeCompare(right.department));
   const total = ordered.reduce((sum, item) => sum + item.count, 0);
   const primary = ordered.slice(0, 5);
@@ -2497,11 +2555,11 @@ function HeadcountDonut({ items }: { items: Array<{ department: string; count: n
   const max = Math.max(1, ...ordered.map(item => item.count));
   return <div className="headcount-visual">
     <div className="headcount-chart">
-      <svg viewBox="0 0 120 120" role="img" aria-label={`${total} assigned active employees across ${ordered.length} departments`}>
+      <svg viewBox="0 0 120 120" role="img" aria-label={`${total} ${label} ${noun} across ${ordered.length} groups`}>
         <circle className="headcount-chart__track" cx="60" cy="60" r="43" pathLength="100" />
         {segments.map(segment => <circle key={segment.department} className="headcount-chart__segment" cx="60" cy="60" r="43" pathLength="100" stroke={segment.color} strokeDasharray={`${segment.share} ${100 - segment.share}`} strokeDashoffset={-segment.offset}><title>{segment.department}: {segment.count} employees</title></circle>)}
         <text className="headcount-chart__value" x="60" y="57" textAnchor="middle">{total}</text>
-        <text className="headcount-chart__label" x="60" y="70" textAnchor="middle">assigned</text>
+        <text className="headcount-chart__label" x="60" y="70" textAnchor="middle">{label}</text>
       </svg>
     </div>
     <ol className="headcount-ranking">
