@@ -10,9 +10,6 @@ services:
     secrets:
       - source: mail_graph_private_key
         target: mail_graph_private_key
-        uid: "1000"
-        gid: "1000"
-        mode: 0400
 
 secrets:
   mail_graph_private_key:
