@@ -22,9 +22,7 @@ import {
   HandCoins,
   ImagePlus,
   LayoutDashboard,
-  LockKeyhole,
   LogOut,
-  Mail,
   Menu,
   Moon,
   PanelLeftClose,
@@ -247,20 +245,18 @@ function accountInitials(value: string) {
   return value.split("@")[0].split(/[.\s_-]+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join("") || "HR";
 }
 
-function LoginPage({ onLogin, theme, toggleTheme }: { onLogin: (session: BackendSession) => void; theme: Theme; toggleTheme: () => void }) {
+function LoginPage({ onLogin, notify }: { onLogin: (session: BackendSession) => void; notify: (message: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    setError("");
     setBusy(true);
     try {
       onLogin(await loginBackend(email, password));
     } catch (error) {
-      setError(errorMessage(error));
+      notify(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -268,22 +264,15 @@ function LoginPage({ onLogin, theme, toggleTheme }: { onLogin: (session: Backend
 
   return (
     <main className="login-shell">
-      <div className="login-stage" aria-hidden="true">
-        <div className="login-stage-art" />
-      </div>
       <section className="login-card" aria-labelledby="login-title">
-        <button
-          className="theme-login"
-          type="button"
-          onClick={toggleTheme}
-          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          title={theme === "dark" ? "Light mode" : "Dark mode"}
-        >
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
-
+        <header className="login-header">
+          <div className="login-product">
+            <img src="/logos/brand-mark.svg?v=4" alt="" aria-hidden="true" />
+            <span>HR sign in</span>
+          </div>
+        </header>
         <div className="login-content">
-          <div className="login-brand">
+          <div className="login-mobile-logo">
             <img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." />
           </div>
           <div className="login-intro">
@@ -292,19 +281,27 @@ function LoginPage({ onLogin, theme, toggleTheme }: { onLogin: (session: Backend
             <p>Sign in with your MedTech work account.</p>
           </div>
           <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
-            <span className="microsoft-mark" aria-hidden="true"><i /><i /><i /><i /></span>
-            <span>Sign in with Microsoft</span>
+            <ShieldCheck size={17} /> Sign in with Microsoft
           </button>
           <div className="login-divider" aria-hidden="true"><span>or</span></div>
-          <form className="login-form" onSubmit={submit} aria-busy={busy}>
-            <label htmlFor="login-email"><span>Email</span><span className="login-input"><Mail size={18} aria-hidden="true" /><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></span></label>
-            <label htmlFor="login-password"><span>Password</span><span className="login-input"><LockKeyhole size={18} aria-hidden="true" /><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></span></label>
-            {error && <p className="login-error" id="login-error" role="alert"><span aria-hidden="true">!</span>{error}</p>}
-            <button className="primary" type="submit" disabled={busy} aria-busy={busy}>{busy ? "Signing in..." : "Sign in"}</button>
+          <form className="login-form" onSubmit={submit}>
+            <label htmlFor="login-email"><span>Email</span><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+            <label htmlFor="login-password"><span>Password</span><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
+            <button className="primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
           </form>
         </div>
 
-        <footer className="login-footer"><ShieldCheck size={14} aria-hidden="true" /> Protected sign-in · MedTech Corporation Trading W.L.L.</footer>
+        <footer className="login-footer">MedTech Corporation Trading W.L.L.</footer>
+      </section>
+      <section className="login-stage" aria-label="MedTech HR system">
+        <div className="login-stage-art" aria-hidden="true" />
+        <div className="login-stage-content">
+          <div className="login-stage-logo"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></div>
+          <div className="login-stage-copy">
+            <span>HR and payroll</span>
+            <strong>People, payroll, and attendance. One secure workspace.</strong>
+          </div>
+        </div>
       </section>
     </main>
   );
@@ -575,7 +572,7 @@ function App() {
   if (backendSession === null) {
     return (
       <>
-        <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} theme={theme} toggleTheme={toggleTheme} />
+        <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} notify={notify} />
         {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
       </>
     );
@@ -616,7 +613,7 @@ function App() {
         hidden={!compactNavigation && sidebarCollapsed}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
+          <span className="logo-crop wordmark"><img src="/logos/medtech-logo-page-2.svg" alt="MedTech Corporation Trading W.L.L." /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -641,7 +638,7 @@ function App() {
         <header className="topbar">
           <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
           <div className="topbar-heading">
-            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-lockup.svg?v=4" alt="" /></span>
+            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-logo-page-2.svg" alt="" /></span>
             <button
               className="desktop-sidebar-toggle"
               type="button"
@@ -949,7 +946,6 @@ function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmploy
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="section-label">{roleLabel} dashboard</p>
-          <span className="dashboard-brand-mark" aria-hidden="true"><img src="/logos/brand-mark.svg?v=4" alt="" /></span>
           <h2>{dashboardGreeting()}, {session.displayName || session.email} <span aria-hidden="true">👋</span></h2>
           <p>{roleSubtitle}</p>
         </div>
