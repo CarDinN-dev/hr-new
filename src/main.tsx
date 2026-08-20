@@ -616,7 +616,7 @@ function App() {
         inert={navigationHidden ? true : undefined}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src={theme === "dark" ? "/logos/medtech-logo-on-dark.svg" : "/logos/medtech-logo-page-2.svg"} alt="MedTech Corporation Trading W.L.L." /></span>
+          <span className="logo-crop wordmark"><img src="/logos/medtech-logo-page-2.svg" alt="MedTech Corporation Trading W.L.L." /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -642,7 +642,7 @@ function App() {
           <div className="topbar-inner">
             <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
             <div className="topbar-heading">
-              <span className="topbar-brand-mark" aria-hidden="true"><img src={theme === "dark" ? "/logos/medtech-logo-on-dark.svg" : "/logos/medtech-logo-page-2.svg"} alt="" /></span>
+              <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-logo-page-2.svg" alt="" /></span>
               <button
                 className="desktop-sidebar-toggle"
                 type="button"

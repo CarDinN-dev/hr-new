@@ -9210,8 +9210,8 @@ body {
 
 :root[data-theme="dark"] .app .sidebar {
   background:
-    radial-gradient(circle at 8% 2%, rgba(237, 30, 54, 0.13), transparent 15rem),
-    linear-gradient(180deg, var(--sidebar), var(--sidebar-deep));
+    radial-gradient(circle at 8% 2%, rgba(237, 30, 54, 0.18), transparent 15rem),
+    linear-gradient(180deg, #463451, #241c38);
 }
 
 @media (min-width: 1281px) {

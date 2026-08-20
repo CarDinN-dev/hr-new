@@ -490,7 +490,7 @@ test("Sidebar surfaces and topbar account menu follow the selected theme", async
   await accountTrigger.click();
   await expect(page.getByRole("menu", { name: "Account options" })).toBeVisible();
   await expect.poll(() => color(".logo-crop.wordmark", "backgroundColor")).toBe("rgba(0, 0, 0, 0)");
-  await expect(page.locator(".logo-crop.wordmark img")).toHaveAttribute("src", "/logos/medtech-logo-on-dark.svg");
+  await expect(page.locator(".logo-crop.wordmark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(accountTrigger).toHaveCSS("width", "44px");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
