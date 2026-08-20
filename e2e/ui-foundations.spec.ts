@@ -99,9 +99,9 @@ for (const theme of ["light", "dark"] as const) {
 
 for (const viewport of [
   { width: 1440, height: 900 },
-  { width: 1200, height: 900 },
-  { width: 1081, height: 900 },
-  { width: 1080, height: 900 },
+  { width: 1366, height: 768 },
+  { width: 1280, height: 720 },
+  { width: 1152, height: 768 },
   { width: 1024, height: 768 },
   { width: 768, height: 900 },
   { width: 390, height: 844 },
@@ -149,7 +149,7 @@ for (const viewport of [
         if (name !== "Employees") {
           const actions = await page.locator(".topbar-actions").boundingBox();
           expect(actions).not.toBeNull();
-          if (viewport.width <= 1080) expect(actions!.y + actions!.height).toBeLessThanOrEqual(searchBox!.y);
+          if (viewport.width <= 1280) expect(actions!.y + actions!.height).toBeLessThanOrEqual(searchBox!.y);
           else expect(Math.abs(actions!.y + actions!.height / 2 - searchBox!.y - searchBox!.height / 2)).toBeLessThanOrEqual(4);
         }
 
@@ -240,16 +240,10 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const logo = page.locator(".brand-block img");
-  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-lockup.svg?v=4", width: 840, transform: "none" });
-  const [sidebarLogo, dashboardMark] = await Promise.all([
-    page.locator(".logo-crop.wordmark").boundingBox(),
-    page.locator(".dashboard-brand-mark").boundingBox(),
-  ]);
+  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-logo-page-2.svg", width: 840, transform: "none" });
+  const sidebarLogo = await page.locator(".logo-crop.wordmark").boundingBox();
   expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
-  expect(dashboardMark).toMatchObject({ width: 40, height: 40 });
-  await expect(page.locator(".dashboard-brand-mark img")).toHaveAttribute("src", "/logos/brand-mark.svg?v=4");
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".dashboard-brand-mark")).toHaveCSS("background-color", "rgb(248, 250, 252)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
@@ -259,7 +253,7 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     color: getComputedStyle(element).color,
     height: element.getBoundingClientRect().height,
   }));
-  expect(primaryColors).toEqual({ background: "rgb(198, 22, 46)", color: "rgb(255, 255, 255)", height: 42 });
+  expect(primaryColors).toEqual({ background: "rgb(248, 250, 252)", color: "rgb(35, 50, 106)", height: 42 });
   const lightPanel = await page.locator(".panel").first().evaluate(element => getComputedStyle(element).backgroundColor);
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -275,14 +269,10 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.goto("/");
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  const [mobileDashboardMark, mobileHeaderLogo] = await Promise.all([
-    page.locator(".dashboard-brand-mark").boundingBox(),
-    page.locator(".topbar-brand-mark").boundingBox(),
-  ]);
-  expect(mobileDashboardMark).toMatchObject({ width: 40, height: 40 });
+  const mobileHeaderLogo = await page.locator(".topbar-brand-mark").boundingBox();
   expect(mobileHeaderLogo).toMatchObject({ width: 60, height: 48 });
-  await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=4/);
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const darkDashboardColors = await page.evaluate(() => {
     const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
     return { heading: getComputedStyle(document.querySelector<HTMLElement>(".hero-panel h2")!).color, snapshot: getComputedStyle(snapshot).color, surface: getComputedStyle(snapshot).backgroundColor };
@@ -410,7 +400,7 @@ test("employee dashboard certificate action retains the documents destination", 
   await expect(page).toHaveURL(navPaths.Documents);
 });
 
-test("navigation drawer cannot block header controls across the 1080px breakpoint", async ({ page }) => {
+test("navigation drawer cannot block header controls across the 1280px breakpoint", async ({ page }) => {
   await installUiApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
@@ -425,7 +415,7 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
-  await page.setViewportSize({ width: 1080, height: 900 });
+  await page.setViewportSize({ width: 1280, height: 720 });
   const menu = page.getByRole("button", { name: "Open menu" });
   await expect(menu).toBeVisible();
   await expect(menu).toHaveCSS("width", "44px");
@@ -448,7 +438,7 @@ test("navigation drawer cannot block header controls across the 1080px breakpoin
   await expect(sidebar).toBeHidden();
   await menu.click();
   await expect(page.locator(".scrim")).toBeVisible();
-  await page.setViewportSize({ width: 1081, height: 900 });
+  await page.setViewportSize({ width: 1281, height: 720 });
   await expect(page.locator(".scrim")).toHaveCount(0);
   await expect(sidebar).toBeVisible();
   expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
@@ -503,13 +493,13 @@ test("compact header controls keep their geometry through dark-mode changes", as
   expect(await headerMetrics()).toEqual(expected);
 
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".dashboard-brand-mark")).toBeVisible();
+  await expect(page.locator(".dashboard-layout")).toBeVisible();
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
 
-  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.reload();
   await page.locator(".topbar-actions > .icon-button").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -520,8 +510,8 @@ test("compact header controls keep their geometry through dark-mode changes", as
     const iconBox = button.querySelector("svg")!.getBoundingClientRect();
     return { button: [buttonBox.width, buttonBox.height], icon: [iconBox.width, iconBox.height], padding: getComputedStyle(button).padding };
   })).toEqual({ button: [44, 44], icon: [20, 20], padding: "0px" });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(245, 245, 247)");
-  await expect(page.locator(".topbar-brand-mark img")).toHaveCSS("content", /brand-mark\.svg\?v=4/);
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
 
   await menu.click();
   const close = page.locator(".sidebar-close");
@@ -676,7 +666,7 @@ test("unknown URLs show an explicit not-found page", async ({ page }) => {
 test("notification actions stay right-aligned and the popover remains visible beside responsive search", async ({ page }) => {
   await installUiApi(page, [], ["notification.self.read", "notification.self.manage"]);
 
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1081, height: 900 }, { width: 1080, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1366, height: 768 }, { width: 1280, height: 720 }, { width: 1152, height: 768 }, { width: 1024, height: 768 }, { width: 768, height: 900 }, { width: 390, height: 844 }]) {
     await test.step(`${viewport.width}x${viewport.height}`, async () => {
       await page.setViewportSize(viewport);
       await page.goto("/");
@@ -692,7 +682,7 @@ test("notification actions stay right-aligned and the popover remains visible be
       expect(actions).not.toBeNull();
       expect(topbar!.x + topbar!.width - actions!.x - actions!.width).toBeLessThanOrEqual(48);
       expect(actions!.x + actions!.width).toBeLessThanOrEqual(topbar!.x + topbar!.width);
-      if (viewport.width <= 1080) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
+      if (viewport.width <= 1280) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
       else expect(Math.abs(actions!.y + actions!.height / 2 - search!.y - search!.height / 2)).toBeLessThanOrEqual(4);
 
       await trigger.click();

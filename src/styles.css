@@ -7492,7 +7492,7 @@ summary:focus-visible,
   }
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1280px) {
   :root {
     --page-gutter: 18px;
   }

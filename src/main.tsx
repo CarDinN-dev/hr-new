@@ -135,7 +135,7 @@ import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
-const compactNavigationQuery = "(max-width: 1080px)";
+const compactNavigationQuery = "(max-width: 1280px)";
 type Theme = "light" | "dark";
 const employeeFieldOptions: Record<string, readonly string[]> = {
   "Employee Category": ["Staff", "Management", "Worker", "Intern"],
