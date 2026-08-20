@@ -115,7 +115,7 @@ test("leave attachments stay on the existing persistence paths", async ({ page }
 
 test("employee submits their own leave and uses My HR and Settings safely", async ({ page }) => {
   const self = { id: "employee-self", employeeCode: "EMP-SELF", firstName: "Noor", lastName: "Ahmed", email: "noor@example.invalid" };
-  const employeeUser = { id: "employee-user", email: self.email, displayName: "Noor Ahmed", roles: ["EMPLOYEE"], permissions: ["session.self.read", "session.self.revoke", "employee.self.read", "employee.self.update_basic", "leave.self.read", "leave.self.create", "leave.self.cancel", "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download"], departmentScopeIds: [], sessionId: "employee-session", authProvider: "local", authorizationVersion: 1, employeeId: self.id };
+  const employeeUser = { id: "employee-user", email: self.email, displayName: "Noor Ahmed", roles: ["EMPLOYEE"], permissions: ["session.self.read", "session.self.revoke", "employee.self.read", "leave.self.read", "leave.self.create", "leave.self.cancel", "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download"], departmentScopeIds: [], sessionId: "employee-session", authProvider: "local", authorizationVersion: 1, employeeId: self.id };
   const ownLeave = { ...leave, id: "own-leave", requesterUserId: employeeUser.id, employeeId: self.id, employee: self, status: "PENDING_LINE_MANAGER" };
 
   await page.route("**/api/v1/**", async route => {
@@ -154,6 +154,8 @@ test("employee submits their own leave and uses My HR and Settings safely", asyn
   await expect(page.getByText("Pending Line Manager", { exact: true })).toBeVisible();
   await expect(page.getByText("Bank details", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Signed-in devices", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("You do not have permission to change this photo.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Upload photo", { exact: true })).toHaveCount(0);
   const personalInformation = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "Personal information" }) });
   await expect(personalInformation.getByLabel("Name")).toHaveValue("Noor Ahmed");
   await expect(personalInformation.getByLabel("Employee ID")).toHaveAttribute("readonly", "");

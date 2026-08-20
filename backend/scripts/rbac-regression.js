@@ -55,6 +55,12 @@ test('role inheritance and business separation match the production matrix', () 
   for (const permission of ['employee.self.read_bank', 'employee.self.update_bank']) {
     assert.equal(employee.has(permission), false, `EMPLOYEE must not access self-service bank details`);
   }
+  for (const role of [employee, lineManager, manager]) {
+    assert.equal(role.has('employee.self.update_basic'), false, 'Employee, Line Manager, and Manager must not change profile photos');
+  }
+  for (const role of [hr, cpo, coo, admin, superAdmin]) {
+    assert.equal(role.has('employee.self.update_basic'), true, 'HR and executive roles retain their own profile-photo access');
+  }
   assert.equal(lineManager.has('leave.team.approve_line_manager'), true);
   assert.equal(lineManager.has('leave.management.approve_manager'), false);
   assert.equal(manager.has('leave.management.approve_manager'), true);

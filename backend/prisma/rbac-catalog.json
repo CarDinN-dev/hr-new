@@ -38,7 +38,7 @@
       "inherits": [],
       "permissions": [
         "session.self.read", "session.self.revoke", "organization.read", "announcement.read",
-        "employee.self.read", "employee.self.update_basic", "employee.self.read_documents", "employee.self.manage_documents", "employee.self.read_compensation",
+        "employee.self.read", "employee.self.read_documents", "employee.self.manage_documents", "employee.self.read_compensation",
         "attendance.self.read", "attendance.self.create", "attendance.self.correct_request",
         "leave.self.read", "leave.self.create", "leave.self.cancel",
         "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download",
@@ -76,7 +76,7 @@
       "inherits": ["EMPLOYEE"],
       "permissions": [
         "settings.read", "settings.manage", "department.read", "department.manage", "position.read", "position.manage", "announcement.read", "announcement.manage",
-        "employee.hr.read", "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "employee.hr.manage_documents",
+        "employee.self.update_basic", "employee.hr.read", "employee.hr.create", "employee.hr.update", "employee.hr.terminate", "employee.hr.read_sensitive", "employee.hr.manage_documents",
         "attendance.hr.read", "attendance.hr.manage", "leave.hr.read", "leave.hr.manage", "leave.hr.approve", "leave.hr.override", "leave.configure",
         "service_request.hr.read", "service_request.hr.create_for_employee", "service_request.hr.generate", "service_request.hr.approve", "service_request.hr.reject", "service_request.hr.publish", "service_request.hr.revoke",
         "payroll.read", "payroll.generate", "payroll.approve", "payroll.publish", "payroll.mark_paid", "payroll.read_compensation", "payroll.read_bank", "payroll.update_bank", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "payroll.configure", "payroll.audit.read",
@@ -91,7 +91,7 @@
       "protection": "STANDARD",
       "inherits": ["EMPLOYEE"],
       "permissions": [
-        "settings.read", "employee.read_all", "attendance.read_all", "leave.executive.approve_cpo", "leave.read_all",
+        "settings.read", "employee.self.update_basic", "employee.read_all", "attendance.read_all", "leave.executive.approve_cpo", "leave.read_all",
         "payroll.read", "payroll.read_compensation", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "recruitment.read"
       ]
     },
@@ -102,7 +102,7 @@
       "protection": "STANDARD",
       "inherits": ["EMPLOYEE"],
       "permissions": [
-        "settings.read", "employee.read_all", "attendance.read_all", "leave.executive.approve_coo", "leave.executive.self_approve_coo", "leave.read_all",
+        "settings.read", "employee.self.update_basic", "employee.read_all", "attendance.read_all", "leave.executive.approve_coo", "leave.executive.self_approve_coo", "leave.read_all",
         "payroll.read", "payroll.read_compensation", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "recruitment.read"
       ]
     },
@@ -114,7 +114,7 @@
       "inherits": ["EMPLOYEE"],
       "permissions": [
         "settings.read", "settings.manage", "system.configure", "department.read", "department.manage", "position.read", "position.manage", "announcement.read",
-        "employee.read_all", "employee.hr.read_sensitive", "attendance.read_all", "leave.read_all", "leave.reassign", "service_request.read_all", "service_request.pdf.download_all",
+        "employee.self.update_basic", "employee.read_all", "employee.hr.read_sensitive", "attendance.read_all", "leave.read_all", "leave.reassign", "service_request.read_all", "service_request.pdf.download_all",
         "expense.read_all", "trip.read_all", "loan.read_all", "document.read_all", "document.pdf.download_all", "contract.read_all", "performance.read_all", "recruitment.read", "eos.read", "report.read", "report.export", "import.run", "import.read",
         "audit.read", "audit.export"
       ]
