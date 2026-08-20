@@ -240,11 +240,14 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const logo = page.locator(".brand-block img");
-  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-logo-page-2.svg", width: 840, transform: "none" });
+  expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-logo-sidebar.svg", width: 840, transform: "none" });
   const sidebarLogo = await page.locator(".logo-crop.wordmark").boundingBox();
   expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
+  const sidebarLogoAsset = await page.evaluate(async () => (await fetch("/logos/medtech-logo-sidebar.svg")).text());
+  expect(sidebarLogoAsset).toContain('filter="url(#sidebar-navy-to-white)"');
+  expect(sidebarLogoAsset).not.toMatch(/<rect\b/);
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
 
@@ -556,6 +559,13 @@ test("login is dark-only, keeps the centered premium composition and stays respo
       await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
       await expect(page.locator(".login-stage-art")).toHaveCSS("mask-image", /radial-gradient/);
       await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
+      const microsoftSignIn = page.getByRole("button", { name: "Sign in with Microsoft" });
+      await expect(microsoftSignIn).toHaveCSS("background-color", "rgb(20, 37, 65)");
+      await microsoftSignIn.hover();
+      await expect(microsoftSignIn).toHaveCSS("background-color", "rgb(26, 45, 75)");
+      await expect(microsoftSignIn).toHaveCSS("color", "rgb(242, 246, 253)");
+      await microsoftSignIn.focus();
+      await expect(microsoftSignIn).toHaveCSS("outline-style", "solid");
       await expect(page.getByLabel("Email").locator("xpath=..")).toHaveCSS("height", "52px");
       await expect(page.getByLabel("Password").locator("xpath=..")).toHaveCSS("height", "52px");
       await page.getByLabel("Email").focus();

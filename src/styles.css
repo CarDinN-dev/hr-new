@@ -244,7 +244,7 @@ button {
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
-button:hover:not(.scrim) {
+.app button:hover:not(.scrim) {
   border-color: var(--navy-2);
   box-shadow: 0 10px 24px rgba(17, 29, 44, 0.1);
   transform: translateY(-1px);
@@ -4051,8 +4051,8 @@ button,
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
-button:hover:not(.scrim),
-.button-like:hover {
+.app button:hover:not(.scrim),
+.app .button-like:hover {
   border-color: var(--muted);
   background: var(--panel-2);
   box-shadow: none;
@@ -5905,9 +5905,10 @@ summary:focus-visible,
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.13);
 }
 
-.microsoft-login:hover {
+.login-card .microsoft-login:hover:not(:disabled) {
   border-color: rgba(201, 193, 255, 0.7);
   background: #1a2d4b;
+  color: var(--login-ink);
 }
 
 .microsoft-mark {
