@@ -38,6 +38,13 @@ describe("System route authorization", () => {
     expect(canAccessRoute(admin, "Settings")).toBe(true);
   });
 
+  it("uses the existing trip and expense read permissions for their restored routes", () => {
+    expect(canAccessRoute(session(["EMPLOYEE"], ["trip.self.read"]), "Business Trips")).toBe(true);
+    expect(canAccessRoute(session(["EMPLOYEE"], ["expense.self.read"]), "Expenses")).toBe(true);
+    expect(canAccessRoute(session(["EMPLOYEE"], ["trip.self.read"]), "Expenses")).toBe(false);
+    expect(canAccessRoute(session(["EMPLOYEE"], ["expense.self.read"]), "Business Trips")).toBe(false);
+  });
+
   it("allows Super Administrators to access Payroll", () => {
     expect(canAccessRoute(session(["SUPER_ADMIN"], ["payroll.read"]), "Payroll")).toBe(true);
   });

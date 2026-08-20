@@ -215,6 +215,8 @@ const navIcon = {
   Employees: UsersRound,
   Attendance: CalendarCheck,
   Leave: BriefcaseBusiness,
+  "Business Trips": BriefcaseBusiness,
+  Expenses: WalletCards,
   Loans: HandCoins,
   Payroll: WalletCards,
   Recruitment: UserRoundPlus,
@@ -226,6 +228,15 @@ const navIcon = {
   System: Settings,
   Settings
 };
+
+function PageLoadingSkeleton() {
+  return <section className="module-loading" role="status" aria-live="polite" aria-busy="true">
+    <span className="sr-only">Loading page…</span>
+    <div className="module-loading__heading"><span /><span /></div>
+    <div className="module-loading__metrics"><span /><span /><span /></div>
+    <div className="module-loading__content"><span /><span /><span /><span /></div>
+  </section>;
+}
 
 async function withPdf<T>(action: (pdf: typeof import("./pdf")) => T) {
   return action(await importWithReleaseRetry("pdf", () => import("./pdf")));
@@ -637,7 +648,6 @@ function App() {
               {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
             <div className="page-title">
-              <p className="section-label">MedTech Corporation Trading W.L.L.</p>
               <h1>{nav}</h1>
               <p className="page-hint">{pageHint}</p>
             </div>
@@ -659,7 +669,7 @@ function App() {
           </div>
         </header>
 
-        <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<section className="module-loading" aria-live="polite"><span className="spinner" /><p>Loading module…</p></section>}>
+        <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<PageLoadingSkeleton />}>
           {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} notify={notify} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
@@ -669,6 +679,8 @@ function App() {
           {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
+          {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
+          {nav === "Expenses" && <Expenses state={state} setState={setState} notify={notify} />}
           {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canOverrideLimit={canManageLoans} />}
           {nav === "Payroll" && <PayrollWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
@@ -1033,6 +1045,8 @@ function pageDescription(nav: NavItem) {
     Employees: "Employee records.",
     Attendance: "Daily attendance and monthly totals.",
     Leave: "Leave requests and balances.",
+    "Business Trips": "Requests, travel costs and employee advances.",
+    Expenses: "Employee expenses and reimbursement processing.",
     Loans: "Employee loans and payroll deductions.",
     Payroll: "Payslips and payroll exports.",
     Recruitment: "Job openings and candidates.",
@@ -1556,7 +1570,10 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
                         <strong data-label="Hours">{punch.hours}</strong>
                         <span className="attendance-status-cell" data-label="Status"><Badge value={punch.status} /></span>
                         <span className="attendance-status-cell" data-label="Approval"><Badge value={approval || (needsReview ? "Pending" : code ? "Approved" : "Not marked")} /></span>
-                        {canManage ? <div className="att-btns" data-label="Action">{(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <button key={item} aria-label={`${statusLabels[item]} - ${employeeName(employee)}`} className={`att-btn ${code === item ? `on-${item}` : ""}`} onClick={() => setState(prev => setAttendance(prev, date, employee.id, item))}>{item}</button>)}</div> : <span data-label="Action">-</span>}
+                        {canManage ? <select className="attendance-status-select" data-label="Action" aria-label={`Attendance status for ${employeeName(employee)}`} value={code ?? ""} onChange={event => setState(prev => setAttendance(prev, date, employee.id, event.target.value as AttendanceCode))}>
+                          <option value="" disabled>Not marked</option>
+                          {(["P", "H", "L", "A"] as AttendanceCode[]).map(item => <option key={item} value={item}>{statusLabels[item]}</option>)}
+                        </select> : <span data-label="Action">-</span>}
                       </div>
                       {canManage && needsReview && (
                         <div className="attendance-review">

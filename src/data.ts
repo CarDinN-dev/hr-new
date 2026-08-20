@@ -299,6 +299,8 @@ export const navItems = [
   "Employees",
   "Attendance",
   "Leave",
+  "Business Trips",
+  "Expenses",
   "Loans",
   "Payroll",
   "Recruitment",

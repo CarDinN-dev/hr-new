@@ -103,8 +103,12 @@ test("leave attachments stay on the existing persistence paths", async ({ page }
   await page.getByRole("button", { name: "Submit request" }).click();
   expect((await submitted).postData()).toContain('filename="medical-note.pdf"');
 
+  const rowAttachment = page.getByLabel("Add attachment for Annual leave request");
+  await rowAttachment.focus();
+  await expect(rowAttachment).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   const saved = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/leave-1/attachment") && request.method() === "POST");
-  await page.getByLabel("Add attachment for Annual leave request").setInputFiles({ name: "manager-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("manager note") });
+  await rowAttachment.setInputFiles({ name: "manager-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("manager note") });
   expect((await saved).postData()).toContain('filename="manager-note.pdf"');
   await expect(page.getByRole("link", { name: "manager-note.pdf" })).toBeVisible();
 });

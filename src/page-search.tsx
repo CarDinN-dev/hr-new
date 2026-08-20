@@ -9,6 +9,8 @@ const placeholders: Record<NavItem, string> = {
   Employees: "Search employees",
   Attendance: "Search attendance",
   Leave: "Search leave requests",
+  "Business Trips": "Search business trips",
+  Expenses: "Search expenses",
   Loans: "Search loans",
   Payroll: "Search payroll",
   Recruitment: "Search jobs and candidates",

@@ -57,8 +57,23 @@ test("every application route renders with a specific document title", async ({ 
   }
 
   expect(errors).toEqual([]);
-  await expect(page.getByRole("link", { name: "Business Trips" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Business Trips" })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(1);
+});
+
+test("Business Trips and Expenses use their existing read permissions", async ({ page }) => {
+  await installUiApi(page, [], [], "light", {
+    roles: ["EMPLOYEE"],
+    permissions: ["session.self.read", "trip.self.read"],
+  });
+
+  await page.goto(navPaths["Business Trips"]);
+  await expect(page).toHaveTitle("Business Trips | MedTech HR ERP");
+  await expect(page.getByRole("link", { name: "Business Trips" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(0);
+
+  await page.goto(navPaths.Expenses);
+  await expect(page.getByRole("heading", { name: "Access not available" })).toBeVisible();
 });
 
 for (const theme of ["light", "dark"] as const) {
@@ -82,12 +97,14 @@ for (const theme of ["light", "dark"] as const) {
           return {
             canvas: root.getPropertyValue("--canvas").trim().toLowerCase(),
             body: getComputedStyle(document.body).backgroundColor,
+            workspace: getComputedStyle(document.querySelector<HTMLElement>(".workspace")!).backgroundColor,
             search: getComputedStyle(document.querySelector<HTMLElement>('[role="search"]')!).backgroundColor,
             surface: firstSurface ? getComputedStyle(firstSurface).backgroundColor : null,
           };
         });
         expect(colors.canvas).toBe(expected.canvas);
         expect(colors.body).toBe(expected.body);
+        if (theme === "light") expect(colors.workspace).toBe(expected.body);
         expect(colors.search).toBe(expected.surface);
         if (colors.surface) expect(colors.surface).toBe(expected.surface);
         await expect(page.locator(".mobile-menu")).toBeHidden();
@@ -162,7 +179,7 @@ for (const viewport of [
           expect(surface).not.toBeNull();
           expect(surface!.x).toBeGreaterThanOrEqual(0);
           expect(surface!.x + surface!.width).toBeLessThanOrEqual(viewport.width + 1);
-          expect(surface!.borderRadius).toBe(name === "Dashboard" || name === "Leave" ? "16px" : "12px");
+          expect(surface!.borderRadius).toBe("16px");
         }
       });
     }

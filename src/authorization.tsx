@@ -10,6 +10,8 @@ const routePermissions: Record<NavItem, string[]> = {
   Employees: ["employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all"],
   Attendance: ["attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"],
   Leave: ["leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.audit.read", "leave.read_all"],
+  "Business Trips": ["trip.self.read", "trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all"],
+  Expenses: ["expense.self.read", "expense.team.read", "expense.management.read", "expense.hr.read", "expense.read_all"],
   Loans: ["loan.self.read", "loan.hr.read", "loan.audit.read", "loan.read_all"],
   Payroll: ["payroll.self.read_payslip", "payroll.read", "payroll.audit.read"],
   Recruitment: ["recruitment.read"],

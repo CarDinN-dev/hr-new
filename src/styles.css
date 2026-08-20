@@ -23,7 +23,7 @@
   --accent-soft: color-mix(in srgb, var(--brand-red) 8%, var(--surface));
   --control-height: 42px;
   --control-radius: 8px;
-  --card-radius: 12px;
+  --card-radius: 16px;
   --layout-gap: 16px;
   --page-gutter: 24px;
   --clinical-shadow: 0 1px 2px rgba(23, 33, 58, 0.035), 0 8px 24px rgba(23, 33, 58, 0.065);
@@ -7019,6 +7019,7 @@ summary:focus-visible,
 }
 
 .app .leave-replace-attachment {
+  position: relative;
   width: fit-content;
   min-height: 34px;
   display: inline-flex;
@@ -8999,4 +9000,129 @@ summary:focus-visible,
 
 .company-role-branch-children {
   gap: 20px;
+}
+
+/* Stability pass: semantic surfaces, accessible loading, and compact attendance controls. */
+:root:not([data-theme="dark"]) .app .workspace {
+  background: var(--canvas);
+}
+
+body {
+  background: var(--canvas);
+}
+
+.app .section-label,
+.app .dashboard-layout .hero-copy .section-label {
+  color: var(--text-muted);
+}
+
+:root[data-theme="dark"] .app .leave-replace-attachment input {
+  position: absolute;
+  width: 1px;
+  min-width: 1px;
+  min-height: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.app .module-loading,
+.app .panel-loading {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--surface);
+}
+
+.app .module-loading {
+  min-height: 276px;
+  padding: 20px;
+  align-content: start;
+}
+
+.app .module-loading__heading,
+.app .module-loading__metrics,
+.app .module-loading__content {
+  display: grid;
+  gap: 10px;
+}
+
+.app .module-loading__heading {
+  width: min(100%, 420px);
+}
+
+.app .module-loading__heading span:first-child {
+  width: 42%;
+  height: 12px;
+}
+
+.app .module-loading__heading span:last-child {
+  width: 72%;
+  height: 30px;
+}
+
+.app .module-loading__metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.app .module-loading__metrics span {
+  min-height: 72px;
+}
+
+.app .module-loading__content {
+  min-height: 88px;
+  grid-template-columns: 1.3fr repeat(3, minmax(0, 1fr));
+}
+
+.app .module-loading span:not(.sr-only),
+.app .panel-loading > span:not(.sr-only) {
+  display: block;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--surface-subtle) 25%, color-mix(in srgb, var(--surface-subtle) 68%, var(--surface)) 50%, var(--surface-subtle) 75%);
+  background-size: 220% 100%;
+  animation: surface-loading 1.35s ease-in-out infinite;
+}
+
+.app .panel-loading {
+  min-height: 164px;
+  grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr));
+  padding: 14px;
+}
+
+@keyframes surface-loading {
+  to { background-position: -220% 0; }
+}
+
+.app .attendance-status-select {
+  width: min(100%, 9.5rem);
+  min-width: 8.75rem;
+  height: 34px;
+  min-height: 34px;
+  padding-block: 5px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+@media (max-width: 1200px) {
+  .app .attendance-row .attendance-status-select {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .app .module-loading__metrics,
+  .app .module-loading__content,
+  .app .panel-loading {
+    grid-template-columns: 1fr;
+  }
+
+  .app .module-loading__metrics span,
+  .app .module-loading__content {
+    min-height: 42px;
+  }
 }
