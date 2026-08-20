@@ -9209,9 +9209,53 @@ body {
 }
 
 :root[data-theme="dark"] .app .sidebar {
+  border-right-color: #d8e1ec;
   background:
-    radial-gradient(circle at 8% 2%, rgba(237, 30, 54, 0.18), transparent 15rem),
-    linear-gradient(180deg, #463451, #241c38);
+    radial-gradient(circle at 8% 2%, rgba(237, 30, 54, 0.09), transparent 15rem),
+    linear-gradient(180deg, #fbfcfe, #edf2f7);
+  box-shadow: 8px 0 30px rgba(8, 15, 36, 0.08);
+  color: #17213a;
+}
+
+:root[data-theme="dark"] .app .brand-block,
+:root[data-theme="dark"] .app .sidebar .account-menu {
+  border-color: #d8e1ec;
+}
+
+:root[data-theme="dark"] .app .logo-crop.wordmark {
+  border-color: rgba(35, 50, 106, 0.1);
+  background: #ffffff;
+}
+
+:root[data-theme="dark"] .app .nav-list a {
+  color: #40516a;
+}
+
+:root[data-theme="dark"] .app .nav-list a:hover {
+  border-color: #d8e1ec;
+  background: #ffffff;
+  color: #17213a;
+}
+
+:root[data-theme="dark"] .app .nav-list a.active {
+  border-color: rgba(237, 30, 54, 0.3);
+  background: rgba(237, 30, 54, 0.1);
+  color: #17213a;
+}
+
+:root[data-theme="dark"] .app .sidebar .account-trigger,
+:root[data-theme="dark"] .app .sidebar .account-trigger:hover {
+  border-color: #d8e1ec;
+  background: #ffffff;
+  color: #17213a;
+}
+
+:root[data-theme="dark"] .app .sidebar .account-label strong {
+  color: #17213a;
+}
+
+:root[data-theme="dark"] .app .sidebar .account-label small {
+  color: #64748b;
 }
 
 @media (min-width: 1281px) {
