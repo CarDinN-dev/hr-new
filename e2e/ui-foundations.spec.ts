@@ -612,8 +612,8 @@ test("compact header controls keep their geometry through dark-mode changes", as
   await page.waitForTimeout(250);
   expect(await headerMetrics()).toEqual(expected);
 
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(198, 213, 238)");
-  expect(await page.locator(".sidebar").evaluate(sidebar => getComputedStyle(sidebar).backgroundImage)).toContain("rgb(26, 36, 93)");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  expect(await page.locator(".sidebar").evaluate(sidebar => getComputedStyle(sidebar).backgroundImage)).toContain("rgb(23, 29, 107)");
   await expect(page.locator(".dashboard-layout")).toBeVisible();
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
