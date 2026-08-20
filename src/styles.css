@@ -9283,6 +9283,20 @@ body {
       visibility 0s linear 180ms;
   }
 
+  /* Keep the shell anchored while the workspace takes over the released navigation width. */
+  .app.sidebar-collapsed .topbar-inner {
+    width: 100%;
+    max-width: none;
+  }
+
+  .app.sidebar-collapsed .workspace.page-layout-wide {
+    --page-max: 100%;
+  }
+
+  .app.sidebar-collapsed .workspace.page-layout-standard {
+    --page-max: 1600px;
+  }
+
   .app .topbar-brand-mark {
     width: 0;
     height: 50px;

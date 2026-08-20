@@ -550,19 +550,25 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
     const workspace = document.querySelector<HTMLElement>(".workspace")!.getBoundingClientRect();
     const content = document.querySelector<HTMLElement>(".content")!.getBoundingClientRect();
     const header = document.querySelector<HTMLElement>(".topbar-inner")!.getBoundingClientRect();
+    const logo = document.querySelector<HTMLElement>(".topbar-brand-mark")!.getBoundingClientRect();
+    const dashboard = document.querySelector<HTMLElement>(".dashboard-layout")!.getBoundingClientRect();
     return {
       workspaceLeft: workspace.left,
       workspaceWidth: workspace.width,
       contentWidth: content.width,
-      contentOffset: Math.abs((content.left + content.width / 2) - (workspace.left + workspace.width / 2)),
-      headerOffset: Math.abs((header.left + header.width / 2) - (workspace.left + workspace.width / 2)),
+      headerWidth: header.width,
+      headerLeft: header.left,
+      logoLeft: logo.left,
+      dashboardWidth: dashboard.width,
     };
   });
-  expect(collapsedGeometry.contentWidth).toBe(1600);
   expect(collapsedGeometry.workspaceLeft).toBeLessThanOrEqual(1);
   expect(collapsedGeometry.workspaceWidth).toBeGreaterThan(expandedWorkspace!.width + 250);
-  expect(collapsedGeometry.contentOffset).toBeLessThanOrEqual(1);
-  expect(collapsedGeometry.headerOffset).toBeLessThanOrEqual(1);
+  expect(collapsedGeometry.contentWidth).toBeCloseTo(collapsedGeometry.workspaceWidth, 1);
+  expect(collapsedGeometry.headerWidth).toBeCloseTo(collapsedGeometry.workspaceWidth, 1);
+  expect(collapsedGeometry.headerLeft).toBeCloseTo(collapsedGeometry.workspaceLeft, 1);
+  expect(collapsedGeometry.logoLeft - collapsedGeometry.workspaceLeft).toBeCloseTo(24, 1);
+  expect(collapsedGeometry.dashboardWidth).toBeGreaterThanOrEqual(collapsedGeometry.workspaceWidth - 48);
 
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
