@@ -4606,6 +4606,52 @@ summary:focus-visible,
   color: var(--on-brand);
 }
 
+/* Light navigation needs a light surface so the supplied red-and-navy logo stays readable. */
+:root:not([data-theme="dark"]) .app .sidebar {
+  border-right-color: var(--border);
+  background:
+    radial-gradient(circle at 8% 2%, color-mix(in srgb, var(--brand-red) 10%, transparent), transparent 15rem),
+    linear-gradient(180deg, var(--surface), var(--surface-muted));
+  box-shadow: 8px 0 30px rgba(24, 35, 79, 0.08);
+  color: var(--text);
+}
+
+:root:not([data-theme="dark"]) .app .brand-block,
+:root:not([data-theme="dark"]) .app .sidebar .account-menu {
+  border-color: var(--border);
+}
+
+:root:not([data-theme="dark"]) .app .nav-list a {
+  color: var(--brand-navy);
+}
+
+:root:not([data-theme="dark"]) .app .nav-list a:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--brand-navy);
+}
+
+:root:not([data-theme="dark"]) .app .nav-list a.active {
+  border-color: color-mix(in srgb, var(--brand-red) 32%, var(--border));
+  background: color-mix(in srgb, var(--brand-red) 10%, var(--surface));
+  color: var(--brand-navy);
+}
+
+:root:not([data-theme="dark"]) .app .sidebar .account-trigger,
+:root:not([data-theme="dark"]) .app .sidebar .account-trigger:hover {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+:root:not([data-theme="dark"]) .app .sidebar .account-label strong {
+  color: var(--text);
+}
+
+:root:not([data-theme="dark"]) .app .sidebar .account-label small {
+  color: var(--text-muted);
+}
+
 .app .account-popover {
   z-index: var(--z-popover);
   border: 1px solid var(--border);
