@@ -9209,12 +9209,12 @@ body {
 }
 
 :root[data-theme="dark"] .app .sidebar {
-  border-right-color: rgba(191, 211, 255, 0.28);
+  border-right-color: rgba(153, 176, 229, 0.24);
   background:
-    radial-gradient(circle at 12% 0%, rgba(237, 30, 54, 0.22), transparent 13rem),
-    radial-gradient(circle at 94% 82%, rgba(126, 164, 255, 0.16), transparent 18rem),
-    linear-gradient(165deg, #0f1a87 0%, #0b1467 54%, #071044 100%);
-  box-shadow: 8px 0 30px rgba(3, 10, 49, 0.28);
+    radial-gradient(circle at 12% 0%, rgba(237, 30, 54, 0.16), transparent 13rem),
+    radial-gradient(circle at 94% 82%, rgba(102, 137, 221, 0.15), transparent 18rem),
+    linear-gradient(165deg, #1a245d 0%, #111943 54%, #090f2c 100%);
+  box-shadow: 8px 0 30px rgba(3, 8, 31, 0.32);
   color: var(--on-brand);
 }
 
@@ -9224,8 +9224,8 @@ body {
 }
 
 :root[data-theme="dark"] .app .logo-crop.wordmark {
-  border-color: rgba(255, 255, 255, 0.34);
-  background: #ffffff;
+  border-color: rgba(198, 213, 238, 0.62);
+  background: #c6d5ee;
   box-shadow: 0 10px 22px rgba(3, 10, 49, 0.2);
 }
 
