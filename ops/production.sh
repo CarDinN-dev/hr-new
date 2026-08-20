@@ -25,8 +25,12 @@ POSTGRES_PASSWORD:hr-erp-postgres-password
 JWT_SECRET:hr-erp-jwt-secret
 AUDIT_HMAC_KEY:hr-erp-audit-hmac-key
 MICROSOFT_CLIENT_SECRET:hr-erp-microsoft-client-secret
-MICROSOFT_PROVISIONING_CLIENT_SECRET:hr-erp-microsoft-provisioning-client-secret
 SECRETS
+  if grep -qx 'MICROSOFT_PROVISIONING_ENABLED=true' "$project_dir/.env"; then
+    value=$(gcloud secrets versions access latest --secret=hr-erp-microsoft-provisioning-client-secret --quiet)
+    [[ $value != *$'\n'* && $value != *$'\r'* ]] || { echo 'Microsoft provisioning secret contains unsupported line breaks.' >&2; exit 1; }
+    printf '%s' "$value" | python3 -c 'import json,sys; print(f"MICROSOFT_PROVISIONING_CLIENT_SECRET={json.dumps(sys.stdin.read())}")' >>"$runtime_env"
+  fi
 }
 
 configure_compose() {
