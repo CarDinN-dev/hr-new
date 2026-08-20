@@ -61,19 +61,19 @@ test("every application route renders with a specific document title", async ({ 
   await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(1);
 });
 
-test("Business Trips and Expenses use their existing read permissions", async ({ page }) => {
+test("employees only see Team and not directory or personal finance routes", async ({ page }) => {
   await installUiApi(page, [], [], "light", {
     roles: ["EMPLOYEE"],
-    permissions: ["session.self.read", "trip.self.read"],
+    permissions: ["session.self.read", "employee.self.read", "trip.self.read", "expense.self.read", "loan.self.read"],
   });
 
-  await page.goto(navPaths["Business Trips"]);
-  await expect(page).toHaveTitle("Business Trips | MedTech HR ERP");
-  await expect(page.getByRole("link", { name: "Business Trips" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(0);
-
-  await page.goto(navPaths.Expenses);
-  await expect(page.getByRole("heading", { name: "Access not available" })).toBeVisible();
+  await page.goto(navPaths.Dashboard);
+  await expect(page.getByRole("link", { name: "Team" })).toBeVisible();
+  for (const route of ["Employees", "Business Trips", "Expenses", "Loans"] as const) {
+    await expect(page.getByRole("link", { name: route })).toHaveCount(0);
+    await page.goto(navPaths[route]);
+    await expect(page.getByRole("heading", { name: "Access not available" })).toBeVisible();
+  }
 });
 
 for (const theme of ["light", "dark"] as const) {

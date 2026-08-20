@@ -38,11 +38,12 @@ describe("System route authorization", () => {
     expect(canAccessRoute(admin, "Settings")).toBe(true);
   });
 
-  it("uses the existing trip and expense read permissions for their restored routes", () => {
-    expect(canAccessRoute(session(["EMPLOYEE"], ["trip.self.read"]), "Business Trips")).toBe(true);
-    expect(canAccessRoute(session(["EMPLOYEE"], ["expense.self.read"]), "Expenses")).toBe(true);
-    expect(canAccessRoute(session(["EMPLOYEE"], ["trip.self.read"]), "Expenses")).toBe(false);
-    expect(canAccessRoute(session(["EMPLOYEE"], ["expense.self.read"]), "Business Trips")).toBe(false);
+  it("keeps employees in their team area and out of directory and personal finance routes", () => {
+    const employee = session(["EMPLOYEE"], ["employee.self.read", "trip.self.read", "expense.self.read", "loan.self.read"]);
+    expect(canAccessRoute(employee, "Team")).toBe(true);
+    for (const route of ["Employees", "Business Trips", "Expenses", "Loans"] as const) expect(canAccessRoute(employee, route)).toBe(false);
+    expect(canAccessRoute(session(["LINE_MANAGER"], ["employee.team.read"]), "Team")).toBe(true);
+    expect(canAccessRoute(session(["HR"], ["employee.hr.read", "trip.hr.read", "expense.hr.read", "loan.hr.read"]), "Employees")).toBe(true);
   });
 
   it("allows Super Administrators to access Payroll", () => {
