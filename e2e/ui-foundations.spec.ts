@@ -570,6 +570,9 @@ test("login is dark-only, keeps the centered premium composition and stays respo
       await expect(page.getByLabel("Password").locator("xpath=..")).toHaveCSS("height", "52px");
       await page.getByLabel("Email").focus();
       expect(await page.locator(".login-input").first().evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
+      const signIn = page.getByRole("button", { name: "Sign in", exact: true });
+      await signIn.hover();
+      expect(await signIn.evaluate(element => getComputedStyle(element).transform)).toBe("none");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     });
   }
