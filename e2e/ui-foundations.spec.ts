@@ -267,8 +267,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   const logo = page.locator(".brand-block img");
   expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-logo-page-2.svg", width: 840, transform: "none" });
   const sidebarLogo = await page.locator(".logo-crop.wordmark").boundingBox();
-  expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  expect(sidebarLogo).toMatchObject({ width: 212, height: 56 });
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(247, 248, 252)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
@@ -278,7 +278,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
     color: getComputedStyle(element).color,
     height: element.getBoundingClientRect().height,
   }));
-  expect(primaryColors).toEqual({ background: "rgb(248, 250, 252)", color: "rgb(35, 50, 106)", height: 42 });
+  expect(primaryColors).toMatchObject({ background: "rgb(248, 250, 252)", color: "rgb(35, 50, 106)" });
+  expect(primaryColors.height).toBeCloseTo(42, 3);
   const lightPanel = await page.locator(".panel").first().evaluate(element => getComputedStyle(element).backgroundColor);
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -296,8 +297,8 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const mobileHeaderLogo = await page.locator(".topbar-brand-mark").boundingBox();
   expect(mobileHeaderLogo).toMatchObject({ width: 60, height: 48 });
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-on-dark.svg");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const darkDashboardColors = await page.evaluate(() => {
     const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
     return { heading: getComputedStyle(document.querySelector<HTMLElement>(".hero-panel h2")!).color, snapshot: getComputedStyle(snapshot).color, surface: getComputedStyle(snapshot).backgroundColor };
@@ -463,7 +464,7 @@ test("navigation drawer cannot block header controls across the 1280px breakpoin
   await expect(desktopToggle).toHaveCSS("width", "44px");
   await desktopToggle.click();
   await expect(sidebar).toBeHidden();
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 184, height: 50 });
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
@@ -535,24 +536,31 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await page.goto(navPaths.Dashboard);
   await expect(page.locator(".content")).toBeVisible();
   const sidebar = page.locator("#main-navigation");
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const expandedWorkspace = await page.locator(".workspace").boundingBox();
   expect(await sidebar.evaluate(element => getComputedStyle(element).transitionDuration)).toContain("0.18s");
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(sidebar).toHaveAttribute("aria-hidden", "true");
   await expect(sidebar).toHaveAttribute("inert", "");
   await expect(sidebar).toBeHidden();
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-on-dark.svg");
 
   const collapsedGeometry = await page.evaluate(() => {
     const workspace = document.querySelector<HTMLElement>(".workspace")!.getBoundingClientRect();
     const content = document.querySelector<HTMLElement>(".content")!.getBoundingClientRect();
     const header = document.querySelector<HTMLElement>(".topbar-inner")!.getBoundingClientRect();
     return {
+      workspaceLeft: workspace.left,
+      workspaceWidth: workspace.width,
       contentWidth: content.width,
       contentOffset: Math.abs((content.left + content.width / 2) - (workspace.left + workspace.width / 2)),
       headerOffset: Math.abs((header.left + header.width / 2) - (workspace.left + workspace.width / 2)),
     };
   });
   expect(collapsedGeometry.contentWidth).toBe(1600);
+  expect(collapsedGeometry.workspaceLeft).toBeLessThanOrEqual(1);
+  expect(collapsedGeometry.workspaceWidth).toBeGreaterThan(expandedWorkspace!.width + 250);
   expect(collapsedGeometry.contentOffset).toBeLessThanOrEqual(1);
   expect(collapsedGeometry.headerOffset).toBeLessThanOrEqual(1);
 
@@ -598,12 +606,13 @@ test("compact header controls keep their geometry through dark-mode changes", as
   await page.waitForTimeout(250);
   expect(await headerMetrics()).toEqual(expected);
 
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".dashboard-layout")).toBeVisible();
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-on-dark.svg");
 
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.reload();
@@ -616,8 +625,8 @@ test("compact header controls keep their geometry through dark-mode changes", as
     const iconBox = button.querySelector("svg")!.getBoundingClientRect();
     return { button: [buttonBox.width, buttonBox.height], icon: [iconBox.width, iconBox.height], padding: getComputedStyle(button).padding };
   })).toEqual({ button: [44, 44], icon: [20, 20], padding: "0px" });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-on-dark.svg");
 
   await menu.click();
   const close = page.locator(".sidebar-close");

@@ -4501,8 +4501,7 @@ summary:focus-visible,
   background: var(--sidebar-bg);
 }
 
-.app .sidebar,
-:root[data-theme="dark"] .app .sidebar {
+.app .sidebar {
   width: 272px;
   flex: 0 0 272px;
   padding: 0 14px 14px;
@@ -4519,7 +4518,7 @@ summary:focus-visible,
 }
 
 .app .brand-block {
-  min-height: 96px;
+  min-height: 84px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -4529,9 +4528,10 @@ summary:focus-visible,
 }
 
 .app .logo-crop.wordmark {
-  width: 100%;
-  height: 72px;
-  padding: 4px 6px;
+  width: min(100%, 212px);
+  height: 56px;
+  justify-self: center;
+  padding: 3px 8px;
   border: 1px solid rgba(35, 50, 106, 0.14);
   border-radius: 12px;
   background: transparent;
@@ -9171,8 +9171,7 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.app .sidebar,
-:root[data-theme="dark"] .app .sidebar {
+.app .sidebar {
   overflow-x: hidden;
   transition:
     width var(--motion-standard),
@@ -9187,19 +9186,31 @@ body {
 
 .app .logo-crop.wordmark,
 .app .topbar-brand-mark {
-  border: 1px solid rgba(35, 50, 106, 0.12);
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(8, 15, 36, 0.12);
+  border: 1px solid rgba(35, 50, 106, 0.1);
+  background: #f7f8fc;
+  box-shadow: none;
 }
 
 .app .logo-crop.wordmark {
-  padding: 6px 10px;
-  border-radius: 14px;
+  padding: 3px 8px;
+  border-radius: 10px;
 }
 
 .app .topbar-brand-mark {
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 9px;
+}
+
+:root[data-theme="dark"] .app .logo-crop.wordmark,
+:root[data-theme="dark"] .app .topbar-brand-mark {
+  border-color: transparent;
+  background: transparent;
+}
+
+:root[data-theme="dark"] .app .sidebar {
+  background:
+    radial-gradient(circle at 8% 2%, rgba(237, 30, 54, 0.13), transparent 15rem),
+    linear-gradient(180deg, var(--sidebar), var(--sidebar-deep));
 }
 
 @media (min-width: 1281px) {
@@ -9244,11 +9255,12 @@ body {
   }
 
   .app.sidebar-collapsed .topbar-brand-mark {
-    width: 184px;
-    padding: 4px 8px;
+    width: 168px;
+    height: 46px;
+    padding: 3px 7px;
     visibility: visible;
-    border-color: rgba(35, 50, 106, 0.12);
-    box-shadow: 0 8px 24px rgba(8, 15, 36, 0.12);
+    border-color: rgba(35, 50, 106, 0.1);
+    box-shadow: none;
     opacity: 1;
     transform: scale(1);
     transition-delay: 0s;
