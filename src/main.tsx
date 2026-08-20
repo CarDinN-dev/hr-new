@@ -599,6 +599,12 @@ function App() {
   const canManageAttendance = hasPermission(backendSession, "attendance.hr.manage");
   const canManageLoans = hasPermission(backendSession, "loan.hr.manage");
   const pageHint = pageDescription(nav);
+  const navigationHidden = compactNavigation ? !sidebarOpen : sidebarCollapsed;
+  const pageLayout = nav === "My HR" || nav === "Settings"
+    ? "focused"
+    : ["Dashboard", "Employees", "Attendance", "Leave", "Payroll", "Recruitment", "Audit", "Hierarchy", "System"].includes(nav)
+      ? "wide"
+      : "standard";
 
   return (
     <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
@@ -606,9 +612,8 @@ function App() {
         id="main-navigation"
         className={`sidebar ${sidebarOpen ? "open" : ""}`}
         aria-label="Main navigation"
-        aria-hidden={compactNavigation && !sidebarOpen ? true : undefined}
-        inert={compactNavigation && !sidebarOpen ? true : undefined}
-        hidden={!compactNavigation && sidebarCollapsed}
+        aria-hidden={navigationHidden ? true : undefined}
+        inert={navigationHidden ? true : undefined}
       >
         <div className="brand-block">
           <span className="logo-crop wordmark"><img src="/logos/medtech-logo-page-2.svg" alt="MedTech Corporation Trading W.L.L." /></span>
@@ -627,45 +632,47 @@ function App() {
         </nav>
       </aside>
 
-      <main className="workspace">
+      <main className={`workspace page-layout-${pageLayout}`}>
         {syncError && !syncAlertDismissed && <div className="sync-alert" role="alert">
           <span><strong>Changes are not saved.</strong> {syncError}</span>
           <button type="button" onClick={() => void retrySave()}>Retry save</button>
           <button type="button" aria-label="Dismiss save error" title="Dismiss" onClick={() => setSyncAlertDismissed(true)}><X size={16} /></button>
         </div>}
         <header className="topbar">
-          <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
-          <div className="topbar-heading">
-            <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-logo-page-2.svg" alt="" /></span>
-            <button
-              className="desktop-sidebar-toggle"
-              type="button"
-              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-controls="main-navigation"
-              aria-expanded={!sidebarCollapsed}
-              onClick={() => setSidebarCollapsed(collapsed => !collapsed)}
-            >
-              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-            </button>
-            <div className="page-title">
-              <h1>{nav}</h1>
-              <p className="page-hint">{pageHint}</p>
+          <div className="topbar-inner">
+            <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
+            <div className="topbar-heading">
+              <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-logo-page-2.svg" alt="" /></span>
+              <button
+                className="desktop-sidebar-toggle"
+                type="button"
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-controls="main-navigation"
+                aria-expanded={!sidebarCollapsed}
+                onClick={() => setSidebarCollapsed(collapsed => !collapsed)}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+              </button>
+              <div className="page-title">
+                <h1>{nav}</h1>
+                <p className="page-hint">{pageHint}</p>
+              </div>
             </div>
-          </div>
-          {nav !== "Employees" && <PageSearchBar page={nav} />}
-          <div className="topbar-actions">
-            <NotificationsPanel session={backendSession} notify={notify} />
-            <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
-              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <AccountMenu
-              state={state}
-              backendSession={backendSession}
-              onLogout={() => void logout()}
-              setNav={setNav}
-              theme={theme}
-              toggleTheme={toggleTheme}
-            />
+            {nav !== "Employees" && <PageSearchBar page={nav} />}
+            <div className="topbar-actions">
+              <NotificationsPanel session={backendSession} notify={notify} />
+              <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
+                {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              <AccountMenu
+                state={state}
+                backendSession={backendSession}
+                onLogout={() => void logout()}
+                setNav={setNav}
+                theme={theme}
+                toggleTheme={toggleTheme}
+              />
+            </div>
           </div>
         </header>
 
@@ -869,17 +876,17 @@ function dashboardPending(items: DashboardLeave[]) {
 
 function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; notify: (message: string) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
   const { search, active: searchActive } = usePageSearch();
-  const employeeSearch = usePageSearchList<{ id: string }>("dashboard-employees", "/employees");
   const persona = dashboardPersona(session);
   const [roleLabel, roleSubtitle] = dashboardRoleCopy(persona);
   const personalDashboard = persona === "employee";
   const managementDashboard = persona === "line-manager" || persona === "manager";
   const operationalDashboard = persona === "hr";
   const executiveDashboard = persona === "cpo" || persona === "coo";
+  const canReadScopedEmployees = !personalDashboard && hasAnyPermission(session, "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
+  const employeeSearch = usePageSearchList<{ id: string }>("dashboard-employees", "/employees", canReadScopedEmployees);
   const active = activeEmployees(state.employees);
   const matchingActive = rankedPageSearchItems(active, employeeSearch.data, searchActive, employee => employee.id, match => match.id);
   const todayValue = todayISO();
-  const canReadScopedEmployees = !personalDashboard && hasAnyPermission(session, "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
   const canReadAttendanceSummary = (operationalDashboard || executiveDashboard) && hasAnyPermission(session, "attendance.hr.read", "attendance.audit.read", "attendance.read_all");
   const attendance = useQuery({ queryKey: ["dashboard-attendance", session.sessionId, session.authorizationVersion, todayValue], queryFn: () => apiRequest<DashboardAttendanceReport>(`/attendance/reports/summary?dateFrom=${todayValue}&dateTo=${todayValue}&limit=100`), enabled: canReadAttendanceSummary });
   const canReadLeave = hasAnyPermission(session, "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.read_all");
@@ -911,7 +918,7 @@ function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmploy
   const attendanceAbsent = attendanceStatus?.ABSENT ?? 0;
   const attendanceLate = attendanceStatus?.LATE ?? 0;
   const currentPayroll = payrollRuns.data ?? [];
-  const canReadRecruitment = executiveDashboard && hasPermission(session, "recruitment.read");
+  const canReadRecruitment = persona === "cpo" && hasPermission(session, "recruitment.read");
   const openJobs = state.jobs.filter(job => job.status === "Open" && !recruitmentJobVacancies(job, state.candidates).isFilled);
   const openPositions = openJobs.reduce((total, job) => total + recruitmentJobVacancies(job, state.candidates).remaining, 0);
   const headcount = [...new Set(matchingActive.map(employee => employee.fields.Department || "Unassigned"))].map(department => ({
@@ -934,11 +941,31 @@ function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmploy
   ].filter(item => item.count > 0);
   const availableLeaveDays = (balances.data ?? []).filter(balance => balance.eligible && !balance.noBalanceRequired).reduce((sum, balance) => sum + Number(balance.availableDays), 0);
   const latestDocument = canReadPersonalDocuments ? [...state.documents].sort((left, right) => right.generatedOn.localeCompare(left.generatedOn))[0] : undefined;
+  const nextWeek = new Date();
+  nextWeek.setDate(nextWeek.getDate() + 7);
+  const nextWeekValue = todayISO(nextWeek);
+  const leaveStartingSoon = upcomingLeave.filter(item => item.startDate > todayValue && item.startDate <= nextWeekValue);
+  const recentLeaveActivity = [...visibleLeaves].sort((left, right) => right.startDate.localeCompare(left.startDate)).slice(0, 6);
+  const attendanceRecorded = attendance.data?.summary.totalRecords ?? 0;
+  const attendanceCompliance = attendanceRecorded ? Math.round((attendancePresent / attendanceRecorded) * 100) : null;
+  const activeCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" && candidate.stage !== "Rejected").length;
   const canOpenLeave = canAccessRoute(session, "Leave") && hasPermission(session, "leave.self.create");
   const canOpenMyHr = canAccessRoute(session, "My HR");
   const canOpenDocuments = canAccessRoute(session, "Documents");
   const canOpenAttendance = operationalDashboard && canAccessRoute(session, "Attendance");
   const canOpenEmployees = operationalDashboard && canAccessRoute(session, "Employees");
+  const canOpenTeam = managementDashboard && canAccessRoute(session, "Team");
+  const canOpenRecruitment = canReadRecruitment && canAccessRoute(session, "Recruitment");
+
+  const approvalQueue = canOpenApprovalInbox ? <div className="dashboard-row dashboard-row--single dashboard-row--priority" data-dashboard-widget="approval-inbox"><ApprovalInboxPanel session={session} notify={notify} /></div> : null;
+  const workforcePanel = canReadScopedEmployees ? <section className="panel headcount-panel dashboard-widget" data-dashboard-widget="workforce-distribution"><div className="panel-head"><div><h3>{persona === "manager" ? "Management scope" : persona === "cpo" ? "People organization" : persona === "coo" ? "Organization by department" : "Workforce distribution"}</h3><span>{active.length} active employees in your permitted scope</span></div></div>{headcount.length ? <HeadcountDonut items={headcount} label={managementDashboard ? "in scope" : "active"} noun="employees" /> : <div className="empty">No employee distribution is available.</div>}</section> : null;
+  const availabilityPanel = broadLeave ? <section className="panel dashboard-widget" data-dashboard-widget="leave-availability"><div className="panel-head"><div><h3>{persona === "line-manager" ? "Team availability" : persona === "manager" ? "Upcoming scoped leave" : persona === "coo" ? "Organization leave outlook" : "Leave overview"}</h3><span>{upcomingLeave.length} current or upcoming approved record(s)</span></div>{canAccessRoute(session, "Leave") && <button type="button" onClick={() => setNav("Leave")}>View leave</button>}</div>
+    <DataTable label="Approved leave availability" empty="No current or upcoming approved leave." columns={["Employee", "Leave type", "Dates", "Days"]} rows={upcomingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} – ${formatDate(leave.endDate)}`, leave.totalDays])} />
+  </section> : null;
+  const leaveDistributionPanel = broadLeave ? <section className="panel dashboard-widget" data-dashboard-widget="leave-distribution"><div className="panel-head"><div><h3>{persona === "cpo" ? "People leave distribution" : persona === "coo" ? "Organization leave summary" : "Leave distribution"}</h3><span>Requests visible within your current scope.</span></div></div>{leaveDistribution.length ? <HeadcountDonut items={leaveDistribution} label="requests" noun="records" /> : <div className="empty">No leave requests are available.</div>}</section> : null;
+  const attendancePanel = canReadAttendanceSummary ? <section className="panel dashboard-attendance-panel dashboard-widget" data-dashboard-widget="attendance-summary"><div className="panel-head"><div><h3>{executiveDashboard ? "Attendance and compliance" : "Attendance overview"}</h3><span>High-level organization summary only.</span></div>{canOpenAttendance && <button type="button" onClick={() => setNav("Attendance")}>Open attendance</button>}</div>
+    {attendance.isPending ? <div className="empty">Loading attendance…</div> : attendance.isError ? <div className="empty">Attendance could not be loaded.</div> : <div className="dashboard-attendance-summary">{executiveDashboard && <div><span>Coverage</span><strong>{attendanceCompliance === null ? "—" : `${attendanceCompliance}%`}</strong></div>}<div><span>Present</span><strong>{attendancePresent}</strong></div><div><span>Absent</span><strong>{attendanceAbsent}</strong></div><div><span>Late</span><strong>{attendanceLate}</strong></div></div>}
+  </section> : null;
 
   return (
     <div className="dashboard-layout" data-dashboard-persona={persona}>
@@ -950,80 +977,157 @@ function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmploy
         </div>
         <div className="dashboard-snapshot">
           <span>Today’s brief</span>
-          <strong>{formatDate(todayISO())}</strong>
+          <strong><time dateTime={todayValue}>{formatDate(todayValue)}</time></strong>
           <dl>
-            {personalDashboard ? <>
+            {persona === "employee" && <>
               {canReadLeave && <div><dt>Leave requests</dt><dd>{pendingLeave.length} pending</dd></div>}
               {canReadPersonalDocuments && <div><dt>Documents</dt><dd>{state.documents.length} available</dd></div>}
-            </> : <>
+              {canReadLeave && <div><dt>Next leave</dt><dd>{upcomingLeave[0] ? formatDate(upcomingLeave[0].startDate) : "None scheduled"}</dd></div>}
+            </>}
+            {persona === "line-manager" && <>
+              {canOpenApprovalInbox && <div><dt>Team approvals</dt><dd>{approvalCount} assigned</dd></div>}
+              {broadLeave && <div><dt>Away today</dt><dd>{onLeaveToday.length} people</dd></div>}
+              {broadLeave && <div><dt>Next 7 days</dt><dd>{leaveStartingSoon.length} starting</dd></div>}
+            </>}
+            {persona === "manager" && <>
+              {canOpenApprovalInbox && <div><dt>Decisions</dt><dd>{approvalCount} assigned</dd></div>}
+              {broadLeave && <div><dt>Leave today</dt><dd>{onLeaveToday.length} people</dd></div>}
+              {canReadScopedEmployees && <div><dt>Departments</dt><dd>{headcount.length} in scope</dd></div>}
+            </>}
+            {persona === "hr" && <>
               {canOpenApprovalInbox && <div><dt>Approvals</dt><dd>{approvalCount} assigned</dd></div>}
               {broadLeave && <div><dt>Leave today</dt><dd>{onLeaveToday.length} people</dd></div>}
               {canReadAttendanceSummary && <div><dt>Attendance</dt><dd>{attendance.isPending ? "Loading…" : `${attendancePresent} present`}</dd></div>}
+            </>}
+            {persona === "cpo" && <>
+              {canOpenApprovalInbox && <div><dt>Executive queue</dt><dd>{approvalCount} assigned</dd></div>}
+              {canReadRecruitment && <div><dt>Open positions</dt><dd>{openPositions} vacancies</dd></div>}
+              {canReadAttendanceSummary && <div><dt>Attendance</dt><dd>{attendance.isPending ? "Loading…" : attendanceCompliance === null ? "No records" : `${attendanceCompliance}% coverage`}</dd></div>}
+            </>}
+            {persona === "coo" && <>
+              {canOpenApprovalInbox && <div><dt>Final approvals</dt><dd>{approvalCount} assigned</dd></div>}
+              {canReadScopedEmployees && <div><dt>Departments</dt><dd>{headcount.length} active</dd></div>}
+              {canReadAttendanceSummary && <div><dt>Attendance</dt><dd>{attendance.isPending ? "Loading…" : attendanceCompliance === null ? "No records" : `${attendanceCompliance}% coverage`}</dd></div>}
             </>}
           </dl>
         </div>
         <div className="hero-actions">
           {canOpenLeave && <button className="primary" onClick={() => setNav("Leave")}><CalendarCheck size={17} /> Apply leave</button>}
           {canOpenMyHr && <button onClick={() => setNav("My HR")}>My profile</button>}
-          {managementDashboard && <button onClick={() => setNav("Leave")}>Review leave</button>}
-          {canAddEmployee && <button onClick={onAddEmployee}><UserRoundPlus size={17} /> Add employee</button>}
+          {personalDashboard && canOpenDocuments && <button onClick={() => setNav("Documents")}><FileText size={17} /> Documents</button>}
+          {managementDashboard && canOpenApprovalInbox && <button onClick={() => setNav("Leave")}>Review leave</button>}
+          {canOpenTeam && <button onClick={() => setNav("Team")}><UsersRound size={17} /> View team</button>}
+          {operationalDashboard && canAddEmployee && <button onClick={onAddEmployee}><UserRoundPlus size={17} /> Add employee</button>}
+          {canOpenEmployees && <button onClick={() => setNav("Employees")}><UsersRound size={17} /> View employees</button>}
+          {canOpenAttendance && <button onClick={() => setNav("Attendance")}><CalendarCheck size={17} /> View attendance</button>}
           {operationalDashboard && canOpenPayroll && <button onClick={() => setNav("Payroll")}><WalletCards size={17} /> {canRunPayroll ? "Run payroll" : "View payroll"}</button>}
+          {canOpenRecruitment && <button onClick={() => setNav("Recruitment")}><BriefcaseBusiness size={17} /> Recruitment</button>}
+          {executiveDashboard && canOpenApprovalInbox && <button onClick={() => setNav("Leave")}>Review approvals</button>}
         </div>
       </section>
 
       <section className="metric-grid">
-        {personalDashboard ? <>
+        {persona === "employee" && <>
           {canReadPersonalBalances && <Metric label="Leave balance" value={balances.isPending ? "…" : `${availableLeaveDays} days`} hint="across eligible leave types" icon={<CalendarCheck size={17} />} />}
           {canReadLeave && <Metric label="Pending leave" value={pendingLeave.length} hint="personal requests in progress" tone={pendingLeave.length ? "warn" : "ok"} icon={<LayoutDashboard size={17} />} />}
           {canReadPersonalDocuments && <Metric label="Latest document" value={latestDocument ? formatDate(latestDocument.generatedOn) : "—"} hint={latestDocument?.filename || "No documents yet"} icon={<FileText size={17} />} />}
           {canReadPersonalRequests && <Metric label="Certificate requests" value={serviceRequests.data?.meta?.total ?? "—"} hint="salary, experience and clearance" icon={<BriefcaseBusiness size={17} />} />}
-        </> : <>
-          {canReadScopedEmployees && <Metric label={persona === "line-manager" ? "Team members" : persona === "manager" ? "Department headcount" : "Total employees"} value={active.length} hint={managementDashboard ? "within your current scope" : `${state.employees.length - active.length} inactive records`} icon={<UsersRound size={17} />} />}
-          {canOpenApprovalInbox && <Metric label={persona === "coo" ? "Final approvals" : persona === "cpo" ? "Executive approvals" : "Pending actions"} value={approvalInbox.isPending ? "…" : approvalCount} hint="currently assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
-          {broadLeave && <Metric label="On leave today" value={onLeaveToday.length} hint="approved leave within your scope" icon={<CalendarCheck size={17} />} />}
-          {operationalDashboard && canReadScopedEmployees && <Metric label="New joiners" value={recentJoiners.length} hint="latest employee records" icon={<UserRoundPlus size={17} />} />}
-          {persona === "cpo" && canReadRecruitment && <Metric label="Open positions" value={openPositions} hint="active recruitment vacancies" icon={<BriefcaseBusiness size={17} />} />}
-          {persona === "coo" && canReadScopedEmployees && <Metric label="Departments" value={headcount.length} hint="organizational units in scope" icon={<LayoutDashboard size={17} />} />}
+        </>}
+        {persona === "line-manager" && <>
+          {canReadScopedEmployees && <Metric label="Direct team" value={active.length} hint="active people in your scope" icon={<UsersRound size={17} />} />}
+          {canOpenApprovalInbox && <Metric label="Awaiting decision" value={approvalInbox.isPending ? "…" : approvalCount} hint="items assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
+          {broadLeave && <Metric label="Away today" value={onLeaveToday.length} hint="approved team leave" icon={<CalendarCheck size={17} />} />}
+          {broadLeave && <Metric label="Starting soon" value={leaveStartingSoon.length} hint="approved leave in the next 7 days" icon={<LayoutDashboard size={17} />} />}
+        </>}
+        {persona === "manager" && <>
+          {canReadScopedEmployees && <Metric label="Management scope" value={active.length} hint="active employees visible to you" icon={<UsersRound size={17} />} />}
+          {canOpenApprovalInbox && <Metric label="Pending decisions" value={approvalInbox.isPending ? "…" : approvalCount} hint="currently assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
+          {broadLeave && <Metric label="On leave today" value={onLeaveToday.length} hint="approved leave in scope" icon={<CalendarCheck size={17} />} />}
+          {broadLeave && <Metric label="Upcoming leave" value={leaveStartingSoon.length} hint="starting within 7 days" icon={<LayoutDashboard size={17} />} />}
+          {canReadScopedEmployees && <Metric label="Departments" value={headcount.length} hint="represented in your scope" icon={<BriefcaseBusiness size={17} />} />}
+        </>}
+        {persona === "hr" && <>
+          {canReadScopedEmployees && <Metric label="Active workforce" value={active.length} hint={`${state.employees.length - active.length} inactive records`} icon={<UsersRound size={17} />} />}
+          {canOpenApprovalInbox && <Metric label="Pending actions" value={approvalInbox.isPending ? "…" : approvalCount} hint="currently assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
+          {broadLeave && <Metric label="On leave today" value={onLeaveToday.length} hint="approved leave within HR scope" icon={<CalendarCheck size={17} />} />}
+          {canReadScopedEmployees && <Metric label="Recent joiners" value={recentJoiners.length} hint="latest employee records" icon={<UserRoundPlus size={17} />} />}
           {canReadPayrollDashboard && <Metric label="Payroll runs" value={payrollRuns.isPending ? "…" : currentPayroll.length} hint="for the current month" icon={<WalletCards size={17} />} />}
           {canReadAttendanceSummary && <Metric label="Attendance today" value={attendance.isPending ? "…" : attendancePresent} hint={`${attendanceAbsent} absent · ${attendanceLate} late`} tone={attendanceAbsent ? "warn" : "ok"} icon={<CalendarCheck size={17} />} />}
         </>}
+        {persona === "cpo" && <>
+          {canReadScopedEmployees && <Metric label="People workforce" value={active.length} hint={`${state.employees.length - active.length} inactive records`} icon={<UsersRound size={17} />} />}
+          {canReadRecruitment && <Metric label="Open positions" value={openPositions} hint="remaining active vacancies" icon={<BriefcaseBusiness size={17} />} />}
+          {canReadRecruitment && <Metric label="Active candidates" value={activeCandidates} hint="not hired or rejected" icon={<UserRoundPlus size={17} />} />}
+          {canOpenApprovalInbox && <Metric label="Executive approvals" value={approvalInbox.isPending ? "…" : approvalCount} hint="currently assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
+          {canReadAttendanceSummary && <Metric label="Attendance coverage" value={attendance.isPending ? "…" : attendanceCompliance === null ? "—" : `${attendanceCompliance}%`} hint={`${attendanceAbsent} absent · ${attendanceLate} late`} tone={attendanceAbsent ? "warn" : "ok"} icon={<CalendarCheck size={17} />} />}
+          {broadLeave && <Metric label="On leave today" value={onLeaveToday.length} hint="approved organization leave" icon={<LayoutDashboard size={17} />} />}
+        </>}
+        {persona === "coo" && <>
+          {canReadScopedEmployees && <Metric label="Organization headcount" value={active.length} hint={`${state.employees.length - active.length} inactive records`} icon={<UsersRound size={17} />} />}
+          {canReadScopedEmployees && <Metric label="Departments" value={headcount.length} hint="organizational units in scope" icon={<BriefcaseBusiness size={17} />} />}
+          {canOpenApprovalInbox && <Metric label="Final approvals" value={approvalInbox.isPending ? "…" : approvalCount} hint="currently assigned to you" tone={approvalCount ? "warn" : "ok"} icon={<ShieldCheck size={17} />} />}
+          {canReadAttendanceSummary && <Metric label="Attendance coverage" value={attendance.isPending ? "…" : attendanceCompliance === null ? "—" : `${attendanceCompliance}%`} hint={`${attendanceAbsent} absent · ${attendanceLate} late`} tone={attendanceAbsent ? "warn" : "ok"} icon={<CalendarCheck size={17} />} />}
+          {broadLeave && <Metric label="On leave today" value={onLeaveToday.length} hint="approved organization leave" icon={<CalendarCheck size={17} />} />}
+          {broadLeave && <Metric label="Starting soon" value={leaveStartingSoon.length} hint="approved leave in the next 7 days" icon={<LayoutDashboard size={17} />} />}
+        </>}
       </section>
 
-      {personalDashboard ? <>
+      {persona === "employee" && <>
         <div className="dashboard-row dashboard-row--two">
-          {canReadPersonalBalances && <section className="panel dashboard-balance-panel"><div className="panel-head"><div><h3>My leave balance</h3><span>Current-year availability by leave type.</span></div><button type="button" onClick={() => setNav("Leave")}>View Leave</button></div>
+          {canReadPersonalBalances && <section className="panel dashboard-balance-panel dashboard-widget" data-dashboard-widget="personal-leave-balance"><div className="panel-head"><div><h3>My leave balance</h3><span>Current-year availability by leave type.</span></div><button type="button" onClick={() => setNav("Leave")}>View Leave</button></div>
             {balances.isPending ? <div className="empty">Loading leave balances…</div> : balances.isError ? <div className="empty">Leave balances could not be loaded.</div> : <div className="dashboard-balance-list">{balances.data?.filter(balance => balance.eligible).map(balance => <div key={balance.leaveType.name}><span>{balance.leaveType.name}</span><strong>{balance.noBalanceRequired ? "No balance required" : `${balance.availableDays} days`}</strong><small>{balance.noBalanceRequired ? "Not deducted from annual allowance" : `${balance.usedDays} used · ${balance.pendingDays} pending`}</small></div>)}{!balances.data?.filter(balance => balance.eligible).length && <div className="empty compact">No available leave balances.</div>}</div>}
           </section>}
-          {canReadLeave && <div className="dashboard-embedded-panel"><MyLeaveStatusPanel session={session} onOpenLeave={() => setNav("Leave")} /></div>}
+          {canReadLeave && <div className="dashboard-embedded-panel" data-dashboard-widget="personal-leave-status"><MyLeaveStatusPanel session={session} onOpenLeave={() => setNav("Leave")} /></div>}
         </div>
         <div className="dashboard-row dashboard-row--two">
-          {canReadPersonalRequests && <section className="panel"><div className="panel-head"><div><h3>My recent requests</h3><span>Leave and certificate activity that belongs to you.</span></div>{canOpenDocuments && <button type="button" onClick={() => setNav("Documents")}>Request certificate</button>}</div>
+          {canReadPersonalRequests && <section className="panel dashboard-widget" data-dashboard-widget="personal-requests"><div className="panel-head"><div><h3>My recent requests</h3><span>Leave and certificate activity that belongs to you.</span></div>{canOpenDocuments && <button type="button" onClick={() => setNav("Documents")}>Request certificate</button>}</div>
             {serviceRequests.isPending ? <div className="empty">Loading requests…</div> : serviceRequests.isError ? <div className="empty">Requests could not be loaded.</div> : <DataTable label="Recent personal requests" empty="No certificate requests yet." columns={["Type", "Requested", "Status"]} rows={(serviceRequests.data?.data ?? []).map(request => [request.requestType.replaceAll("_", " "), formatDate(request.createdAt), <Badge key={request.id} value={request.status} />])} />}
           </section>}
-          {canReadAnnouncements && <section className="panel"><div className="panel-head"><div><h3>Announcements</h3><span>Company updates relevant to you.</span></div></div>
+          {canReadAnnouncements && <section className="panel dashboard-widget" data-dashboard-widget="announcements"><div className="panel-head"><div><h3>Announcements</h3><span>Company updates relevant to you.</span></div></div>
             {announcements.isPending ? <div className="empty">Loading announcements…</div> : announcements.isError ? <div className="empty">Announcements could not be loaded.</div> : <div className="dashboard-announcements">{announcements.data?.data.map(item => <article key={item.id}><strong>{item.title}</strong><p>{item.content}</p><small>{formatDate(item.publishedAt || item.createdAt)}</small></article>)}{!announcements.data?.data.length && <div className="empty compact">No current announcements.</div>}</div>}
           </section>}
         </div>
-      </> : <>
-        {(canReadScopedEmployees || broadLeave) && <div className={`dashboard-row ${canReadScopedEmployees && broadLeave ? "dashboard-row--two" : "dashboard-row--single"}`}>
-          {canReadScopedEmployees && <section className="panel headcount-panel"><div className="panel-head"><div><h3>{managementDashboard ? "People in your scope" : persona === "coo" ? "Organization snapshot" : "Workforce distribution"}</h3><span>{active.length} active employees</span></div></div>{headcount.length ? <HeadcountDonut items={headcount} label={managementDashboard ? "in scope" : "active"} noun="employees" /> : <div className="empty">No employee distribution is available.</div>}</section>}
-          {broadLeave && <section className="panel"><div className="panel-head"><div><h3>{managementDashboard ? "Team availability" : persona === "coo" ? "Executive leave summary" : "Leave overview"}</h3><span>{upcomingLeave.length} approved record(s)</span></div></div>
-            <DataTable label="Approved leave availability" empty="No current or upcoming approved leave." columns={["Employee", "Leave type", "Dates", "Days"]} rows={upcomingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} – ${formatDate(leave.endDate)}`, leave.totalDays])} />
-          </section>}
+      </>}
+
+      {persona === "line-manager" && <>
+        {approvalQueue}
+        {(availabilityPanel || canReadScopedEmployees) && <div className={`dashboard-row ${availabilityPanel && canReadScopedEmployees ? "dashboard-row--two" : "dashboard-row--single"}`}>
+          {availabilityPanel}
+          {canReadScopedEmployees && <section className="panel dashboard-widget" data-dashboard-widget="team-snapshot"><div className="panel-head"><div><h3>Team snapshot</h3><span>Availability calculated from approved leave in your scope.</span></div>{canOpenTeam && <button type="button" onClick={() => setNav("Team")}>Open team</button>}</div><div className="dashboard-focus-list"><div><span>Available today</span><strong>{Math.max(active.length - onLeaveToday.length, 0)}</strong></div><div><span>Away today</span><strong>{onLeaveToday.length}</strong></div><div><span>Starting leave soon</span><strong>{leaveStartingSoon.length}</strong></div></div></section>}
         </div>}
-        {(operationalDashboard || executiveDashboard) && (broadLeave || canReadAttendanceSummary) && <div className={`dashboard-row ${broadLeave && canReadAttendanceSummary ? "dashboard-row--two" : "dashboard-row--single"}`}>
-          {broadLeave && <section className="panel"><div className="panel-head"><div><h3>Leave distribution</h3><span>Requests visible within your current scope.</span></div></div>{leaveDistribution.length ? <HeadcountDonut items={leaveDistribution} label="requests" noun="records" /> : <div className="empty">No leave requests are available.</div>}</section>}
-          {canReadAttendanceSummary && <section className="panel dashboard-attendance-panel"><div className="panel-head"><div><h3>Attendance overview</h3><span>High-level organization summary only.</span></div>{canOpenAttendance && <button type="button" onClick={() => setNav("Attendance")}>View attendance</button>}</div>
-            {attendance.isPending ? <div className="empty">Loading attendance…</div> : attendance.isError ? <div className="empty">Attendance could not be loaded.</div> : <div className="dashboard-attendance-summary"><div><span>Present</span><strong>{attendancePresent}</strong></div><div><span>Absent</span><strong>{attendanceAbsent}</strong></div><div><span>Late</span><strong>{attendanceLate}</strong></div></div>}
-          </section>}
-        </div>}
-        {operationalDashboard && (canReadScopedEmployees || broadLeave || canReadPayrollDashboard) && <div className="dashboard-row dashboard-row--two">
-          {canReadScopedEmployees && <section className="panel"><div className="panel-head"><div><h3>Recent joiners</h3><span>Latest employee records.</span></div>{canOpenEmployees && <button type="button" onClick={() => setNav("Employees")}>View employees</button>}</div>
+      </>}
+
+      {persona === "manager" && <>
+        {approvalQueue}
+        {(workforcePanel || availabilityPanel) && <div className={`dashboard-row ${workforcePanel && availabilityPanel ? "dashboard-row--two" : "dashboard-row--single"}`}>{workforcePanel}{availabilityPanel}</div>}
+        {broadLeave && <div className="dashboard-row dashboard-row--single"><section className="panel dashboard-widget" data-dashboard-widget="recent-leave-activity"><div className="panel-head"><div><h3>Recent scoped leave activity</h3><span>Latest requests visible in your management scope.</span></div></div><DataTable label="Recent scoped leave activity" empty="No leave activity is available." columns={["Employee", "Leave type", "Start date", "Status"]} rows={recentLeaveActivity.map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, formatDate(leave.startDate), <Badge key={leave.id} value={leave.status} />])} /></section></div>}
+      </>}
+
+      {persona === "hr" && <>
+        {approvalQueue}
+        {(workforcePanel || attendancePanel) && <div className={`dashboard-row ${workforcePanel && attendancePanel ? "dashboard-row--two" : "dashboard-row--single"}`}>{workforcePanel}{attendancePanel}</div>}
+        {(leaveDistributionPanel || canReadScopedEmployees) && <div className={`dashboard-row ${leaveDistributionPanel && canReadScopedEmployees ? "dashboard-row--two" : "dashboard-row--single"}`}>
+          {leaveDistributionPanel}
+          {canReadScopedEmployees && <section className="panel dashboard-widget" data-dashboard-widget="recent-joiners"><div className="panel-head"><div><h3>Recent joiners</h3><span>Latest employee records.</span></div>{canOpenEmployees && <button type="button" onClick={() => setNav("Employees")}>Open directory</button>}</div>
             <DataTable label="Recent joiners" empty="No employees yet." columns={["Name", "Designation", "Joined", "Status"]} rows={recentJoiners.map(employee => [<strong key="name">{employeeName(employee)}</strong>, employee.fields.Designation || "-", formatDate(employee.fields["Joining Date"]), <Badge key="status" value={employee.status} />])} />
           </section>}
-          {(broadLeave || canReadPayrollDashboard) && <section className="panel"><div className="panel-head"><div><h3>Operational focus</h3><span>Real-time priorities from the existing workspace.</span></div></div><div className="dashboard-focus-list">{broadLeave && <><div><span>Approved leave today</span><strong>{onLeaveToday.length}</strong></div><div><span>Pending requests</span><strong>{pendingLeave.length}</strong></div></>}{canReadPayrollDashboard && <div><span>Current-month payroll runs</span><strong>{currentPayroll.length}</strong></div>}</div></section>}
         </div>}
-        {canOpenApprovalInbox && <div className="dashboard-row dashboard-row--single"><ApprovalInboxPanel session={session} notify={notify} /></div>}
+        {(broadLeave || canReadPayrollDashboard) && <div className="dashboard-row dashboard-row--single"><section className="panel dashboard-widget" data-dashboard-widget="operational-focus"><div className="panel-head"><div><h3>Operational focus</h3><span>Current priorities from the existing workspace.</span></div></div><div className="dashboard-focus-list dashboard-focus-list--inline">{broadLeave && <><div><span>Approved leave today</span><strong>{onLeaveToday.length}</strong></div><div><span>Pending leave requests</span><strong>{pendingLeave.length}</strong></div></>}{canReadPayrollDashboard && <div><span>Current-month payroll runs</span><strong>{currentPayroll.length}</strong></div>}</div></section></div>}
+      </>}
+
+      {persona === "cpo" && <>
+        {approvalQueue}
+        {(workforcePanel || canReadRecruitment) && <div className={`dashboard-row ${workforcePanel && canReadRecruitment ? "dashboard-row--two" : "dashboard-row--single"}`}>
+          {workforcePanel}
+          {canReadRecruitment && <section className="panel dashboard-widget" data-dashboard-widget="recruitment-summary"><div className="panel-head"><div><h3>Recruitment outlook</h3><span>{openPositions} remaining vacancies across {openJobs.length} open role(s)</span></div>{canOpenRecruitment && <button type="button" onClick={() => setNav("Recruitment")}>View recruitment</button>}</div><DataTable label="Open recruitment positions" empty="No open positions." columns={["Position", "Department", "Vacancies", "Candidates"]} rows={openJobs.slice(0, 6).map(job => [job.title, job.dept || "Unassigned", recruitmentJobVacancies(job, state.candidates).remaining, state.candidates.filter(candidate => candidate.jobId === job.id && candidate.stage !== "Rejected").length])} /></section>}
+        </div>}
+        {(leaveDistributionPanel || attendancePanel) && <div className={`dashboard-row ${leaveDistributionPanel && attendancePanel ? "dashboard-row--two" : "dashboard-row--single"}`}>{leaveDistributionPanel}{attendancePanel}</div>}
+      </>}
+
+      {persona === "coo" && <>
+        {approvalQueue}
+        {(workforcePanel || attendancePanel) && <div className={`dashboard-row ${workforcePanel && attendancePanel ? "dashboard-row--two" : "dashboard-row--single"}`}>{workforcePanel}{attendancePanel}</div>}
+        {(availabilityPanel || leaveDistributionPanel) && <div className={`dashboard-row ${availabilityPanel && leaveDistributionPanel ? "dashboard-row--two" : "dashboard-row--single"}`}>{availabilityPanel}{leaveDistributionPanel}</div>}
       </>}
     </div>
   );

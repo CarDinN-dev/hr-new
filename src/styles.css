@@ -9126,3 +9126,517 @@ body {
     min-height: 42px;
   }
 }
+
+/* Premium workspace pass: shared shell, role dashboards, and consistent page rhythm. */
+.app .workspace {
+  --page-max: 1440px;
+  background: var(--canvas);
+}
+
+.app .workspace.page-layout-wide {
+  --page-max: 1600px;
+}
+
+.app .workspace.page-layout-focused {
+  --page-max: 1280px;
+}
+
+.app .topbar,
+:root[data-theme="dark"] .app .topbar {
+  display: block;
+  padding: 0;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.app .topbar-inner {
+  width: min(100%, var(--page-max));
+  min-height: 94px;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(300px, auto) minmax(280px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px var(--page-gutter);
+}
+
+.app .content {
+  width: min(100%, var(--page-max));
+  margin-inline: auto;
+  animation: premium-page-arrival var(--motion-standard) both;
+}
+
+@keyframes premium-page-arrival {
+  from { opacity: 0.72; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app .sidebar,
+:root[data-theme="dark"] .app .sidebar {
+  overflow-x: hidden;
+  transition:
+    width var(--motion-standard),
+    flex-basis var(--motion-standard),
+    padding var(--motion-standard),
+    border-color var(--motion-standard),
+    box-shadow var(--motion-standard),
+    opacity var(--motion-standard),
+    transform var(--motion-standard),
+    visibility 0s linear;
+}
+
+.app .logo-crop.wordmark,
+.app .topbar-brand-mark {
+  border: 1px solid rgba(35, 50, 106, 0.12);
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(8, 15, 36, 0.12);
+}
+
+.app .logo-crop.wordmark {
+  padding: 6px 10px;
+  border-radius: 14px;
+}
+
+.app .topbar-brand-mark {
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+@media (min-width: 1281px) {
+  .app.sidebar-collapsed .sidebar {
+    width: 0;
+    flex-basis: 0;
+    padding-inline: 0;
+    visibility: hidden;
+    border-right-color: transparent;
+    box-shadow: none;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-12px);
+    transition:
+      width var(--motion-standard),
+      flex-basis var(--motion-standard),
+      padding var(--motion-standard),
+      border-color var(--motion-standard),
+      box-shadow var(--motion-standard),
+      opacity var(--motion-standard),
+      transform var(--motion-standard),
+      visibility 0s linear 180ms;
+  }
+
+  .app .topbar-brand-mark {
+    width: 0;
+    height: 50px;
+    padding: 0;
+    visibility: hidden;
+    border-color: transparent;
+    box-shadow: none;
+    opacity: 0;
+    transform: scale(0.96);
+    transition:
+      width var(--motion-standard),
+      padding var(--motion-standard),
+      border-color var(--motion-standard),
+      box-shadow var(--motion-standard),
+      opacity var(--motion-standard),
+      transform var(--motion-standard),
+      visibility 0s linear 180ms;
+  }
+
+  .app.sidebar-collapsed .topbar-brand-mark {
+    width: 184px;
+    padding: 4px 8px;
+    visibility: visible;
+    border-color: rgba(35, 50, 106, 0.12);
+    box-shadow: 0 8px 24px rgba(8, 15, 36, 0.12);
+    opacity: 1;
+    transform: scale(1);
+    transition-delay: 0s;
+  }
+}
+
+.app .stack,
+.app .employee-workspace,
+.app .attendance-workspace,
+.app .leave-workflow,
+.app .payroll-workspace,
+.app .recruitment-workspace {
+  gap: 20px;
+}
+
+.app .two-col,
+.app .report-grid,
+.app .settings-grid,
+.app .payroll-grid,
+.app .document-grid {
+  align-items: start;
+  gap: 20px;
+}
+
+.app .panel,
+.app .metric,
+.app .report-card,
+.app .employee-card,
+.app .template-card,
+.app .pipeline-column,
+.app .candidate-card,
+.app .payroll-tile,
+.app .workflow-card,
+.app details,
+.app .modal {
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(23, 33, 58, 0.035), 0 10px 28px rgba(23, 33, 58, 0.055);
+}
+
+:root[data-theme="dark"] .app .panel,
+:root[data-theme="dark"] .app .metric,
+:root[data-theme="dark"] .app .report-card,
+:root[data-theme="dark"] .app .employee-card,
+:root[data-theme="dark"] .app .template-card,
+:root[data-theme="dark"] .app .pipeline-column,
+:root[data-theme="dark"] .app .candidate-card,
+:root[data-theme="dark"] .app .payroll-tile,
+:root[data-theme="dark"] .app .workflow-card,
+:root[data-theme="dark"] .app details,
+:root[data-theme="dark"] .app .modal {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+}
+
+.app .panel,
+.app .report-card {
+  padding: 20px;
+}
+
+.app .panel:hover {
+  transform: none;
+}
+
+.app :is(.metric, .report-card, .employee-card, .template-card, .candidate-card, .payroll-tile):hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--clinical-shadow-raised);
+  transform: translateY(-1px);
+}
+
+.app .panel-head {
+  min-height: 0;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+}
+
+.app .panel-head h3 {
+  font-size: 1.02rem;
+  letter-spacing: -0.022em;
+}
+
+.app button,
+.app .button-like,
+:root[data-theme="dark"] .app button {
+  border-radius: 10px;
+  transition:
+    border-color var(--motion-standard),
+    background var(--motion-standard),
+    color var(--motion-standard),
+    box-shadow var(--motion-standard),
+    transform var(--motion-standard);
+}
+
+.app button:hover:not(:disabled):not(.scrim),
+.app .button-like:hover {
+  transform: translateY(-1px);
+}
+
+.app button:is(.desktop-sidebar-toggle, .mobile-menu, .icon-button, .sidebar-close, .modal-close):hover:not(:disabled),
+.app .account-menu--topbar .account-trigger:hover:not(:disabled) {
+  transform: none;
+}
+
+.app input,
+.app select,
+.app textarea,
+:root[data-theme="dark"] .app input,
+:root[data-theme="dark"] .app select,
+:root[data-theme="dark"] .app textarea {
+  border-radius: 10px;
+  transition: border-color var(--motion-standard), background var(--motion-standard), box-shadow var(--motion-standard);
+}
+
+.app .filters,
+.app .employee-filters,
+.app .audit-filters,
+.app .system-user-filters {
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.app .table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  scrollbar-gutter: stable;
+  overscroll-behavior-inline: contain;
+}
+
+.app th,
+:root[data-theme="dark"] .app th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.app tbody tr {
+  transition: background var(--motion-standard);
+}
+
+.app .empty {
+  min-height: 96px;
+  border-radius: 12px;
+}
+
+.app .employee-hero,
+.app .attendance-hero,
+.app .employee-directory-panel,
+.app .attendance-control,
+.app .leave-balance-panel,
+.app .leave-request-panel,
+.app .leave-requests-panel,
+.app .payroll-run-panel,
+.app .workflow-disclosure,
+.app .organization-chart,
+.app .company-role-hierarchy {
+  border-radius: 16px;
+}
+
+.app .employee-card-grid,
+.app .recruitment-pipeline {
+  gap: 16px;
+}
+
+.app .list-row,
+.app .workflow-card,
+.app .candidate-card {
+  transition: border-color var(--motion-standard), background var(--motion-standard), box-shadow var(--motion-standard), transform var(--motion-standard);
+}
+
+.dashboard-layout {
+  gap: 20px;
+}
+
+.dashboard-layout > .hero-panel {
+  grid-column: span 7;
+  min-height: 286px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  background-color: var(--surface);
+  background-image: linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--surface-subtle) 74%, var(--surface)) 100%);
+  box-shadow: 0 1px 2px rgba(23, 33, 58, 0.04), 0 18px 48px rgba(23, 33, 58, 0.07);
+}
+
+:root[data-theme="dark"] .dashboard-layout > .hero-panel {
+  background-color: var(--surface);
+  background-image: linear-gradient(135deg, var(--surface) 0%, color-mix(in srgb, var(--surface-subtle) 78%, var(--surface)) 100%);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.2);
+}
+
+.dashboard-layout > .metric-grid {
+  grid-column: span 5;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-layout .hero-copy .section-label {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+}
+
+.dashboard-layout .hero-panel h2 {
+  max-width: 780px;
+  font-size: clamp(1.8rem, 2.7vw, 2.65rem);
+  font-weight: 730;
+  letter-spacing: -0.048em;
+}
+
+.dashboard-layout .hero-panel p {
+  max-width: 650px;
+  margin-top: 10px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.dashboard-layout > .hero-panel .hero-actions {
+  gap: 9px;
+  align-self: end;
+  margin-top: 12px;
+}
+
+.dashboard-layout .dashboard-snapshot {
+  padding: 16px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-subtle) 82%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.dashboard-layout .dashboard-snapshot > span {
+  color: var(--text-muted);
+  font-size: 0.67rem;
+  font-weight: 820;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+}
+
+.dashboard-layout .dashboard-snapshot > strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.92rem;
+}
+
+.dashboard-layout .dashboard-snapshot dl {
+  margin-top: 14px;
+}
+
+.dashboard-layout .metric {
+  min-height: 124px;
+  padding: 16px;
+  background-color: var(--surface);
+  background-image: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--surface-subtle) 58%, var(--surface)));
+}
+
+.dashboard-layout .metric::before {
+  display: none;
+}
+
+.dashboard-layout .metric > .metric-icon {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--brand-navy);
+}
+
+:root[data-theme="dark"] .dashboard-layout .metric > .metric-icon {
+  color: var(--text);
+}
+
+.dashboard-layout .metric > span:not(.metric-icon) {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 820;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.dashboard-layout .metric > strong,
+.dashboard-attendance-summary strong,
+.dashboard-focus-list strong,
+.headcount-chart__value {
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="dark"] .dashboard-attendance-summary strong,
+:root[data-theme="dark"] .dashboard-focus-list strong {
+  color: var(--text);
+}
+
+.dashboard-layout .metric > strong {
+  margin-top: 5px;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  letter-spacing: -0.035em;
+}
+
+.dashboard-layout .metric > p {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.dashboard-row--priority > .panel {
+  background-color: var(--surface);
+  background-image: linear-gradient(135deg, var(--surface), color-mix(in srgb, var(--surface-subtle) 70%, var(--surface)));
+}
+
+.dashboard-focus-list--inline {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-attendance-summary {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
+.dashboard-widget .table-wrap {
+  box-shadow: none;
+}
+
+@media (max-width: 1500px) and (min-width: 1201px) {
+  .dashboard-layout > .hero-panel {
+    grid-column: span 8;
+  }
+
+  .dashboard-layout > .metric-grid {
+    grid-column: span 4;
+  }
+}
+
+@media (max-width: 1280px) {
+  .app .topbar-inner {
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px var(--page-gutter);
+  }
+
+  .app .topbar-brand-mark,
+  .sidebar-collapsed .topbar-brand-mark {
+    width: 60px;
+    height: 48px;
+    padding: 3px 5px;
+    display: inline-flex;
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+  }
+
+  .app .content {
+    margin-inline: auto;
+  }
+}
+
+@media (max-width: 1200px) {
+  .dashboard-layout > .hero-panel,
+  .dashboard-layout > .metric-grid {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-layout > .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .app .panel,
+  .app .report-card {
+    padding: 16px;
+  }
+
+  .dashboard-layout > .hero-panel {
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .dashboard-layout > .metric-grid,
+  .dashboard-focus-list--inline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 460px) {
+  .app .topbar-inner {
+    padding-inline: 12px;
+  }
+
+  .dashboard-layout > .metric-grid,
+  .dashboard-focus-list--inline {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-layout .hero-panel h2 {
+    font-size: clamp(1.65rem, 9vw, 2.1rem);
+  }
+}

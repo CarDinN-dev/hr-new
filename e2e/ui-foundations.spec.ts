@@ -91,6 +91,9 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
         await expect(page.locator(".content")).toBeVisible();
         await expect(page.getByRole("search")).toHaveCount(1);
+        if (theme === "dark" && name === "Dashboard") {
+          await expect(page.locator(".dashboard-attendance-summary strong").first()).toBeVisible();
+        }
         const colors = await page.evaluate(() => {
           const root = getComputedStyle(document.documentElement);
           const firstSurface = document.querySelector<HTMLElement>(".content :is(.panel, .metric, .report-card, .employee-card, .payroll-tile):not(.hero-panel)");
@@ -100,6 +103,9 @@ for (const theme of ["light", "dark"] as const) {
             workspace: getComputedStyle(document.querySelector<HTMLElement>(".workspace")!).backgroundColor,
             search: getComputedStyle(document.querySelector<HTMLElement>('[role="search"]')!).backgroundColor,
             surface: firstSurface ? getComputedStyle(firstSurface).backgroundColor : null,
+            dashboardValue: document.querySelector<HTMLElement>(".dashboard-attendance-summary strong")
+              ? getComputedStyle(document.querySelector<HTMLElement>(".dashboard-attendance-summary strong")!).color
+              : null,
           };
         });
         expect(colors.canvas).toBe(expected.canvas);
@@ -107,6 +113,7 @@ for (const theme of ["light", "dark"] as const) {
         if (theme === "light") expect(colors.workspace).toBe(expected.body);
         expect(colors.search).toBe(expected.surface);
         if (colors.surface) expect(colors.surface).toBe(expected.surface);
+        if (theme === "dark" && name === "Dashboard") expect(colors.dashboardValue).toBe("rgb(238, 244, 252)");
         await expect(page.locator(".mobile-menu")).toBeHidden();
         await expect(page.locator(".sidebar-close")).toBeHidden();
       });
@@ -115,6 +122,7 @@ for (const theme of ["light", "dark"] as const) {
 }
 
 for (const viewport of [
+  { width: 1920, height: 1080 },
   { width: 1440, height: 900 },
   { width: 1366, height: 768 },
   { width: 1280, height: 720 },
@@ -260,7 +268,7 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   expect(await logo.evaluate(image => ({ source: (image as HTMLImageElement).getAttribute("src"), width: (image as HTMLImageElement).naturalWidth, transform: getComputedStyle(image).transform }))).toEqual({ source: "/logos/medtech-logo-page-2.svg", width: 840, transform: "none" });
   const sidebarLogo = await page.locator(".logo-crop.wordmark").boundingBox();
   expect(sidebarLogo).toMatchObject({ width: 229, height: 72 });
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await expect(logo).toHaveAttribute("alt", "MedTech Corporation Trading W.L.L.");
   await expect(page.locator(".mobile-menu")).toBeHidden();
   await expect(page.locator(".sidebar-close")).toBeHidden();
@@ -289,7 +297,7 @@ test("clinical tokens, dashboard bento, themes and reduced motion stay responsiv
   const mobileHeaderLogo = await page.locator(".topbar-brand-mark").boundingBox();
   expect(mobileHeaderLogo).toMatchObject({ width: 60, height: 48 });
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
   const darkDashboardColors = await page.evaluate(() => {
     const snapshot = document.querySelector<HTMLElement>(".dashboard-snapshot")!;
     return { heading: getComputedStyle(document.querySelector<HTMLElement>(".hero-panel h2")!).color, snapshot: getComputedStyle(snapshot).color, surface: getComputedStyle(snapshot).backgroundColor };
@@ -338,13 +346,17 @@ const roleDashboardEmployee = {
 };
 
 const roleDashboardCases = [
-  { name: "Employee", persona: "employee", roles: ["EMPLOYEE"], permissions: ["session.self.read", "employee.self.read", "leave.self.read", "leave.self.create", "document.self.read", "announcement.read", "service_request.self.read", "service_request.self.create"], attendance: false },
-  { name: "Line Manager", persona: "line-manager", roles: ["LINE_MANAGER"], permissions: ["session.self.read", "employee.self.read", "employee.team.read", "leave.self.read", "leave.team.read", "leave.team.approve_line_manager", "document.self.read"], attendance: false },
-  { name: "Manager", persona: "manager", roles: ["MANAGER"], permissions: ["session.self.read", "employee.self.read", "employee.management.read", "leave.self.read", "leave.management.read", "leave.management.approve_manager", "document.self.read"], attendance: false },
-  { name: "HR", persona: "hr", roles: ["HR"], permissions: ["session.self.read", "employee.self.read", "employee.hr.read", "employee.hr.create", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.approve", "attendance.hr.read", "payroll.read", "recruitment.read", "document.hr.read"], attendance: true },
-  { name: "CPO", persona: "cpo", roles: ["CPO"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_cpo", "attendance.read_all", "recruitment.read", "document.self.read"], attendance: true },
-  { name: "COO", persona: "coo", roles: ["COO"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_coo", "attendance.read_all", "document.self.read"], attendance: true },
+  { name: "Employee", persona: "employee", heading: "My leave balance", roles: ["EMPLOYEE"], permissions: ["session.self.read", "employee.self.read", "leave.self.read", "leave.self.create", "document.self.read", "announcement.read", "service_request.self.read", "service_request.self.create"], attendance: false, payroll: false },
+  { name: "Line Manager", persona: "line-manager", heading: "Team snapshot", roles: ["LINE_MANAGER"], permissions: ["session.self.read", "employee.self.read", "employee.team.read", "leave.self.read", "leave.team.read", "leave.team.approve_line_manager", "document.self.read"], attendance: false, payroll: false },
+  { name: "Manager", persona: "manager", heading: "Recent scoped leave activity", roles: ["MANAGER"], permissions: ["session.self.read", "employee.self.read", "employee.management.read", "leave.self.read", "leave.management.read", "leave.management.approve_manager", "document.self.read"], attendance: false, payroll: false },
+  { name: "HR", persona: "hr", heading: "Operational focus", roles: ["HR"], permissions: ["session.self.read", "employee.self.read", "employee.hr.read", "employee.hr.create", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.approve", "attendance.hr.read", "payroll.read", "recruitment.read", "document.hr.read"], attendance: true, payroll: true },
+  { name: "CPO", persona: "cpo", heading: "Recruitment outlook", roles: ["CPO"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_cpo", "attendance.read_all", "recruitment.read", "document.self.read"], attendance: true, payroll: false },
+  { name: "COO", persona: "coo", heading: "Organization leave outlook", roles: ["COO"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.executive.approve_coo", "attendance.read_all", "document.self.read"], attendance: true, payroll: false },
+  { name: "Admin", persona: "hr", heading: "Operational focus", roles: ["ADMIN"], permissions: ["session.self.read", "employee.self.read", "employee.hr.read", "leave.self.read", "leave.hr.read", "leave.hr.approve", "attendance.hr.read", "payroll.read"], attendance: true, payroll: false },
+  { name: "Super Admin", persona: "hr", heading: "Operational focus", roles: ["SUPER_ADMIN"], permissions: ["session.self.read", "employee.self.read", "employee.read_all", "leave.self.read", "leave.read_all", "leave.hr.approve", "attendance.read_all", "payroll.read"], attendance: true, payroll: true },
 ] as const;
+
+const personaOnlyHeadings = ["My leave balance", "Team snapshot", "Recent scoped leave activity", "Operational focus", "Recruitment outlook", "Organization leave outlook"] as const;
 
 for (const roleCase of roleDashboardCases) {
   test(`${roleCase.name} receives only its role-safe dashboard requests`, async ({ page }) => {
@@ -357,12 +369,35 @@ for (const roleCase of roleDashboardCases) {
     await page.goto(navPaths.Dashboard);
 
     await expect(page.locator(".dashboard-layout")).toHaveAttribute("data-dashboard-persona", roleCase.persona);
+    await expect(page.getByRole("heading", { name: roleCase.heading })).toBeVisible();
+    for (const heading of personaOnlyHeadings.filter(heading => heading !== roleCase.heading)) {
+      await expect(page.getByRole("heading", { name: heading })).toHaveCount(0);
+    }
     await page.waitForLoadState("networkidle");
     expect(requests.some(path => path.startsWith("/api/v1/attendance/reports/summary"))).toBe(roleCase.attendance);
-    expect(requests.some(path => path.startsWith("/api/v1/payroll/runs"))).toBe(roleCase.persona === "hr");
-    if (!roleCase.attendance) expect(requests.some(path => path.startsWith("/api/v1/approvals/inbox"))).toBe(roleCase.persona !== "employee");
+    expect(requests.some(path => path.startsWith("/api/v1/payroll/runs"))).toBe(roleCase.payroll);
+    expect(requests.some(path => path.startsWith("/api/v1/approvals/inbox"))).toBe(roleCase.persona !== "employee");
   });
 }
+
+test("employee dashboard search never requests scoped employee or executive data", async ({ page }) => {
+  const requests: string[] = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/v1/")) requests.push(`${url.pathname}${url.search}`);
+  });
+  await installUiApi(page, [roleDashboardEmployee], [], "light", {
+    roles: ["EMPLOYEE"],
+    permissions: ["session.self.read", "employee.self.read", "leave.self.read", "document.self.read", "announcement.read", "service_request.self.read"],
+  });
+  await page.goto(navPaths.Dashboard);
+  await page.getByRole("search").getByRole("searchbox").fill("Role");
+  await page.waitForTimeout(350);
+  expect(requests.some(path => path.startsWith("/api/v1/employees?"))).toBe(false);
+  expect(requests.some(path => path.startsWith("/api/v1/attendance/reports/summary"))).toBe(false);
+  expect(requests.some(path => path.startsWith("/api/v1/payroll/runs"))).toBe(false);
+  expect(requests.some(path => path.startsWith("/api/v1/approvals/inbox"))).toBe(false);
+});
 
 test("multi-role dashboard precedence chooses the highest permitted persona", async ({ page }) => {
   await installUiApi(page, [roleDashboardEmployee], [], "light", {
@@ -473,6 +508,60 @@ test("navigation drawer cannot block header controls across the 1280px breakpoin
   await expect(page.locator(".sidebar-close")).toBeHidden();
 });
 
+test("desktop page frames stay centered through the animated sidebar collapse", async ({ page }) => {
+  await installUiApi(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+
+  for (const [path, maximum] of [[navPaths.Dashboard, 1600], [navPaths.Reports, 1440], [navPaths.Settings, 1280]] as const) {
+    await page.goto(path);
+    await expect(page.locator(".content")).toBeVisible();
+    await expect(page.locator(".topbar-inner")).toBeVisible();
+    const geometry = await page.evaluate(() => {
+      const workspace = document.querySelector<HTMLElement>(".workspace")!.getBoundingClientRect();
+      const content = document.querySelector<HTMLElement>(".content")!.getBoundingClientRect();
+      const header = document.querySelector<HTMLElement>(".topbar-inner")!.getBoundingClientRect();
+      return {
+        contentWidth: content.width,
+        contentOffset: Math.abs((content.left + content.width / 2) - (workspace.left + workspace.width / 2)),
+        headerOffset: Math.abs((header.left + header.width / 2) - (workspace.left + workspace.width / 2)),
+      };
+    });
+    expect(geometry.contentWidth).toBeLessThanOrEqual(maximum);
+    expect(geometry.contentWidth).toBeGreaterThan(maximum - 1);
+    expect(geometry.contentOffset).toBeLessThanOrEqual(1);
+    expect(geometry.headerOffset).toBeLessThanOrEqual(1);
+  }
+
+  await page.goto(navPaths.Dashboard);
+  await expect(page.locator(".content")).toBeVisible();
+  const sidebar = page.locator("#main-navigation");
+  expect(await sidebar.evaluate(element => getComputedStyle(element).transitionDuration)).toContain("0.18s");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar).toHaveAttribute("aria-hidden", "true");
+  await expect(sidebar).toHaveAttribute("inert", "");
+  await expect(sidebar).toBeHidden();
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+
+  const collapsedGeometry = await page.evaluate(() => {
+    const workspace = document.querySelector<HTMLElement>(".workspace")!.getBoundingClientRect();
+    const content = document.querySelector<HTMLElement>(".content")!.getBoundingClientRect();
+    const header = document.querySelector<HTMLElement>(".topbar-inner")!.getBoundingClientRect();
+    return {
+      contentWidth: content.width,
+      contentOffset: Math.abs((content.left + content.width / 2) - (workspace.left + workspace.width / 2)),
+      headerOffset: Math.abs((header.left + header.width / 2) - (workspace.left + workspace.width / 2)),
+    };
+  });
+  expect(collapsedGeometry.contentWidth).toBe(1600);
+  expect(collapsedGeometry.contentOffset).toBeLessThanOrEqual(1);
+  expect(collapsedGeometry.headerOffset).toBeLessThanOrEqual(1);
+
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
+  await expect(sidebar).not.toHaveAttribute("inert", "");
+  await expect(sidebar).toBeVisible();
+});
+
 test("compact header controls keep their geometry through dark-mode changes", async ({ page }) => {
   await installUiApi(page, [], ["notification.self.read", "notification.self.manage"]);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -509,11 +598,11 @@ test("compact header controls keep their geometry through dark-mode changes", as
   await page.waitForTimeout(250);
   expect(await headerMetrics()).toEqual(expected);
 
-  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await expect(page.locator(".dashboard-layout")).toBeVisible();
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
 
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -527,7 +616,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
     const iconBox = button.querySelector("svg")!.getBoundingClientRect();
     return { button: [buttonBox.width, buttonBox.height], icon: [iconBox.width, iconBox.height], padding: getComputedStyle(button).padding };
   })).toEqual({ button: [44, 44], icon: [20, 20], padding: "0px" });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
 
   await menu.click();
