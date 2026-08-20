@@ -22,7 +22,9 @@ import {
   HandCoins,
   ImagePlus,
   LayoutDashboard,
+  LockKeyhole,
   LogOut,
+  Mail,
   Menu,
   Moon,
   PanelLeftClose,
@@ -245,18 +247,20 @@ function accountInitials(value: string) {
   return value.split("@")[0].split(/[.\s_-]+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join("") || "HR";
 }
 
-function LoginPage({ onLogin, notify }: { onLogin: (session: BackendSession) => void; notify: (message: string) => void }) {
+function LoginPage({ onLogin }: { onLogin: (session: BackendSession) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    setError("");
     setBusy(true);
     try {
       onLogin(await loginBackend(email, password));
     } catch (error) {
-      notify(errorMessage(error));
+      setError(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -264,44 +268,27 @@ function LoginPage({ onLogin, notify }: { onLogin: (session: BackendSession) => 
 
   return (
     <main className="login-shell">
+      <div className="login-stage" aria-hidden="true"><div className="login-stage-art" /></div>
       <section className="login-card" aria-labelledby="login-title">
-        <header className="login-header">
-          <div className="login-product">
-            <img src="/logos/brand-mark.svg?v=4" alt="" aria-hidden="true" />
-            <span>HR sign in</span>
-          </div>
-        </header>
         <div className="login-content">
-          <div className="login-mobile-logo">
-            <img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." />
-          </div>
+          <div className="login-brand"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></div>
           <div className="login-intro">
             <span className="login-eyebrow"><ShieldCheck size={15} /> Secure HR access</span>
             <h1 id="login-title">Welcome back</h1>
             <p>Sign in with your MedTech work account.</p>
           </div>
           <button className="microsoft-login" type="button" onClick={startMicrosoftLogin}>
-            <ShieldCheck size={17} /> Sign in with Microsoft
+            <span className="microsoft-mark" aria-hidden="true"><i /><i /><i /><i /></span><span>Sign in with Microsoft</span>
           </button>
           <div className="login-divider" aria-hidden="true"><span>or</span></div>
-          <form className="login-form" onSubmit={submit}>
-            <label htmlFor="login-email"><span>Email</span><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
-            <label htmlFor="login-password"><span>Password</span><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
-            <button className="primary" type="submit" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
+          <form className="login-form" onSubmit={submit} aria-busy={busy}>
+            <label htmlFor="login-email"><span>Email</span><span className="login-input"><Mail size={18} aria-hidden="true" /><input id="login-email" name="email" type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></span></label>
+            <label htmlFor="login-password"><span>Password</span><span className="login-input"><LockKeyhole size={18} aria-hidden="true" /><input id="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></span></label>
+            {error && <p className="login-error" role="alert"><span aria-hidden="true">!</span>{error}</p>}
+            <button className="primary" type="submit" disabled={busy} aria-busy={busy}>{busy ? "Signing in..." : "Sign in"}</button>
           </form>
         </div>
-
-        <footer className="login-footer">MedTech Corporation Trading W.L.L.</footer>
-      </section>
-      <section className="login-stage" aria-label="MedTech HR system">
-        <div className="login-stage-art" aria-hidden="true" />
-        <div className="login-stage-content">
-          <div className="login-stage-logo"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></div>
-          <div className="login-stage-copy">
-            <span>HR and payroll</span>
-            <strong>People, payroll, and attendance. One secure workspace.</strong>
-          </div>
-        </div>
+        <footer className="login-footer"><ShieldCheck size={14} aria-hidden="true" /> Protected sign-in · MedTech Corporation Trading W.L.L.</footer>
       </section>
     </main>
   );
@@ -572,7 +559,7 @@ function App() {
   if (backendSession === null) {
     return (
       <>
-        <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} notify={notify} />
+        <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} />
         {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
       </>
     );

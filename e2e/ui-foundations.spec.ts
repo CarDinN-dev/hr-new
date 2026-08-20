@@ -533,7 +533,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
   })).toEqual({ button: [44, 44], icon: [18, 18], padding: "0px" });
 });
 
-test("login is dark-only, keeps the original split layout and stays responsive", async ({ page }) => {
+test("login is dark-only, keeps the centered premium composition and stays responsive", async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.clear();
     localStorage.removeItem("medtech-hr-theme");
@@ -551,9 +551,7 @@ test("login is dark-only, keeps the original split layout and stays responsive",
 
       const stage = page.locator(".login-stage");
       const card = page.locator(".login-card");
-      await expect(page.locator(".login-stage-logo img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
-      await expect(page.locator(".login-mobile-logo img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
-      await expect(page.locator(".login-product img")).toHaveAttribute("src", "/logos/brand-mark.svg?v=4");
+      await expect(page.locator(".login-brand img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
       await expect(page.getByRole("button", { name: /Switch to (light|dark) mode/ })).toHaveCount(0);
       await expect(page.getByText("Role-based access. Protected activity is audited.", { exact: true })).toHaveCount(0);
       await expect(page.getByText("Access is limited to the work assigned to you.", { exact: true })).toHaveCount(0);
@@ -563,18 +561,15 @@ test("login is dark-only, keeps the original split layout and stays responsive",
       expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width);
       expect(cardBox.y).toBeGreaterThanOrEqual(0);
       expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(viewport.height + 1);
-      if (viewport.width > 720) {
-        await expect(stage).toBeVisible();
-        expect(cardBox.x).toBe(0);
-      } else {
-        await expect(stage).toBeHidden();
-      }
+      await expect(stage).toBeVisible();
+      if (viewport.width > 720) expect(Math.abs(cardBox.x + cardBox.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
       await expect(page.locator(".login-stage-art")).toHaveCSS("background-image", /login-medtech-hero\.webp/);
+      await expect(page.locator(".login-stage-art")).toHaveCSS("mask-image", /radial-gradient/);
       await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
-      await expect(page.getByLabel("Email")).toHaveCSS("height", "52px");
-      await expect(page.getByLabel("Password")).toHaveCSS("height", "52px");
+      await expect(page.getByLabel("Email").locator("xpath=..")).toHaveCSS("height", "52px");
+      await expect(page.getByLabel("Password").locator("xpath=..")).toHaveCSS("height", "52px");
       await page.getByLabel("Email").focus();
-      expect(await page.getByLabel("Email").evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
+      expect(await page.locator(".login-input").first().evaluate(element => getComputedStyle(element).boxShadow)).not.toBe("none");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     });
   }
@@ -650,7 +645,7 @@ test("local login preserves validation, busy state and backend session flow", as
   await page.getByLabel("Email").fill("ui.admin@example.invalid");
   await page.getByLabel("Password").fill("valid-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("API request failed (401)");
+  await expect(page.getByRole("alert")).toContainText("API request failed (401)");
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("button", { name: "Signing in..." })).toBeDisabled();
