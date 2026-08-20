@@ -6339,6 +6339,7 @@ summary:focus-visible,
 .dashboard-balance-list > div,
 .dashboard-focus-list > div,
 .dashboard-attendance-summary {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
 }
