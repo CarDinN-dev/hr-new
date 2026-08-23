@@ -2385,12 +2385,29 @@ summary {
   right: 1rem;
   bottom: 1rem;
   z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   background: var(--navy);
   color: #fff;
   padding: 0.8rem 1rem;
   border-radius: 8px;
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
   font-weight: 800;
+}
+
+.toast > span {
+  min-width: 0;
+}
+
+.toast > button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: currentColor;
+  box-shadow: none;
 }
 
 .scrim {
@@ -9819,4 +9836,15 @@ body {
 .app .audit-pagination > .muted {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.app .pagination-actions button {
+  width: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0;
+}
+
+.app :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent);
 }

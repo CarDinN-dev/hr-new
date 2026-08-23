@@ -149,8 +149,12 @@ test("Users and access paginates at 15 and supports 50 per page", async ({ page 
 
   const usersPanel = page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Users and access" }) });
   await expect(usersPanel.getByText("Showing 1–15 of 16 users · Page 1 of 2")).toBeVisible();
-  await expect(usersPanel.getByRole("button", { name: "Previous" })).toBeDisabled();
-  await usersPanel.getByRole("button", { name: "Next" }).click();
+  await expect(usersPanel.getByRole("button", { name: "Previous page" })).toBeDisabled();
+  await usersPanel.getByRole("button", { name: "Last page" }).click();
+  await expect(usersPanel.getByText("Showing 16–16 of 16 users · Page 2 of 2")).toBeVisible();
+  await usersPanel.getByRole("button", { name: "First page" }).click();
+  await expect(usersPanel.getByText("Showing 1–15 of 16 users · Page 1 of 2")).toBeVisible();
+  await usersPanel.getByRole("button", { name: "Next page" }).click();
   await expect(usersPanel.getByText("Showing 16–16 of 16 users · Page 2 of 2")).toBeVisible();
   await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
 

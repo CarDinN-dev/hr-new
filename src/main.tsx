@@ -126,10 +126,11 @@ import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
-import { paginationLabel, workflowKey } from "./features/workflow-utils";
+import { workflowKey } from "./features/workflow-utils";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
+import { Pagination } from "./pagination";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
 import "./styles.css";
 
@@ -311,6 +312,7 @@ function App() {
   const nav = useRouterState({ select: routerState => navItemForPath(routerState.location.pathname) });
   const [state, setState] = useState<HrState>(() => loadState());
   const [toast, setToast] = useState("");
+  const toastTimer = useRef<number | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [compactNavigation, setCompactNavigation] = useState(() => window.matchMedia(compactNavigationQuery).matches);
@@ -343,6 +345,8 @@ function App() {
   useEffect(() => {
     localStorage.removeItem(storageKey);
   }, []);
+
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   useEffect(() => {
     const expireAuthorization = () => {
@@ -465,8 +469,9 @@ function App() {
   }, [backendSession, nav]);
 
   function notify(message: string) {
+    window.clearTimeout(toastTimer.current);
     setToast(message);
-    window.setTimeout(() => setToast(""), 2400);
+    toastTimer.current = window.setTimeout(() => setToast(""), 2400);
   }
 
   function saveBackendNow(): Promise<BackendSession> {
@@ -571,7 +576,7 @@ function App() {
     return (
       <>
         <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} />
-        {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
+        {toast && <div className="toast" role="status" aria-live="polite"><span>{toast}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast("")}><X size={16} aria-hidden="true" /></button></div>}
       </>
     );
   }
@@ -722,7 +727,7 @@ function App() {
 
       {compactNavigation && sidebarOpen && <button type="button" aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
       {modal && <Dialog onClose={closeModal}>{modal}</Dialog>}
-      {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><span>{toast}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast("")}><X size={16} aria-hidden="true" /></button></div>}
     </div></PageSearchProvider></AuthorizationProvider>
   );
 }
@@ -1273,13 +1278,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
             })}
           </div>
         ) : <div className="empty">No employees match the filters.</div>}
-        {employees.length > 20 && <div className="audit-pagination">
-          <span className="muted" aria-live="polite">{paginationLabel(employees.length, page, 20, "employees")} · Page {page} of {totalPages}</span>
-          <div className="inline-controls">
-            <button disabled={page <= 1} onClick={() => setPage(current => current - 1)}>Previous</button>
-            <button disabled={page >= totalPages} onClick={() => setPage(current => current + 1)}>Next</button>
-          </div>
-        </div>}
+        {employees.length > 20 && <Pagination total={employees.length} page={page} limit={20} totalPages={totalPages} label="employees" onPage={setPage} />}
       </div>
     </section>
   );
