@@ -8000,6 +8000,257 @@ summary:focus-visible,
   }
 }
 
+/* P2 remediation: shared density, contrast, structured Settings, and deep links. */
+.app .attendance-status-select {
+  height: auto;
+  min-height: var(--control-height);
+  padding-block: 8px;
+  font-size: 0.8125rem;
+}
+
+.app .badge.neutral {
+  color: var(--text);
+}
+
+.app .badge,
+.app .attendance-row > span,
+.app .attendance-row > strong,
+.app .attendance-dept-head span,
+.app .attendance-foot {
+  font-size: 0.8125rem;
+}
+
+.app .avatar {
+  color: var(--bad);
+}
+
+.app .eos-mode-grid span {
+  color: var(--bad);
+  font-size: 0.8125rem;
+  letter-spacing: 0.045em;
+}
+
+.notification-trigger > span {
+  min-width: 1.25rem;
+  height: 1.25rem;
+  background: var(--action-red);
+  font-size: 0.75rem;
+}
+
+.notification-item {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-subtle);
+}
+
+.notification-item.unread {
+  border-left: 3px solid var(--action-red);
+}
+
+.notification-copy {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.notification-copy span,
+.notification-copy small {
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+.notification-copy span {
+  font-size: 0.8125rem;
+}
+
+.notification-copy small {
+  font-size: 0.75rem;
+}
+
+.notification-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.notification-actions button {
+  min-height: 34px;
+  padding-block: 5px;
+}
+
+.settings-repeatable {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-repeatable-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-subtle);
+}
+
+.settings-repeatable-row.leave-type-row {
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.35fr) auto;
+}
+
+.settings-repeatable-row .field-error {
+  display: block;
+  margin-top: 4px;
+}
+
+.settings-repeatable-row > .field-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.settings-remove-row {
+  align-self: end;
+}
+
+.settings-preview {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.deep-link-target {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+  background-color: var(--accent-soft) !important;
+}
+
+.company-role-canvas .role-flowchart-line {
+  stroke: var(--pro-text-soft);
+  animation: company-role-connector-reveal var(--motion-standard) both;
+}
+
+.company-role-canvas marker path {
+  fill: var(--pro-text-soft);
+}
+
+.company-role-executive-children,
+.company-role-department-branch,
+.company-role-card-shell {
+  animation: role-branch-reveal var(--motion-standard) both;
+}
+
+.company-role-summary span,
+.company-role-department-jump select,
+.company-role-match-count,
+.company-role-legend,
+.company-role-breadcrumb,
+.company-role-search-navigation,
+.company-role-pan-hint,
+.company-role-zoom-value,
+.company-role-department-focus {
+  font-size: 0.75rem;
+}
+
+.company-role-leadership-heading > span,
+.company-role-executive small,
+.company-role-executive span,
+.company-role-lane-label,
+.company-role-unassigned small,
+.company-role-department small,
+.company-role-card small,
+.company-role-reports-to,
+.company-role-reports-to b,
+.company-role-member small {
+  color: var(--pro-text-soft);
+  font-size: 0.75rem;
+}
+
+.company-role-executive strong,
+.company-role-department strong,
+.company-role-card strong,
+.company-role-member strong {
+  font-size: 0.8125rem;
+}
+
+.company-role-role-badge,
+.company-role-report-count,
+.company-role-member em,
+.company-role-card em {
+  font-size: 0.71875rem;
+}
+
+.company-role-member em,
+.company-role-card em {
+  color: var(--pro-warning);
+}
+
+.company-role-hierarchy:has(:focus-visible) .role-flowchart-line,
+.role-flowchart-root-level:has(.company-role-leadership:focus-visible) + .company-role-executive-children,
+.role-flowchart-level:has(.company-role-leadership:focus-visible) + .company-role-departments,
+.company-role-department-shell:has(.company-role-department:focus-visible) + .company-role-cards,
+.company-role-card-shell:has(> .company-role-card:focus-visible) > .company-role-branch-children .company-role-card-shell,
+.company-role-unassigned:focus-visible + .company-role-departments {
+  animation: none !important;
+}
+
+@media (max-width: 720px), (pointer: coarse) {
+  :root {
+    --control-height: 44px;
+  }
+
+  .app .pagination-actions,
+  .app .notification-actions,
+  .app .company-role-actions {
+    gap: 8px;
+  }
+
+  .app .pagination-actions button,
+  .app .employee-picker .employee-picker__toggle,
+  .app .employee-picker .employee-picker__clear,
+  .app .company-role-search button,
+  .app .company-role-search-navigation button,
+  .app .company-role-canvas-controls button,
+  .app .company-role-department-focus {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .app .employee-picker input {
+    padding-right: 3.25rem;
+  }
+
+  .app .employee-picker:has(.employee-picker__clear) input {
+    padding-right: 6rem;
+  }
+
+  .app .employee-picker__toggle {
+    right: 0;
+  }
+
+  .app .employee-picker__clear {
+    right: 44px;
+  }
+
+  .app .attendance-row > [data-label]::before {
+    font-size: 0.75rem;
+  }
+
+  .settings-repeatable-row,
+  .settings-repeatable-row.leave-type-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-remove-row {
+    width: 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

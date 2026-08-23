@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { NavItem } from "./data";
 
@@ -38,20 +38,26 @@ type PageSearchValue = {
 
 const PageSearchContext = createContext<PageSearchValue | null>(null);
 
-export function PageSearchProvider({ page, children }: { page: NavItem; children: React.ReactNode }) {
-  const [input, setInput] = useState("");
-  const [search, setSearch] = useState("");
+export function PageSearchProvider({ page, query = "", onQueryChange, children }: { page: NavItem; query?: string; onQueryChange?: (value: string) => void; children: React.ReactNode }) {
+  const [input, setInput] = useState(query);
+  const [search, setSearch] = useState(query);
   const [statuses, setStatuses] = useState<Record<string, { count?: number; loading?: boolean; error?: string }>>({});
+  const onQueryChangeRef = useRef(onQueryChange);
+  onQueryChangeRef.current = onQueryChange;
 
   useEffect(() => {
-    setInput("");
-    setSearch("");
+    setInput(query);
+    setSearch(query);
     setStatuses({});
-  }, [page]);
+  }, [page, query]);
 
   useEffect(() => {
     const trimmed = input.trim();
-    const timer = window.setTimeout(() => setSearch(trimmed.length >= 2 ? trimmed : ""), 250);
+    const timer = window.setTimeout(() => {
+      const next = trimmed.length >= 2 ? trimmed : "";
+      setSearch(next);
+      onQueryChangeRef.current?.(next);
+    }, 250);
     return () => window.clearTimeout(timer);
   }, [input]);
 
@@ -74,7 +80,7 @@ export function PageSearchProvider({ page, children }: { page: NavItem; children
     loading: reported.some(status => status.loading),
     error: reported.find(status => status.error)?.error,
     setInput,
-    clear: () => { setInput(""); setSearch(""); },
+    clear: () => { setInput(""); setSearch(""); onQueryChangeRef.current?.(""); },
     report,
   }), [input, search, report, reported]);
 

@@ -134,6 +134,7 @@ import { Dialog, useDialogCloseGuard } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
 import { Pagination } from "./pagination";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
+import { commonSearch, operationalPageSize, paginate, settingsEditorErrors, shellSearch, statusActionLabel, type AttendanceSearch, type CommonSearch, type DepartmentDraft } from "./ui-state";
 import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
@@ -315,7 +316,9 @@ function LoginPage({ onLogin }: { onLogin: (session: BackendSession) => void }) 
 function App() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const nav = useRouterState({ select: routerState => navItemForPath(routerState.location.pathname) });
+  const routeLocation = useRouterState({ select: routerState => routerState.location });
+  const nav = navItemForPath(routeLocation.pathname);
+  const pageQuery = commonSearch(routeLocation.search as Record<string, unknown>).q ?? "";
   const [state, setState] = useState<HrState>(() => loadState());
   const [toast, setToast] = useState<{ message: string; action?: NotifyAction } | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -572,6 +575,20 @@ function App() {
     void navigate({ to: navPaths[next] });
   }
 
+  function setPageQuery(value: string) {
+    if (value === pageQuery) return;
+    void navigate({
+      to: routeLocation.pathname as never,
+      search: ((current: CommonSearch & AttendanceSearch) => ({
+        ...current,
+        q: value || undefined,
+        ...(nav === "Team" ? { page: 1 } : {}),
+        ...(nav === "Attendance" ? { page: 1, summaryPage: 1 } : {}),
+      })) as never,
+      replace: true,
+    });
+  }
+
   if (backendSession === undefined) {
     return (
       <main className="workspace-gate">
@@ -624,7 +641,7 @@ function App() {
       : "standard";
 
   return (
-    <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+    <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav} query={pageQuery} onQueryChange={setPageQuery}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside
         id="main-navigation"
@@ -842,12 +859,20 @@ function MyHrPage({ state, session, notify, refreshWorkspace, onOpenLeave }: { s
 
 function TeamPage({ state, session, notify }: { state: HrState; session: BackendSession; notify: (message: string) => void }) {
   const { active: searchActive } = usePageSearch();
+  const search = teamRoute.useSearch();
+  const navigate = teamRoute.useNavigate();
   const matches = usePageSearchList<{ id: string }>("team-employees", "/employees");
   const employees = rankedPageSearchItems(state.employees, matches.data, searchActive, employee => employee.id, match => match.id);
+  const requestedPage = search.page ?? 1;
+  const page = paginate(employees, requestedPage);
+  useEffect(() => {
+    if (page.page !== requestedPage) void navigate({ search: current => ({ ...current, page: page.page }), replace: true });
+  }, [navigate, page.page, requestedPage]);
   return <div className="dashboard-grid">
     <Metric label="PEOPLE IN SCOPE" value={state.employees.length} hint="Direct reports and managed departments" />
     <section className="panel span-2"><div className="panel-head"><div><h3>People in your scope</h3><span>Compensation, bank and confidential HR fields are not included.</span></div></div>
-      <DataTable label="People in scope" empty="No team members match this search." columns={["Employee", "Department", "Status", "Joined"]} rows={employees.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
+      <DataTable label="People in scope" empty="No team members match this search." columns={["Employee", "Department", "Status", "Joined"]} rows={page.items.map(employee => [employeeName(employee), employee.fields.Department || "-", employee.status, formatDate(employee.fields["Joining Date"])])} />
+      {employees.length > operationalPageSize && <Pagination total={employees.length} page={page.page} limit={operationalPageSize} totalPages={page.totalPages} label="team members" onPage={next => void navigate({ search: current => ({ ...current, page: next }) })} />}
     </section>
     <ApprovalInboxPanel session={session} notify={notify} />
   </div>;
@@ -1659,11 +1684,13 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
 function Attendance({ state, setState, savePdf, notify, canManage, canExport }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: Notify; canManage: boolean; canExport: boolean }) {
   const authorization = useAuthorization();
   const now = new Date();
-  const [date, setDate] = useState(todayISO);
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
-  const [department, setDepartment] = useState("");
-  const [status, setStatus] = useState("");
+  const routeSearch = attendanceRoute.useSearch();
+  const navigate = attendanceRoute.useNavigate();
+  const date = routeSearch.date ?? todayISO();
+  const month = routeSearch.month ?? now.getMonth() + 1;
+  const year = routeSearch.year ?? now.getFullYear();
+  const department = routeSearch.department ?? "";
+  const status = routeSearch.status ?? "";
   const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const { active: searchActive } = usePageSearch();
   const canSearchEmployees = authorization.hasAnyPermission("employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
@@ -1691,6 +1718,10 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
     return (!department || (employee.fields.Department || "Unassigned") === department) &&
       (!status || label === status);
   }), searchReady ? rankedEmployeeIds : undefined, searchActive, employee => employee.id, id => id);
+  const requestedPage = routeSearch.page ?? 1;
+  const requestedSummaryPage = routeSearch.summaryPage ?? 1;
+  const dailyPage = paginate(visibleEmployees, requestedPage);
+  const summaryPage = paginate(stats, requestedSummaryPage);
   const payrollImpact = active.reduce((sum, employee) => {
     const code = day[employee.id];
     return sum + (employeeSalary(employee).total / 30) * (code === "A" ? 1 : code === "H" ? 0.5 : 0);
@@ -1700,11 +1731,16 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
       const departmentEmployees = active.filter(employee => (employee.fields.Department || "Unassigned") === name);
       return {
         name,
-        employees: visibleEmployees.filter(employee => (employee.fields.Department || "Unassigned") === name),
+        employees: dailyPage.items.filter(employee => (employee.fields.Department || "Unassigned") === name),
         summary: attendanceDaySummary(departmentEmployees, day)
       };
     })
     .filter(group => group.employees.length);
+
+  useEffect(() => {
+    if (dailyPage.page === requestedPage && summaryPage.page === requestedSummaryPage) return;
+    void navigate({ search: current => ({ ...current, page: dailyPage.page, summaryPage: summaryPage.page }), replace: true });
+  }, [dailyPage.page, navigate, requestedPage, requestedSummaryPage, summaryPage.page]);
 
   async function downloadAttendanceTemplate() {
     const { attendanceTemplateHtml } = await importWithReleaseRetry("attendance-sheet", () => import("./attendanceSheet"));
@@ -1724,7 +1760,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
         return;
       }
       setState(result.state);
-      if (result.latestDate) setDate(result.latestDate);
+      if (result.latestDate) void navigate({ search: current => ({ ...current, date: result.latestDate, page: 1 }), replace: true });
       notify(`Attendance import complete: ${result.imported} row(s) across ${result.dates} date(s)${result.skipped ? `; ${result.skipped} skipped` : ""}.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Attendance import failed. Use the downloaded template or a CSV exported from Excel.");
@@ -1795,9 +1831,9 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
         </div>
 
         <div className="attendance-toolbar department-style">
-          <input id="attendance-date" name="attendance-date" aria-label="Attendance date" type="date" value={date} onChange={event => setDate(event.target.value)} />
-          <select value={department} onChange={event => setDepartment(event.target.value)} aria-label="Department filter"><option value="">All departments</option>{departments.map(item => <option key={item}>{item}</option>)}</select>
-          <select value={status} onChange={event => setStatus(event.target.value)} aria-label="Status filter"><option value="">All statuses</option>{["Present", "Half-day", "Leave", "Absent", "Unmarked"].map(item => <option key={item}>{item}</option>)}</select>
+          <input id="attendance-date" name="attendance-date" aria-label="Attendance date" type="date" value={date} onChange={event => void navigate({ search: current => ({ ...current, date: event.target.value || undefined, page: 1 }), replace: true })} />
+          <select value={department} onChange={event => void navigate({ search: current => ({ ...current, department: event.target.value || undefined, page: 1 }), replace: true })} aria-label="Department filter"><option value="">All departments</option>{departments.map(item => <option key={item}>{item}</option>)}</select>
+          <select value={status} onChange={event => void navigate({ search: current => ({ ...current, status: event.target.value || undefined, page: 1 }), replace: true })} aria-label="Status filter"><option value="">All statuses</option>{["Present", "Half-day", "Leave", "Absent", "Unmarked"].map(item => <option key={item}>{item}</option>)}</select>
         </div>
 
         <div className="attendance-board">
@@ -1845,6 +1881,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
           })}
           {!grouped.length && <div className="empty">No attendance records match the filters.</div>}
         </div>
+        {visibleEmployees.length > operationalPageSize && <Pagination total={visibleEmployees.length} page={dailyPage.page} limit={operationalPageSize} totalPages={dailyPage.totalPages} label="attendance employees" onPage={next => void navigate({ search: current => ({ ...current, page: next }) })} />}
         <p className="attendance-foot">Marked: <strong>{daySummary.marked}</strong>/{daySummary.total} · Present {daySummary.P} · Half-day {daySummary.H} · Leave {daySummary.L} · Absent {daySummary.A} · Unmarked {daySummary.unmarked}{canManage ? ` · Day LOP estimate ${formatMoney(payrollImpact, state.settings.company.currency)}` : ""}</p>
       </div>
 
@@ -1852,12 +1889,13 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
         <div className="panel-head">
           <div><h3>Monthly Summary</h3><span>Counts for {months[month - 1]} {year}</span></div>
           <div className="inline-controls">
-          <select id="attendance-month" name="attendance-month" aria-label="Attendance report month" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
-          <input id="attendance-year" name="attendance-year" aria-label="Attendance report year" type="number" value={year} onChange={event => setYear(Number(event.target.value))} />
+          <select id="attendance-month" name="attendance-month" aria-label="Attendance report month" value={month} onChange={event => void navigate({ search: current => ({ ...current, month: Number(event.target.value), summaryPage: 1 }), replace: true })}>{months.map((item, index) => <option value={index + 1} key={item}>{item}</option>)}</select>
+          <input id="attendance-year" name="attendance-year" aria-label="Attendance report year" type="number" min="1900" max="2200" value={year} onChange={event => void navigate({ search: current => ({ ...current, year: Number(event.target.value), summaryPage: 1 }), replace: true })} />
             {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveReportPdf("attendance_report", state, year, month), "attendance_report"))}>PDF</button>}
           </div>
         </div>
-        <DataTable label="Monthly attendance report" columns={["Code", "Employee", "Present", "Half-day", "Leave", "Absent", "%"]} rows={stats.map(row => [row.employee.fields["Employee Code"], employeeName(row.employee), row.P, row.H, row.L, row.A, `${row.pct}%`])} />
+        <DataTable label="Monthly attendance report" columns={["Code", "Employee", "Present", "Half-day", "Leave", "Absent", "%"]} rows={summaryPage.items.map(row => [row.employee.fields["Employee Code"], employeeName(row.employee), row.P, row.H, row.L, row.A, `${row.pct}%`])} />
+        {stats.length > operationalPageSize && <Pagination total={stats.length} page={summaryPage.page} limit={operationalPageSize} totalPages={summaryPage.totalPages} label="monthly attendance rows" onPage={next => void navigate({ search: current => ({ ...current, summaryPage: next }) })} />}
       </div>
     </section>{confirmation && <ActionConfirmation action={confirmation} close={() => setConfirmation(null)} />}</>
   );
@@ -1906,7 +1944,8 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
   }
 
   function requestStatusChange(trip: BusinessTrip, status: BusinessTrip["status"]) {
-    setConfirmation({ title: `${status} this trip?`, description: `This changes the trip to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: status, danger: status === "Rejected", onConfirm: () => {
+    const action = statusActionLabel(status, trip.status);
+    setConfirmation({ title: `${action} this trip?`, description: `This changes the trip to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: action, danger: status === "Rejected", onConfirm: () => {
       updateTrip(trip.id, { status });
       notify(`Trip ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateTrip(trip.id, { status: trip.status }) });
     } });
@@ -2003,7 +2042,8 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
   }
 
   function requestStatusChange(expense: EmployeeExpense, status: EmployeeExpense["status"]) {
-    setConfirmation({ title: `${status} this expense?`, description: `This changes the expense to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: status === "Paid" ? "Mark paid" : status, danger: status === "Rejected", onConfirm: () => {
+    const action = statusActionLabel(status, expense.status);
+    setConfirmation({ title: action === "Mark paid" ? "Mark this expense paid?" : `${action} this expense?`, description: `This changes the expense to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: action, danger: status === "Rejected", onConfirm: () => {
       updateExpense(expense.id, { status });
       notify(`Expense ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateExpense(expense.id, { status: expense.status }) });
     } });
@@ -2096,7 +2136,8 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
 
   function requestStatusChange(loan: EmployeeLoan, status: EmployeeLoan["status"]) {
     const description = status === "Cancelled" ? "Future payroll deductions will stop. You can undo this immediately after confirmation." : `This changes the loan to ${status.toLowerCase()}. You can undo it immediately after confirmation.`;
-    setConfirmation({ title: `${status} this loan?`, description, confirmLabel: status === "Cancelled" ? "Cancel loan" : status, danger: status === "Cancelled", onConfirm: () => {
+    const action = statusActionLabel(status, loan.status);
+    setConfirmation({ title: `${action} this loan?`, description, confirmLabel: action, danger: status === "Cancelled", onConfirm: () => {
       updateStatus(loan, status);
       notify(`Loan ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateStatus(loan, loan.status) });
     } });
@@ -2692,7 +2733,8 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   }
 
   function requestRecordStatus(record: EosRecord, status: EosRecord["status"]) {
-    setConfirmation({ title: `${status} this settlement?`, description: `This changes the settlement to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: status === "Paid" ? "Mark paid" : status, onConfirm: () => {
+    const action = statusActionLabel(status, record.status);
+    setConfirmation({ title: action === "Mark paid" ? "Mark this settlement paid?" : `${action} this settlement?`, description: `This changes the settlement to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: action, onConfirm: () => {
       updateRecord(record.id, { status });
       notify(`Settlement ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateRecord(record.id, { status: record.status }) });
     } });
@@ -2870,8 +2912,9 @@ function SettingsPage({
   const canManageDepartments = Boolean(backendSession && hasPermission(backendSession, "department.manage"));
   const canConfigureLeave = Boolean(backendSession && hasPermission(backendSession, "leave.configure"));
   const [company, setCompany] = useState(state.settings.company);
-  const [departments, setDepartments] = useState(state.settings.departments.join("\n"));
-  const [leaveTypes, setLeaveTypes] = useState(state.settings.leaveTypes.map(item => `${item.name}:${item.days}`).join("\n"));
+  const [departments, setDepartments] = useState<DepartmentDraft[]>(() => state.settings.departments.map(name => ({ key: newId(), name })));
+  const [leaveTypes, setLeaveTypes] = useState(() => state.settings.leaveTypes.map(item => ({ ...item })));
+  const [attemptedSave, setAttemptedSave] = useState(false);
   const [workdayHours, setWorkdayHours] = useState(state.settings.workdayHours);
   const [halfDayHours, setHalfDayHours] = useState(state.settings.halfDayHours);
   const [loanCapType, setLoanCapType] = useState(state.settings.loanDeductionCap.type);
@@ -2881,21 +2924,26 @@ function SettingsPage({
   const [payrollRequireAttendance, setPayrollRequireAttendance] = useState(state.settings.payrollRequireAttendance);
   const [payrollVarianceThreshold, setPayrollVarianceThreshold] = useState(state.settings.payrollVarianceThreshold);
   const canSaveOrganizationSettings = canConfigureSystem || canManageDepartments || canConfigureLeave;
+  const editorErrors = useMemo(() => settingsEditorErrors(departments, leaveTypes), [departments, leaveTypes]);
+  const editableSettingsValid = (!canManageDepartments || !Object.keys(editorErrors.departments).length) && (!canConfigureLeave || !Object.keys(editorErrors.leaveTypes).length);
+  const leaveDaysTotal = leaveTypes.reduce((total, item) => total + (Number.isFinite(item.days) ? item.days : 0), 0);
 
   function saveSettings() {
-    const nextDepartments = departments.split("\n").map(item => item.trim()).filter(Boolean);
-    const nextLeaveTypes = leaveTypes.split("\n").map((line, index) => {
-      const [name, days] = line.split(":");
-      const normalizedName = name.trim();
-      const existing = state.settings.leaveTypes.find(item => item.name.toLowerCase() === normalizedName.toLowerCase()) ?? state.settings.leaveTypes[index];
-      return { id: existing?.id || newId(), name: normalizedName, code: existing?.code || "", days: Number(days) || 0, isPaid: existing?.isPaid ?? true, requiresAttachment: existing?.requiresAttachment ?? false };
-    }).filter(item => item.name);
+    if (!editableSettingsValid) {
+      setAttemptedSave(true);
+      window.setTimeout(() => document.querySelector<HTMLElement>(".settings-repeatable [aria-invalid='true']")?.focus(), 0);
+      notify("Fix the highlighted Settings fields before saving.");
+      return;
+    }
+    const nextDepartments = departments.map(item => item.name.trim());
+    const nextLeaveTypes = leaveTypes.map(item => ({ ...item, name: item.name.trim() }));
     setState(prev => ({ ...prev, settings: {
       ...prev.settings,
       ...(canConfigureSystem ? { company, workdayHours: Math.max(0.25, workdayHours), halfDayHours: Math.max(0.25, Math.min(halfDayHours, workdayHours)), loanDeductionCap: { type: loanCapType, value: Math.max(0, loanCapType === "Percent" ? Math.min(100, loanCapValue) : loanCapValue) }, payrollProrationBasis, payrollRequireBankDetails, payrollRequireAttendance, payrollVarianceThreshold: Math.max(0, payrollVarianceThreshold) } : {}),
       ...(canManageDepartments ? { departments: nextDepartments } : {}),
       ...(canConfigureLeave ? { leaveTypes: nextLeaveTypes } : {})
     } }));
+    setAttemptedSave(false);
     notify("Settings saved.");
   }
 
@@ -2911,12 +2959,23 @@ function SettingsPage({
         return <label htmlFor={fieldId} key={key}>{labelize(key)}<input id={fieldId} name={fieldId} value={company[key]} onChange={event => setCompany(prev => ({ ...prev, [key]: event.target.value }))} /></label>;
       })}
     </div></div>}
-    {canManageDepartments && sections.visible("departments") && <div className="panel"><div className="panel-head"><h3>Departments</h3></div><textarea id="settings-departments" name="settings-departments" aria-label="Departments" value={departments} onChange={event => setDepartments(event.target.value)} /></div>}
-    {canConfigureLeave && sections.visible("leave-types") && <div className="panel"><div className="panel-head"><h3>Leave Types</h3><span>Format: Name:days</span></div><textarea id="settings-leave-types" name="settings-leave-types" aria-label="Leave types" value={leaveTypes} onChange={event => setLeaveTypes(event.target.value)} /></div>}
+    {canManageDepartments && sections.visible("departments") && <div className="panel"><div className="panel-head"><div><h3>Departments</h3><span>{departments.length} configured</span></div><button type="button" onClick={() => setDepartments(current => [...current, { key: newId(), name: "" }])}>Add department</button></div><div className="settings-repeatable" role="list" aria-label="Departments">{departments.map((department, index) => {
+      const inputId = `settings-department-${department.key}`;
+      const errorId = `${inputId}-error`;
+      const error = editorErrors.departments[department.key];
+      return <div className="settings-repeatable-row" role="listitem" key={department.key}><label htmlFor={inputId}>Department {index + 1}<input id={inputId} maxLength={150} value={department.name} aria-invalid={Boolean(error) || undefined} aria-describedby={error ? errorId : undefined} onChange={event => setDepartments(current => current.map(item => item.key === department.key ? { ...item, name: event.target.value } : item))} /></label><button type="button" className="danger-outline settings-remove-row" aria-label={`Remove department ${department.name || index + 1}`} onClick={() => setDepartments(current => current.filter(item => item.key !== department.key))}><Trash2 size={15} aria-hidden="true" /> Remove</button>{error && <p className="field-error" id={errorId}>{error}</p>}</div>;
+    })}</div><p className="settings-preview" aria-live="polite">Preview: {departments.filter(item => item.name.trim()).length} named department{departments.filter(item => item.name.trim()).length === 1 ? "" : "s"}.</p></div>}
+    {canConfigureLeave && sections.visible("leave-types") && <div className="panel"><div className="panel-head"><div><h3>Leave Types</h3><span>{leaveTypes.length} configured</span></div><button type="button" onClick={() => setLeaveTypes(current => [...current, { id: newId(), name: "", code: "", days: 0, isPaid: true, requiresAttachment: false }])}>Add leave type</button></div><div className="settings-repeatable" role="list" aria-label="Leave types">{leaveTypes.map((leaveType, index) => {
+      const nameId = `settings-leave-name-${leaveType.id}`;
+      const daysId = `settings-leave-days-${leaveType.id}`;
+      const nameError = editorErrors.leaveTypes[leaveType.id]?.name;
+      const daysError = editorErrors.leaveTypes[leaveType.id]?.days;
+      return <div className="settings-repeatable-row leave-type-row" role="listitem" key={leaveType.id}><label htmlFor={nameId}>Leave type {index + 1}<input id={nameId} maxLength={150} value={leaveType.name} aria-invalid={Boolean(nameError) || undefined} aria-describedby={nameError ? `${nameId}-error` : undefined} onChange={event => setLeaveTypes(current => current.map(item => item.id === leaveType.id ? { ...item, name: event.target.value } : item))} />{nameError && <span className="field-error" id={`${nameId}-error`}>{nameError}</span>}</label><label htmlFor={daysId}>Annual days<input id={daysId} type="number" min="0" max="366" step="0.01" value={leaveType.days} aria-invalid={Boolean(daysError) || undefined} aria-describedby={daysError ? `${daysId}-error` : undefined} onChange={event => setLeaveTypes(current => current.map(item => item.id === leaveType.id ? { ...item, days: Number(event.target.value) } : item))} />{daysError && <span className="field-error" id={`${daysId}-error`}>{daysError}</span>}</label><button type="button" className="danger-outline settings-remove-row" aria-label={`Remove leave type ${leaveType.name || index + 1}`} onClick={() => setLeaveTypes(current => current.filter(item => item.id !== leaveType.id))}><Trash2 size={15} aria-hidden="true" /> Remove</button></div>;
+    })}</div><p className="settings-preview" aria-live="polite">Preview: {leaveTypes.filter(item => item.name.trim()).length} leave type{leaveTypes.filter(item => item.name.trim()).length === 1 ? "" : "s"} · {leaveDaysTotal.toFixed(2).replace(/\.00$/, "")} total annual days.</p></div>}
     {canConfigureSystem && sections.visible("payroll-policy") && <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>}
     {canConfigureSystem && sections.visible("loan-policy") && <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>}
     {canConfigureSystem && sections.visible("payroll-policy") && <div className="panel"><div className="panel-head"><h3>Payroll Controls</h3><span>These values are snapshotted on every run.</span></div><div className="form-grid compact"><label>Proration basis<select value={payrollProrationBasis} onChange={event => setPayrollProrationBasis(event.target.value as "Fixed 30" | "Calendar Days")}><option>Fixed 30</option><option>Calendar Days</option></select></label><label>Net pay variance warning (%)<input type="number" min="0" max="1000" step="0.01" value={payrollVarianceThreshold} onChange={event => setPayrollVarianceThreshold(Number(event.target.value) || 0)} /></label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireBankDetails} onChange={event => setPayrollRequireBankDetails(event.target.checked)} /> Require bank details before payroll</label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireAttendance} onChange={event => setPayrollRequireAttendance(event.target.checked)} /> Block payroll when attendance is missing</label></div><p className="muted">Bank data is required by default. Attendance can remain a warning while the rollout is in progress.</p></div>}
-    {canSaveOrganizationSettings && <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p><button className="primary" onClick={saveSettings}>Save settings</button></div>}
+    {canSaveOrganizationSettings && <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p>{attemptedSave && !editableSettingsValid && <p className="sync-alert" role="alert">Some department or leave type fields need attention.</p>}<button className="primary" type="button" onClick={saveSettings}>Save settings</button></div>}
   </section>;
 }
 
@@ -3109,7 +3168,7 @@ const rootRoute = createRootRoute({
   component: RootRoute,
   notFoundComponent: NotFoundPage
 });
-const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: "hr-shell", component: App });
+const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: "hr-shell", component: App, validateSearch: shellSearch });
 const dashboardRoute = createRoute({ getParentRoute: () => shellRoute, path: "/" });
 const meRoute = createRoute({ getParentRoute: () => shellRoute, path: "me" });
 const teamRoute = createRoute({ getParentRoute: () => shellRoute, path: "team" });

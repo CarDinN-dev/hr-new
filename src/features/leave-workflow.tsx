@@ -6,6 +6,7 @@ import { Dialog } from "../dialog";
 import { EmployeePicker } from "../employee-picker";
 import { displayDate, displayTitle, idempotencyHeaders, workflowKey } from "./workflow-utils";
 import { usePageSearch, usePageSearchStatus } from "../page-search";
+import { useDeepLinkFocus, useHashRecordId } from "../deep-link";
 
 const searched = (path: string, search: string) => search ? `${path}${path.includes("?") ? "&" : "?"}search=${encodeURIComponent(search)}` : path;
 
@@ -149,6 +150,8 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
 
   const inboxIds = new Set((inbox.data ?? []).map(item => item.id));
   const all = useMemo(() => { const map = new Map<string, LeaveRecord>(); for (const item of [...(records.data ?? []), ...(inbox.data ?? [])]) map.set(item.id, item); return [...map.values()]; }, [records.data, inbox.data]);
+  const focusedRequestId = useHashRecordId("leave");
+  useDeepLinkFocus("leave", focusedRequestId, records.isSuccess && (!canInbox || inbox.isSuccess), all.some(item => item.id === focusedRequestId), notify);
   function openDecision(request: LeaveRecord, action: DecisionAction, reasonRequired = false) {
     setDecision({ request, action, reasonRequired }); setDecisionReason(""); setDecisionPassword(""); setAssigneeUserId(""); setCorrectionFile(null);
     setCorrection({ leaveTypeId: request.leaveType.id, startDate: request.startDate.slice(0, 10), endDate: request.endDate.slice(0, 10), isHalfDay: request.isHalfDay, reason: request.reason || "" });
@@ -191,7 +194,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
       const canHrDirectOverride = canHrOverride && !canSuperOverride && !own && !finalStatuses.includes(request.status);
       const canSuperDirectOverride = canSuperOverride && !finalStatuses.includes(request.status);
       const hasMoreActions = (assigned && !selfApproval) || canCancel || canReassign || canSuperDirectOverride;
-      return <tr className="leave-request-row" key={request.id}>
+      return <tr id={`leave-${request.id}`} tabIndex={-1} className="leave-request-row" key={request.id}>
         <td data-label="Employee"><div className="leave-request-person"><strong>{request.employee.firstName} {request.employee.lastName}</strong><span>{request.employee.employeeCode}</span></div></td>
         <td data-label="Leave"><div className="leave-request-type"><strong>{request.leaveType.name}</strong><span>{request.totalDays} day(s)</span></div></td>
         <td data-label="Dates">{displayDate(request.startDate)} – {displayDate(request.endDate)}</td>
