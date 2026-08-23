@@ -109,6 +109,15 @@ export class UpdateCandidateDto extends PartialType(CreateCandidateDto) {
   @IsOptional() @ValidateNested() @Type(() => OfferDetailsDto) offerDetails?: OfferDetailsDto;
 }
 
+export class AssessmentLeaseDto {
+  @ApiProperty() @IsUUID() editorToken: string;
+}
+
+export class UpdateInterviewAssessmentDto extends AssessmentLeaseDto {
+  @ApiProperty({ minimum: 1 }) @Type(() => Number) @IsInt() @Min(1) expectedVersion: number;
+  @ApiProperty({ type: InterviewAssessmentDto }) @ValidateNested() @Type(() => InterviewAssessmentDto) interviewAssessment: InterviewAssessmentDto;
+}
+
 export class TransitionCandidateDto {
   @ApiProperty({ enum: CandidateStage }) @IsEnum(CandidateStage) stage: CandidateStage;
   @ApiPropertyOptional() @IsOptional() @IsUUID() employeeId?: string;

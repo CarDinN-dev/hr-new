@@ -42,6 +42,13 @@ async function installApi(page: Page) {
       const name = path.split("/").at(-1) || "document.pdf";
       return route.fulfill({ contentType: "application/pdf", headers: { "content-disposition": `attachment; filename*=UTF-8''${name}` }, body: "%PDF-1.3\n%%EOF" });
     }
+    if (/^\/recruitment\/candidates\/[^/]+\/interview-assessment\/lease$/.test(path)) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 1 })) });
+    }
+    if (/^\/recruitment\/candidates\/[^/]+\/interview-assessment$/.test(path) && request.method() === "PATCH") {
+      const assessment = request.postDataJSON().interviewAssessment;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 2, rating: assessment.overallRating || 0, interviewAssessment: assessment })) });
+    }
     if (/^\/recruitment\/candidates\/[^/]+$/.test(path) && request.method() === "PATCH") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({})) });
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(path === "/organization-settings" ? null : [])) });
   });
@@ -66,9 +73,10 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   await assessment.getByLabel("Interview date").fill("2026-08-23");
   await assessment.getByLabel("Overall rating").selectOption("4");
   await assessment.getByLabel("Interviewer comments").fill("Recommended for offer review.");
-  const assessmentSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview") && request.method() === "PATCH");
-  await assessment.getByRole("button", { name: "Save assessment" }).click();
+  const assessmentSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment") && request.method() === "PATCH");
+  await assessment.getByRole("button", { name: "Save now" }).click();
   expect((await assessmentSave).postDataJSON()).toMatchObject({ interviewAssessment: { date: "2026-08-23", overallRating: 4, interviewerComments: "Recommended for offer review." } });
+  await expect(assessment.getByText("Saved", { exact: true })).toBeVisible();
   const assessmentDownload = page.waitForEvent("download");
   await assessment.getByRole("button", { name: "Download PDF" }).click();
   await expect((await assessmentDownload).suggestedFilename()).toBe("interview-assessment.pdf");
@@ -91,6 +99,20 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
     await requested;
     await expect((await download).suggestedFilename()).toBe(`${endpoint}.pdf`);
   }
+});
+
+test("assessment autosaves on blur and releases its edit lease when closed", async ({ page }) => {
+  await installApi(page);
+  await page.goto("/recruitment");
+  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  const assessment = page.getByRole("dialog", { name: "Interview assessment" });
+  const autoSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment") && request.method() === "PATCH");
+  await assessment.getByLabel("Interviewer comments").fill("Autosaved on blur.");
+  await assessment.getByLabel("Venue").focus();
+  expect((await autoSave).postDataJSON()).toMatchObject({ interviewAssessment: { interviewerComments: "Autosaved on blur." } });
+  const release = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment/lease") && request.method() === "DELETE");
+  await assessment.getByRole("button", { name: "Close", exact: true }).click();
+  await release;
 });
 
 test("interview assessment stays aligned and actionable across screen sizes", async ({ page }) => {

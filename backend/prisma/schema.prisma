@@ -1540,6 +1540,10 @@ model RecruitmentCandidate {
   notes      String?
   interviewAssessment Json?
   offerDetails        Json?
+  assessmentLockSessionId String?   @db.VarChar(191)
+  assessmentLockToken     String?   @db.VarChar(36)
+  assessmentLockEditor    String?   @db.VarChar(200)
+  assessmentLockExpiresAt DateTime?
   appliedOn  DateTime
   version    Int            @default(1)
   createdAt  DateTime       @default(now())
@@ -1552,6 +1556,7 @@ model RecruitmentCandidate {
   @@index([jobId])
   @@index([employeeId])
   @@index([stage])
+  @@index([assessmentLockExpiresAt])
   @@index([deletedAt])
 }
 

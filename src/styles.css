@@ -5550,6 +5550,15 @@ summary:focus-visible,
   border-top: 1px solid var(--border);
 }
 
+.modal:has(> .interview-assessment-form) .save-status {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.modal:has(> .interview-assessment-form) .save-status-saved { color: var(--good); }
+.modal:has(> .interview-assessment-form) .save-status-error { color: var(--bad); }
+
 /* iPad centers WebKit's date text by default; keep this native picker aligned with the form. */
 .modal:has(> .interview-assessment-form) input[type="date"],
 .modal:has(> .interview-assessment-form) input[type="date"]::-webkit-date-and-time-value,

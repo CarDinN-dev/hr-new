@@ -549,6 +549,37 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     }, sessions.HR);
     assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
   }
+  const assessmentEditorToken = randomUUID();
+  const assessmentLease = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment/lease`, {
+    method: 'POST', body: { editorToken: assessmentEditorToken },
+  }, sessions.HR);
+  assert.equal(assessmentLease.status, 201, JSON.stringify(assessmentLease.payload));
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment/lease`, {
+    method: 'POST', body: { editorToken: randomUUID() },
+  }, sessions.CPO)).status, 409);
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}`, {
+    method: 'PATCH', body: { interviewAssessment: { interviewerComments: 'Bypass attempt' } },
+  }, sessions.HR)).status, 400);
+  const assessmentSaved = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment`, {
+    method: 'PATCH', body: { editorToken: assessmentEditorToken, expectedVersion: assessmentLease.data.version, interviewAssessment: { interviewerComments: 'Saved with an exclusive lease', overallRating: 4 } },
+  }, sessions.HR);
+  assert.equal(assessmentSaved.status, 200, JSON.stringify(assessmentSaved.payload));
+  assert.equal(assessmentSaved.data.interviewAssessment.interviewerComments, 'Saved with an exclusive lease');
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment`, {
+    method: 'PATCH', body: { editorToken: assessmentEditorToken, expectedVersion: assessmentLease.data.version, interviewAssessment: { interviewerComments: 'Stale write' } },
+  }, sessions.HR)).status, 409);
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment/lease`, {
+    method: 'DELETE', body: { editorToken: assessmentEditorToken },
+  }, sessions.HR)).status, 200);
+  const cpoEditorToken = randomUUID();
+  const cpoLease = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment/lease`, {
+    method: 'POST', body: { editorToken: cpoEditorToken },
+  }, sessions.CPO);
+  assert.equal(cpoLease.status, 201, JSON.stringify(cpoLease.payload));
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment/lease`, {
+    method: 'DELETE', body: { editorToken: cpoEditorToken },
+  }, sessions.CPO)).status, 200);
+  recruitmentCandidate = assessmentSaved;
   const interviewPdf = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment.pdf`, {}, sessions.HR);
   assert.equal(interviewPdf.status, 200);
   assert.equal(interviewPdf.contentType.includes('application/pdf'), true);

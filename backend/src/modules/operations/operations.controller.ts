@@ -5,9 +5,9 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import {
-  CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
+  AssessmentLeaseDto, CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
   EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
-  TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
+  TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateInterviewAssessmentDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
 import { OperationsService } from './operations.service';
 
@@ -47,6 +47,12 @@ export class OperationsController {
   @Post('recruitment/candidates') createCandidate(@Body() dto: CreateCandidateDto, @CurrentUser() user: RequestUser) { return this.operations.createCandidate(dto, user); }
   @Permissions('recruitment.read')
   @Get('recruitment/candidates') candidates(@Query() query: QueryRecruitmentDto, @CurrentUser() user: RequestUser) { return this.operations.listCandidates(query, user); }
+  @Permissions('recruitment.manage')
+  @Post('recruitment/candidates/:id/interview-assessment/lease') assessmentLease(@Param('id') id: string, @Body() dto: AssessmentLeaseDto, @CurrentUser() user: RequestUser) { return this.operations.acquireAssessmentLease(id, dto, user); }
+  @Permissions('recruitment.manage')
+  @Patch('recruitment/candidates/:id/interview-assessment') updateAssessment(@Param('id') id: string, @Body() dto: UpdateInterviewAssessmentDto, @CurrentUser() user: RequestUser) { return this.operations.updateInterviewAssessment(id, dto, user); }
+  @Permissions('recruitment.manage')
+  @Delete('recruitment/candidates/:id/interview-assessment/lease') releaseAssessmentLease(@Param('id') id: string, @Body() dto: AssessmentLeaseDto, @CurrentUser() user: RequestUser) { return this.operations.releaseAssessmentLease(id, dto, user); }
   @Permissions('recruitment.manage')
   @Patch('recruitment/candidates/:id') updateCandidate(@Param('id') id: string, @Body() dto: UpdateCandidateDto, @CurrentUser() user: RequestUser) { return this.operations.updateCandidate(id, dto, user); }
   @Permissions('recruitment.manage')

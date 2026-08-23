@@ -143,6 +143,7 @@ type Theme = "light" | "dark";
 type NotifyAction = { label: string; onAction: () => void };
 type Notify = (message: string, action?: NotifyAction) => void;
 type ConfirmAction = { title: string; description: string; confirmLabel: string; danger?: boolean; onConfirm: () => void };
+type AssessmentResponse = { version: number; rating: number | string; interviewAssessment?: InterviewAssessment };
 const employeeFieldOptions: Record<string, readonly string[]> = {
   "Employee Category": ["Staff", "Management", "Worker", "Intern"],
   "Work Shift": ["Standard day", "Morning shift", "Evening shift", "Night shift", "Rotating shift"],
@@ -2262,7 +2263,9 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [candidateRating, setCandidateRating] = useState("0");
   const [candidateNotes, setCandidateNotes] = useState("");
   const [assessmentCandidateId, setAssessmentCandidateId] = useState("");
-  const [assessmentDraft, setAssessmentDraft] = useState<InterviewAssessment>({});
+  const [assessmentEditorToken, setAssessmentEditorToken] = useState("");
+  const [assessmentVersion, setAssessmentVersion] = useState(0);
+  const [assessmentInitialDraft, setAssessmentInitialDraft] = useState<InterviewAssessment>({});
   const [offerCandidateId, setOfferCandidateId] = useState("");
   const [offerDraft, setOfferDraft] = useState<OfferDetails>({});
   const [savingStageDocument, setSavingStageDocument] = useState(false);
@@ -2403,10 +2406,16 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     setNav("Employees");
   }
 
-  function openAssessment(candidate: RecruitmentCandidate) {
+  async function openAssessment(candidate: RecruitmentCandidate) {
     const job = state.jobs.find(item => item.id === candidate.jobId);
-    setAssessmentCandidateId(candidate.id);
-    setAssessmentDraft(candidate.interviewAssessment ?? { date: todayISO(), hiringDepartment: job?.dept || "" });
+    const editorToken = crypto.randomUUID();
+    try {
+      const locked = await apiRequest<AssessmentResponse>(`/recruitment/candidates/${candidate.id}/interview-assessment/lease`, { method: "POST", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ editorToken }) });
+      setAssessmentInitialDraft(locked.interviewAssessment ?? candidate.interviewAssessment ?? { date: todayISO(), hiringDepartment: job?.dept || "" });
+      setAssessmentVersion(locked.version);
+      setAssessmentEditorToken(editorToken);
+      setAssessmentCandidateId(candidate.id);
+    } catch (error) { notify(errorMessage(error)); }
   }
 
   function openOffer(candidate: RecruitmentCandidate) {
@@ -2415,15 +2424,29 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     setOfferDraft(candidate.offerDetails ?? { issueDate: todayISO(), basic: 0, hra: 0, conveyance: 0, otherAllowance: 0, lineOfBusiness: job?.dept || "" });
   }
 
-  async function saveAssessment() {
-    if (!assessmentCandidateId) return;
-    setSavingStageDocument(true);
+  async function saveAssessment(candidateId: string, interviewAssessment: InterviewAssessment, expectedVersion: number) {
     try {
-      await apiRequest(`/recruitment/candidates/${assessmentCandidateId}`, { method: "PATCH", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ interviewAssessment: assessmentDraft }) });
-      setState(previous => ({ ...previous, candidates: previous.candidates.map(candidate => candidate.id === assessmentCandidateId ? { ...candidate, rating: assessmentDraft.overallRating ?? candidate.rating, interviewAssessment: assessmentDraft } : candidate) }));
-      notify("Interview assessment saved.");
-    } catch (error) { notify(errorMessage(error)); }
-    finally { setSavingStageDocument(false); }
+      const updated = await apiRequest<AssessmentResponse>(`/recruitment/candidates/${candidateId}/interview-assessment`, { method: "PATCH", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ expectedVersion, editorToken: assessmentEditorToken, interviewAssessment }) });
+      setAssessmentVersion(updated.version);
+      return updated;
+    } catch (error) { throw error; }
+  }
+
+  async function renewAssessmentLease(candidateId: string) {
+    const locked = await apiRequest<AssessmentResponse>(`/recruitment/candidates/${candidateId}/interview-assessment/lease`, { method: "POST", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ editorToken: assessmentEditorToken }) });
+    setAssessmentVersion(locked.version);
+    return locked;
+  }
+
+  async function closeAssessment() {
+    const candidateId = assessmentCandidateId;
+    const editorToken = assessmentEditorToken;
+    if (candidateId && editorToken) {
+      try { await apiRequest(`/recruitment/candidates/${candidateId}/interview-assessment/lease`, { method: "DELETE", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ editorToken }) }); }
+      catch (error) { notify(`${errorMessage(error)} The edit lock will expire shortly.`); }
+    }
+    setAssessmentCandidateId("");
+    setAssessmentEditorToken("");
   }
 
   async function saveOffer() {
@@ -2520,7 +2543,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
                 {canManage ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
                 {candidate.notes && <small>{candidate.notes}</small>}
                 <div className="row-actions">
-                  {candidate.stage === "Interview" && candidate.interviewAssessment && (canManage ? <button className="primary" onClick={() => openAssessment(candidate)}>Assessment</button> : <button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button>)}
+                  {candidate.stage === "Interview" && candidate.interviewAssessment && (canManage ? <button className="primary" onClick={() => void openAssessment(candidate)}>Assessment</button> : <button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button>)}
                   {candidate.stage === "Interview" && !candidate.interviewAssessment && <small>Preparing assessment…</small>}
                   {candidate.stage === "Offer" && candidate.offerDetails && (canManage ? <button className="primary" onClick={() => openOffer(candidate)}>Offer documents</button> : <><button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button><button onClick={() => void downloadRecruitment(candidate, "offer-letter")}>Offer PDF</button><button onClick={() => void downloadRecruitment(candidate, "nda")}>NDA PDF</button></>)}
                   {candidate.stage === "Offer" && !candidate.offerDetails && <small>Preparing offer…</small>}
@@ -2532,29 +2555,108 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
         })}
       </div>
     </div>
-    {assessmentCandidateId && (() => { const candidate = state.candidates.find(item => item.id === assessmentCandidateId); const job = candidate && state.jobs.find(item => item.id === candidate.jobId); return candidate ? <InterviewAssessmentDialog candidate={candidate} job={job} value={assessmentDraft} saving={savingStageDocument} onChange={setAssessmentDraft} onSave={() => void saveAssessment()} onDownload={() => void downloadRecruitment(candidate, "interview-assessment")} onClose={() => setAssessmentCandidateId("")} /> : null; })()}
+    {assessmentCandidateId && (() => { const candidate = state.candidates.find(item => item.id === assessmentCandidateId); const job = candidate && state.jobs.find(item => item.id === candidate.jobId); return candidate ? <InterviewAssessmentDialog candidate={candidate} job={job} value={assessmentInitialDraft} version={assessmentVersion} onSave={(draft, version) => saveAssessment(candidate.id, draft, version)} onRenew={() => renewAssessmentLease(candidate.id)} onDownload={() => void downloadRecruitment(candidate, "interview-assessment")} onClose={closeAssessment} /> : null; })()}
     {offerCandidateId && (() => { const candidate = state.candidates.find(item => item.id === offerCandidateId); const job = candidate && state.jobs.find(item => item.id === candidate.jobId); return candidate ? <OfferDocumentsDialog candidate={candidate} job={job} value={offerDraft} saving={savingStageDocument} onChange={setOfferDraft} onSave={() => void saveOffer()} onDownload={document => void downloadRecruitment(candidate, document)} onClose={() => setOfferCandidateId("")} /> : null; })()}
   </section>;
 }
 
-function InterviewAssessmentDialog({ candidate, job, value, saving, onChange, onSave, onDownload, onClose }: { candidate: RecruitmentCandidate; job?: RecruitmentJob; value: InterviewAssessment; saving: boolean; onChange: React.Dispatch<React.SetStateAction<InterviewAssessment>>; onSave: () => void; onDownload: () => void; onClose: () => void }) {
+function AssessmentCloseGuard({ requestClose }: { requestClose: () => void }) {
+  useDialogCloseGuard(() => { requestClose(); return false; });
+  return null;
+}
+
+function InterviewAssessmentDialog({ candidate, job, value, version, onSave, onRenew, onDownload, onClose }: { candidate: RecruitmentCandidate; job?: RecruitmentJob; value: InterviewAssessment; version: number; onSave: (draft: InterviewAssessment, expectedVersion: number) => Promise<AssessmentResponse>; onRenew: () => Promise<AssessmentResponse>; onDownload: () => void; onClose: () => Promise<void> | void }) {
   const ratings: Array<[keyof InterviewAssessment, keyof InterviewAssessment, string]> = [
     ["greetingRating", "greetingRemarks", "Greeting, presentation and communication"], ["backgroundRating", "backgroundRemarks", "Background and experience"],
     ["technicalRating", "technicalRemarks", "Technical knowledge"], ["leadershipRating", "leadershipRemarks", "Leadership and competencies"]
   ];
-  const set = (key: keyof InterviewAssessment, next: string | number | undefined) => onChange(previous => ({ ...previous, [key]: next }));
+  const [draft, setDraft] = useState(value);
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "error" | "unsaved">("saved");
+  const [saveError, setSaveError] = useState("");
+  const draftRef = useRef(value);
+  const savedRef = useRef(JSON.stringify(value));
+  const versionRef = useRef(version);
+  const saveQueue = useRef(Promise.resolve(true));
+  const timer = useRef<number | undefined>(undefined);
+  const closing = useRef(false);
+
+  useEffect(() => { versionRef.current = version; }, [version]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    const heartbeat = window.setInterval(() => {
+      void onRenew().then(updated => { versionRef.current = updated.version; }).catch(error => {
+        setSaveState("error"); setSaveError(errorMessage(error));
+      });
+    }, 30_000);
+    return () => window.clearInterval(heartbeat);
+  }, [onRenew]);
+
+  function persist() {
+    window.clearTimeout(timer.current);
+    const save = async () => {
+      const before = JSON.stringify(draftRef.current);
+      if (before === savedRef.current) return true;
+      setSaveState("saving"); setSaveError("");
+      try {
+        const updated = await onSave(draftRef.current, versionRef.current);
+        versionRef.current = updated.version;
+        const saved = updated.interviewAssessment ?? draftRef.current;
+        savedRef.current = JSON.stringify(saved);
+        if (JSON.stringify(draftRef.current) === before) {
+          draftRef.current = saved;
+          setDraft(saved);
+        }
+        setSaveState(JSON.stringify(draftRef.current) === savedRef.current ? "saved" : "unsaved");
+        return true;
+      } catch (error) {
+        setSaveState("error"); setSaveError(errorMessage(error));
+        return false;
+      }
+    };
+    saveQueue.current = saveQueue.current.then(save, save);
+    return saveQueue.current;
+  }
+
+  function set(key: keyof InterviewAssessment, next: string | number | undefined) {
+    const updated = { ...draftRef.current, [key]: next };
+    draftRef.current = updated;
+    setDraft(updated); setSaveState("unsaved"); setSaveError("");
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { void persist(); }, 750);
+  }
+
+  async function reloadLatest() {
+    try {
+      const latest = await onRenew();
+      const refreshed = latest.interviewAssessment ?? {};
+      versionRef.current = latest.version;
+      draftRef.current = refreshed;
+      savedRef.current = JSON.stringify(refreshed);
+      setDraft(refreshed); setSaveState("saved"); setSaveError("");
+    } catch (error) { setSaveState("error"); setSaveError(errorMessage(error)); }
+  }
+
+  async function requestClose() {
+    if (closing.current) return;
+    closing.current = true;
+    const saved = await persist();
+    if (saved) await onClose();
+    closing.current = false;
+  }
+
   return <Dialog wide title="Interview assessment" onClose={onClose}>
-    <div className="form-grid compact interview-assessment-form">
-      <label>Candidate name<input value={value.candidateName || candidate.name} readOnly /></label><label>Vacancy title<input value={value.position || job?.title || "-"} readOnly /></label><label>Department<input value={value.department || job?.dept || "-"} readOnly /></label><label>Interview date<input type="date" value={(value.date || todayISO()).slice(0, 10)} onChange={event => set("date", event.target.value || undefined)} /></label>
-      <label>Interview time<input value={value.time || ""} onChange={event => set("time", event.target.value || undefined)} /></label><label>Venue<input value={value.venue || ""} onChange={event => set("venue", event.target.value || undefined)} /></label>
-      <label>Hiring name<input value={value.hiringName || ""} onChange={event => set("hiringName", event.target.value || undefined)} /></label><label>Hiring department<input value={value.hiringDepartment || job?.dept || ""} onChange={event => set("hiringDepartment", event.target.value || undefined)} /></label><label>Hiring position<input value={value.hiringPosition || ""} onChange={event => set("hiringPosition", event.target.value || undefined)} /></label>
-      {ratings.map(([ratingKey, remarksKey, label]) => <React.Fragment key={String(ratingKey)}><label>{label} rating<select value={String(value[ratingKey] || "")} onChange={event => set(ratingKey, event.target.value ? Number(event.target.value) : undefined)}><option value="">Select 1–5</option>{[1, 2, 3, 4, 5].map(score => <option key={score}>{score}</option>)}</select></label><label className="wide">{label} remarks<textarea maxLength={2000} value={String(value[remarksKey] || "")} onChange={event => set(remarksKey, event.target.value || undefined)} /></label></React.Fragment>)}
-      <label>Overall rating<select value={String(value.overallRating || "")} onChange={event => set("overallRating", event.target.value ? Number(event.target.value) : undefined)}><option value="">Select 1–5</option>{[1, 2, 3, 4, 5].map(score => <option key={score}>{score}</option>)}</select></label>
-      <label>Visa status<input maxLength={500} value={value.visaStatus || ""} onChange={event => set("visaStatus", event.target.value || undefined)} /></label><label>Driving licence<input maxLength={500} value={value.drivingLicense || ""} onChange={event => set("drivingLicense", event.target.value || undefined)} /></label>
-      <label>Current salary<input type="number" min="0" step="0.01" value={value.currentSalary ?? ""} onChange={event => set("currentSalary", event.target.value === "" ? undefined : Number(event.target.value))} /></label><label>Expected salary<input type="number" min="0" step="0.01" value={value.expectedSalary ?? ""} onChange={event => set("expectedSalary", event.target.value === "" ? undefined : Number(event.target.value))} /></label><label>Expected joining date<input type="date" value={(value.expectedJoiningDate || "").slice(0, 10)} onChange={event => set("expectedJoiningDate", event.target.value || undefined)} /></label>
-      <label className="wide">Interviewer comments<textarea maxLength={2000} value={value.interviewerComments || ""} onChange={event => set("interviewerComments", event.target.value || undefined)} /></label><label className="wide">Manager comments<textarea maxLength={2000} value={value.managerComments || ""} onChange={event => set("managerComments", event.target.value || undefined)} /></label>
+    <AssessmentCloseGuard requestClose={() => { void requestClose(); }} />
+    <div className="form-grid compact interview-assessment-form" onBlur={() => { void persist(); }}>
+      <label>Candidate name<input value={draft.candidateName || candidate.name} readOnly /></label><label>Vacancy title<input value={draft.position || job?.title || "-"} readOnly /></label><label>Department<input value={draft.department || job?.dept || "-"} readOnly /></label><label>Interview date<input type="date" value={(draft.date || todayISO()).slice(0, 10)} onChange={event => set("date", event.target.value || undefined)} /></label>
+      <label>Interview time<input value={draft.time || ""} onChange={event => set("time", event.target.value || undefined)} /></label><label>Venue<input value={draft.venue || ""} onChange={event => set("venue", event.target.value || undefined)} /></label>
+      <label>Hiring name<input value={draft.hiringName || ""} onChange={event => set("hiringName", event.target.value || undefined)} /></label><label>Hiring department<input value={draft.hiringDepartment || job?.dept || ""} onChange={event => set("hiringDepartment", event.target.value || undefined)} /></label><label>Hiring position<input value={draft.hiringPosition || ""} onChange={event => set("hiringPosition", event.target.value || undefined)} /></label>
+      {ratings.map(([ratingKey, remarksKey, label]) => <React.Fragment key={String(ratingKey)}><label>{label} rating<select value={String(draft[ratingKey] || "")} onChange={event => set(ratingKey, event.target.value ? Number(event.target.value) : undefined)}><option value="">Select 1–5</option>{[1, 2, 3, 4, 5].map(score => <option key={score}>{score}</option>)}</select></label><label className="wide">{label} remarks<textarea maxLength={2000} value={String(draft[remarksKey] || "")} onChange={event => set(remarksKey, event.target.value || undefined)} /></label></React.Fragment>)}
+      <label>Overall rating<select value={String(draft.overallRating || "")} onChange={event => set("overallRating", event.target.value ? Number(event.target.value) : undefined)}><option value="">Select 1–5</option>{[1, 2, 3, 4, 5].map(score => <option key={score}>{score}</option>)}</select></label>
+      <label>Visa status<input maxLength={500} value={draft.visaStatus || ""} onChange={event => set("visaStatus", event.target.value || undefined)} /></label><label>Driving licence<input maxLength={500} value={draft.drivingLicense || ""} onChange={event => set("drivingLicense", event.target.value || undefined)} /></label>
+      <label>Current salary<input type="number" min="0" step="0.01" value={draft.currentSalary ?? ""} onChange={event => set("currentSalary", event.target.value === "" ? undefined : Number(event.target.value))} /></label><label>Expected salary<input type="number" min="0" step="0.01" value={draft.expectedSalary ?? ""} onChange={event => set("expectedSalary", event.target.value === "" ? undefined : Number(event.target.value))} /></label><label>Expected joining date<input type="date" value={(draft.expectedJoiningDate || "").slice(0, 10)} onChange={event => set("expectedJoiningDate", event.target.value || undefined)} /></label>
+      <label className="wide">Interviewer comments<textarea maxLength={2000} value={draft.interviewerComments || ""} onChange={event => set("interviewerComments", event.target.value || undefined)} /></label><label className="wide">Manager comments<textarea maxLength={2000} value={draft.managerComments || ""} onChange={event => set("managerComments", event.target.value || undefined)} /></label>
     </div>
-    <div className="modal-actions"><button onClick={onClose}>Close</button><button onClick={onDownload}>Download PDF</button><button className="primary" disabled={saving} onClick={onSave}>{saving ? "Saving…" : "Save assessment"}</button></div>
+    <div className="modal-actions"><span className={`save-status save-status-${saveState}`} aria-live="polite">{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "unsaved" ? "Unsaved changes" : saveError}</span>{saveState === "error" && <><button onClick={() => void persist()}>Retry save</button><button onClick={() => void reloadLatest()}>Reload latest</button></>}<button onClick={() => void requestClose()}>Close</button><button onClick={() => { void persist().then(saved => { if (saved) onDownload(); }); }}>Download PDF</button><button className="primary" disabled={saveState === "saving"} onClick={() => void persist()}>{saveState === "saving" ? "Saving…" : "Save now"}</button></div>
   </Dialog>;
 }
 

@@ -10,9 +10,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import {
-  CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
+  AssessmentLeaseDto, CreateCandidateDto, CreateEosDto, CreateExpenseDto, CreateRecruitmentJobDto, CreateTripDto,
   EmployeeScopedQueryDto, QueryRecruitmentDto, TransitionCandidateDto, TransitionEosDto,
-  TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
+  TransitionExpenseDto, TransitionTripDto, UpdateCandidateDto, UpdateInterviewAssessmentDto, UpdateOrganizationSettingsDto, UpdateRecruitmentJobDto,
 } from './dto/operations.dto';
 import { interviewAssessmentPdf, ndaPdf, offerLetterPdf } from './recruitment-pdf';
 
@@ -189,6 +189,7 @@ export class OperationsService {
 
   async updateCandidate(id: string, dto: UpdateCandidateDto, user: RequestUser) {
     this.assertSystemScope(user, 'recruitment.manage', id);
+    if (dto.interviewAssessment) throw new BadRequestException('Use the interview assessment save endpoint');
     return this.transaction(async (tx) => {
       const existing = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
       if (!existing) throw new NotFoundException('Candidate not found');
@@ -200,24 +201,15 @@ export class OperationsService {
         if (hiredCount >= nextJob.openings) throw new BadRequestException('All openings for this job are filled');
         job = nextJob;
       }
-      const { interviewAssessment, offerDetails, ...candidateDetails } = dto;
+      const { interviewAssessment: _interviewAssessment, offerDetails, ...candidateDetails } = dto;
       const candidateName = dto.name ?? existing.name;
-      const assessmentSnapshot = this.jsonObject(existing.interviewAssessment);
       const offerSnapshot = this.jsonObject(existing.offerDetails);
       const updated = await tx.recruitmentCandidate.update({
         where: { id },
         data: {
           ...candidateDetails,
           email: dto.email?.trim().toLowerCase(),
-          rating: dto.rating === undefined
-            ? (interviewAssessment?.overallRating === undefined ? undefined : new Prisma.Decimal(interviewAssessment.overallRating))
-            : nonNegativeMoney(dto.rating, 'rating'),
-          interviewAssessment: interviewAssessment ? {
-            ...assessmentSnapshot, ...this.interviewJson(interviewAssessment),
-            candidateName: typeof assessmentSnapshot.candidateName === 'string' ? assessmentSnapshot.candidateName : candidateName,
-            position: typeof assessmentSnapshot.position === 'string' ? assessmentSnapshot.position : job.title,
-            department: typeof assessmentSnapshot.department === 'string' ? assessmentSnapshot.department : job.department?.name ?? '',
-          } : undefined,
+          rating: dto.rating === undefined ? undefined : nonNegativeMoney(dto.rating, 'rating'),
           offerDetails: offerDetails ? {
             ...offerSnapshot, ...this.offerJson(offerDetails),
             candidateName: typeof offerSnapshot.candidateName === 'string' ? offerSnapshot.candidateName : candidateName,
@@ -231,6 +223,60 @@ export class OperationsService {
       await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentCandidate', id, 'Candidate details updated');
       return updated;
     });
+  }
+
+  async acquireAssessmentLease(id: string, dto: AssessmentLeaseDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
+    return this.transaction(async (tx) => {
+      const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
+      if (!candidate) throw new NotFoundException('Candidate not found');
+      const now = new Date();
+      const ownsLease = candidate.assessmentLockSessionId === user.sessionId && candidate.assessmentLockToken === dto.editorToken;
+      if (candidate.assessmentLockExpiresAt && candidate.assessmentLockExpiresAt > now && !ownsLease) {
+        throw new ConflictException(`Assessment is being edited by ${candidate.assessmentLockEditor || 'another user'}`);
+      }
+      return tx.recruitmentCandidate.update({
+        where: { id },
+        data: { assessmentLockSessionId: user.sessionId, assessmentLockToken: dto.editorToken, assessmentLockEditor: user.displayName, assessmentLockExpiresAt: new Date(now.getTime() + 90_000) },
+        include: { job: { include: { department: true } }, employee: { select: employeeSummary } },
+      });
+    });
+  }
+
+  async updateInterviewAssessment(id: string, dto: UpdateInterviewAssessmentDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
+    return this.transaction(async (tx) => {
+      const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
+      if (!candidate) throw new NotFoundException('Candidate not found');
+      const now = new Date();
+      if (candidate.assessmentLockSessionId !== user.sessionId || candidate.assessmentLockToken !== dto.editorToken || !candidate.assessmentLockExpiresAt || candidate.assessmentLockExpiresAt <= now) {
+        throw new ConflictException('Assessment editing session expired; reopen it to continue');
+      }
+      this.assertExpectedVersion(candidate.version, dto.expectedVersion, 'Candidate');
+      const snapshot = this.jsonObject(candidate.interviewAssessment);
+      const assessment = {
+        ...snapshot, ...this.interviewJson(dto.interviewAssessment),
+        candidateName: typeof snapshot.candidateName === 'string' ? snapshot.candidateName : candidate.name,
+        position: typeof snapshot.position === 'string' ? snapshot.position : candidate.job.title,
+        department: typeof snapshot.department === 'string' ? snapshot.department : candidate.job.department?.name ?? '',
+      };
+      const updated = await tx.recruitmentCandidate.update({
+        where: { id },
+        data: { interviewAssessment: assessment, rating: dto.interviewAssessment.overallRating === undefined ? undefined : new Prisma.Decimal(dto.interviewAssessment.overallRating), version: { increment: 1 } },
+        include: { job: { include: { department: true } }, employee: { select: employeeSummary } },
+      });
+      await this.record(tx, user, AuditAction.UPDATE, 'RecruitmentCandidate', id, 'Interview assessment saved');
+      return updated;
+    });
+  }
+
+  async releaseAssessmentLease(id: string, dto: AssessmentLeaseDto, user: RequestUser) {
+    this.assertSystemScope(user, 'recruitment.manage', id);
+    await this.prisma.recruitmentCandidate.updateMany({
+      where: { id, deletedAt: null, assessmentLockSessionId: user.sessionId, assessmentLockToken: dto.editorToken },
+      data: { assessmentLockSessionId: null, assessmentLockToken: null, assessmentLockEditor: null, assessmentLockExpiresAt: null },
+    });
+    return { released: true };
   }
 
   async transitionCandidate(id: string, dto: TransitionCandidateDto, user: RequestUser) {

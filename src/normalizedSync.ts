@@ -248,10 +248,10 @@ async function syncRecruitment(before: HrState, after: HrState, departmentIds: M
     const old = oldCandidates.get(candidate.id);
     let nextVersion = old?.version;
     const jobId = serverJobIds.get(candidate.jobId) ?? candidate.jobId;
-    const payload = { jobId, name: candidate.name, email: candidate.email, phone: candidate.phone || undefined, rating: String(candidate.rating), notes: candidate.notes || undefined, appliedOn: candidate.appliedOn, interviewAssessment: candidate.interviewAssessment, offerDetails: candidate.offerDetails };
+    const payload = { jobId, name: candidate.name, email: candidate.email, phone: candidate.phone || undefined, rating: String(candidate.rating), notes: candidate.notes || undefined, appliedOn: candidate.appliedOn };
     if (!old) await request("/recruitment/candidates", "POST", payload);
     else {
-      const oldPayload = { jobId: old.jobId, name: old.name, email: old.email, phone: old.phone || undefined, rating: String(old.rating), notes: old.notes || undefined, appliedOn: old.appliedOn, interviewAssessment: old.interviewAssessment, offerDetails: old.offerDetails };
+      const oldPayload = { jobId: old.jobId, name: old.name, email: old.email, phone: old.phone || undefined, rating: String(old.rating), notes: old.notes || undefined, appliedOn: old.appliedOn };
       if (!same(oldPayload, payload)) await request(`/recruitment/candidates/${candidate.id}`, "PATCH", payload);
     }
     if (old && old.stage !== candidate.stage) {
