@@ -634,6 +634,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
   })).toEqual({ button: [44, 44], icon: [20, 20], padding: "0px" });
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
 
   await menu.click();
   const close = page.locator(".sidebar-close");

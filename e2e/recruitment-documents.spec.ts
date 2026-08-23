@@ -63,11 +63,12 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   await expect(assessment.getByLabel("Vacancy title")).toHaveValue(job.title);
   await expect(assessment.getByLabel("Department", { exact: true })).toHaveValue(job.department.name);
   await expect(assessment.getByLabel("Interview date")).toHaveValue("2026-08-06");
+  await assessment.getByLabel("Interview date").fill("2026-08-23");
   await assessment.getByLabel("Overall rating").selectOption("4");
   await assessment.getByLabel("Interviewer comments").fill("Recommended for offer review.");
   const assessmentSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview") && request.method() === "PATCH");
   await assessment.getByRole("button", { name: "Save assessment" }).click();
-  expect((await assessmentSave).postDataJSON()).toMatchObject({ interviewAssessment: { overallRating: 4, interviewerComments: "Recommended for offer review." } });
+  expect((await assessmentSave).postDataJSON()).toMatchObject({ interviewAssessment: { date: "2026-08-23", overallRating: 4, interviewerComments: "Recommended for offer review." } });
   const assessmentDownload = page.waitForEvent("download");
   await assessment.getByRole("button", { name: "Download PDF" }).click();
   await expect((await assessmentDownload).suggestedFilename()).toBe("interview-assessment.pdf");
@@ -89,5 +90,30 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
     await offer.getByRole("button", { name: button }).click();
     await requested;
     await expect((await download).suggestedFilename()).toBe(`${endpoint}.pdf`);
+  }
+});
+
+test("interview assessment stays aligned and actionable across screen sizes", async ({ page }) => {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await installApi(page);
+    await page.goto("/recruitment");
+    await page.getByRole("button", { name: "Assessment", exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Interview assessment" });
+    const modal = dialog.locator(".modal");
+    const actions = dialog.locator(".modal-actions");
+    const [dialogBox, actionBox] = await Promise.all([dialog.boundingBox(), actions.boundingBox()]);
+    expect(dialogBox).not.toBeNull();
+    expect(actionBox).not.toBeNull();
+    expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport.height + 1);
+    expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height + 1);
+    expect(await modal.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    if (viewport.width >= 1024) expect(dialogBox!.width).toBeGreaterThanOrEqual(940);
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
   }
 });

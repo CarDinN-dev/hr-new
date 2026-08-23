@@ -92,7 +92,7 @@
       "inherits": ["EMPLOYEE"],
       "permissions": [
         "settings.read", "employee.self.update_basic", "employee.read_all", "attendance.read_all", "leave.executive.approve_cpo", "leave.read_all",
-        "payroll.read", "payroll.read_compensation", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "recruitment.read"
+        "payroll.read", "payroll.read_compensation", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "recruitment.read", "recruitment.manage"
       ]
     },
     {

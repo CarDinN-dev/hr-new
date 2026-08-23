@@ -5428,6 +5428,50 @@ summary:focus-visible,
   background: transparent;
 }
 
+.modal-dialog.modal-dialog-wide {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.modal-dialog > .modal {
+  background-color: var(--surface);
+  border-color: var(--border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--clinical-shadow-raised);
+  padding: 20px;
+}
+
+.modal:has(> .interview-assessment-form) {
+  height: min(90dvh, 900px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.interview-assessment-form {
+  min-height: 0;
+  margin-top: 14px;
+  padding: 0 6px 2px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.modal:has(> .interview-assessment-form) .modal-actions {
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.app .recruitment-workspace :is(.pipeline-column, .candidate-card, .candidate-card > div) {
+  min-width: 0;
+}
+
+.app .candidate-card :is(strong, span, p, small) {
+  overflow-wrap: anywhere;
+}
+
 .modal-dialog:has(> .modal > .employee-profile),
 .modal-dialog:has(> .modal > .employee-editor) {
   width: min(920px, calc(100vw - 32px));
@@ -9690,6 +9734,16 @@ body {
 
   .app .content {
     margin-inline: auto;
+  }
+}
+
+/* The header uses the full official lockup, not a square mark, on tablets. */
+@media (min-width: 721px) and (max-width: 1280px) {
+  .app .topbar-brand-mark,
+  .sidebar-collapsed .topbar-brand-mark {
+    width: clamp(132px, 16vw, 168px);
+    height: 46px;
+    padding: 3px 7px;
   }
 }
 

@@ -50,7 +50,7 @@ export function Dialog({ children, onClose, title, description, wide = false }: 
   return createPortal(
     <dialog
       ref={dialogRef}
-      className="modal-dialog"
+      className={`modal-dialog${wide ? " modal-dialog-wide" : ""}`}
       aria-labelledby={title ? titleId : undefined}
       aria-describedby={description ? descriptionId : undefined}
       onCancel={event => { event.preventDefault(); requestClose(); }}
