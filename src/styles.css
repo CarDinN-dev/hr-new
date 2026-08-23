@@ -9738,3 +9738,56 @@ body {
     transform: translateX(1px);
   }
 }
+
+/* Shared operational controls: clear state without adding a component library. */
+.app .table-wrap tbody tr:focus-within {
+  background: var(--accent-soft);
+}
+
+.app .badge {
+  min-height: 26px;
+  border: 1px solid transparent;
+  padding-inline: 0.7rem;
+}
+
+.app .badge.good {
+  border-color: color-mix(in srgb, var(--good) 28%, var(--good-bg));
+}
+
+.app .badge.warn {
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--warn-bg));
+}
+
+.app .badge.bad {
+  border-color: color-mix(in srgb, var(--bad) 28%, var(--bad-bg));
+}
+
+.app .badge.neutral {
+  border-color: var(--border);
+}
+
+.app .employee-picker__options {
+  z-index: var(--z-popover);
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface-overlay);
+}
+
+.app .employee-picker__options button {
+  min-height: var(--control-height);
+  border-radius: var(--control-radius);
+}
+
+.app .employee-picker__options button.is-active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--brand-red);
+}
+
+.app .audit-pagination {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.app .audit-pagination > .muted {
+  font-variant-numeric: tabular-nums;
+}

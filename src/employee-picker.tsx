@@ -90,7 +90,7 @@ export function EmployeePicker({ id, name, value, options, onChange, placeholder
     {clearable && value && <button className="employee-picker__clear" type="button" aria-label="Clear selection" disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(""); setQuery(""); setOpen(false); }}>×</button>}
     <button className="employee-picker__toggle" type="button" aria-label={`${open ? "Hide" : "Show"} choices`} disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => setOpen(current => !current)}>▾</button>
     {open && <div id={listId} className="employee-picker__options" role="listbox" aria-label={`${ariaLabel} choices`}>
-      {matches.length ? matches.map((option, index) => <button id={`${listId}-${option.id}`} className={option.id === value ? "is-selected" : undefined} type="button" role="option" aria-label={option.label} aria-selected={option.id === value} key={option.id} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(option)}>{employeePickerOptionLabel(option.label)}</button>) : <p className="employee-picker__empty">No employees match.</p>}
+      {matches.length ? matches.map((option, index) => <button id={`${listId}-${option.id}`} className={[option.id === value && "is-selected", index === activeIndex && "is-active"].filter(Boolean).join(" ")} type="button" role="option" aria-label={option.label} aria-selected={option.id === value} key={option.id} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(option)}>{employeePickerOptionLabel(option.label)}</button>) : <p className="employee-picker__empty">No employees match.</p>}
     </div>}
   </div>;
 }
