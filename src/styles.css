@@ -5464,6 +5464,13 @@ summary:focus-visible,
   border-top: 1px solid var(--border);
 }
 
+/* iPad centers WebKit's date text by default; keep this native picker aligned with the form. */
+.modal:has(> .interview-assessment-form) input[type="date"],
+.modal:has(> .interview-assessment-form) input[type="date"]::-webkit-date-and-time-value,
+.modal:has(> .interview-assessment-form) input[type="date"]::-webkit-datetime-edit {
+  text-align: start;
+}
+
 .app .recruitment-workspace :is(.pipeline-column, .candidate-card, .candidate-card > div) {
   min-width: 0;
 }
