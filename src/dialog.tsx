@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -25,6 +25,8 @@ export function Dialog({ children, onClose, title, description, wide = false }: 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null);
   const closeGuardRef = useRef<(() => boolean) | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const [closing, setClosing] = useState(false);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -44,6 +46,7 @@ export function Dialog({ children, onClose, title, description, wide = false }: 
     document.body.style.overflow = "hidden";
     dialog.showModal();
     return () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
       if (dialog.open) dialog.close();
       document.body.style.overflow = overflow;
       const returnFocus = returnFocusRef.current;
@@ -57,16 +60,17 @@ export function Dialog({ children, onClose, title, description, wide = false }: 
   const setCloseGuard = useCallback((guard: (() => boolean) | null) => { closeGuardRef.current = guard; }, []);
 
   function requestClose() {
-    if (closeGuardRef.current && !closeGuardRef.current()) return;
-    if (dialogRef.current?.open) dialogRef.current.close();
-    onClose();
+    if (closing || (closeGuardRef.current && !closeGuardRef.current())) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return onClose();
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(onClose, 130);
   }
 
   return createPortal(
     <DialogCloseGuardContext.Provider value={setCloseGuard}>
       <dialog
         ref={dialogRef}
-        className={`modal-dialog${wide ? " modal-dialog-wide" : ""}`}
+        className={`modal-dialog${wide ? " modal-dialog-wide" : ""}${closing ? " is-closing" : ""}`}
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descriptionId : undefined}
         onCancel={event => { event.preventDefault(); requestClose(); }}

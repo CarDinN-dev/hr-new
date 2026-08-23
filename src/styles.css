@@ -1856,7 +1856,23 @@ button.danger-outline {
   border-radius: var(--radius);
   box-shadow: 0 30px 80px rgba(15, 23, 42, 0.35);
   padding: 1.25rem;
-  animation: modalIn 180ms ease both;
+  animation: modalIn var(--motion-standard) both;
+}
+
+.modal-dialog::backdrop {
+  animation: modalBackdropIn var(--motion-standard) both;
+}
+
+.modal-dialog.is-closing {
+  pointer-events: none;
+}
+
+.modal-dialog.is-closing > .modal {
+  animation: modalOut 130ms cubic-bezier(.4, 0, 1, 1) both;
+}
+
+.modal-dialog.is-closing::backdrop {
+  animation: modalBackdropOut 100ms cubic-bezier(.4, 0, 1, 1) both;
 }
 
 @keyframes fadeIn {
@@ -1879,6 +1895,21 @@ button.danger-outline {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+@keyframes modalOut {
+  to {
+    opacity: 0;
+    transform: translateY(5px) scale(0.99);
+  }
+}
+
+@keyframes modalBackdropIn {
+  from { opacity: 0; }
+}
+
+@keyframes modalBackdropOut {
+  to { opacity: 0; }
 }
 
 .modal h2 {
@@ -3917,6 +3948,21 @@ summary {
   border-radius: var(--radius);
   background: var(--panel);
   box-shadow: var(--shadow);
+  transform-origin: top right;
+  animation: notificationsPopoverIn 140ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.notifications-popover.is-closing {
+  pointer-events: none;
+  animation: notificationsPopoverOut 100ms cubic-bezier(.4, 0, 1, 1) both;
+}
+
+@keyframes notificationsPopoverIn {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+}
+
+@keyframes notificationsPopoverOut {
+  to { opacity: 0; transform: translateY(-2px) scale(.99); }
 }
 
 .notification-list {
@@ -3951,6 +3997,7 @@ summary {
     right: 1rem;
     left: 1rem;
     width: auto;
+    transform-origin: top center;
   }
 }
 
@@ -9276,20 +9323,11 @@ body {
 .app .content {
   width: min(100%, var(--page-max));
   margin-inline: auto;
-  animation: premium-page-arrival var(--motion-standard) both;
-}
-
-@keyframes premium-page-arrival {
-  from { opacity: 0.72; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 .app .sidebar {
   overflow-x: hidden;
   transition:
-    width var(--motion-standard),
-    flex-basis var(--motion-standard),
-    padding var(--motion-standard),
     border-color var(--motion-standard),
     box-shadow var(--motion-standard),
     opacity var(--motion-standard),
@@ -9389,9 +9427,6 @@ body {
     pointer-events: none;
     transform: translateX(-12px);
     transition:
-      width var(--motion-standard),
-      flex-basis var(--motion-standard),
-      padding var(--motion-standard),
       border-color var(--motion-standard),
       box-shadow var(--motion-standard),
       opacity var(--motion-standard),
@@ -9423,8 +9458,6 @@ body {
     opacity: 0;
     transform: scale(0.96);
     transition:
-      width var(--motion-standard),
-      padding var(--motion-standard),
       border-color var(--motion-standard),
       box-shadow var(--motion-standard),
       opacity var(--motion-standard),
@@ -9580,6 +9613,12 @@ body {
 .app .empty {
   min-height: 96px;
   border-radius: 12px;
+}
+
+.app .empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
 }
 
 .app .employee-hero,

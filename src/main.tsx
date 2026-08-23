@@ -1892,6 +1892,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
   const [perDiem, setPerDiem] = useState("250");
   const [travelCost, setTravelCost] = useState("0");
   const [advanceAmount, setAdvanceAmount] = useState("0");
+  const destinationRef = useRef<HTMLInputElement>(null);
   const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const days = from && to && to >= from ? inclusiveDays(from, to) : 0;
 
@@ -1940,7 +1941,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
       <div className="panel-head"><div><h3>Business Trips</h3><span>Requests, costs and advances.</span></div></div>
       <div className="form-grid compact">
         <label>Employee<EmployeePicker id="trip-employee" name="trip-employee" value={employeeId} onChange={setEmployeeId} options={employeePickerOptions(eligibleEmployees)} /></label>
-        <label>Destination<input id="trip-destination" name="trip-destination" value={destination} onChange={event => setDestination(event.target.value)} placeholder="Doha, Riyadh, Dubai..." /></label>
+        <label>Destination<input ref={destinationRef} id="trip-destination" name="trip-destination" value={destination} onChange={event => setDestination(event.target.value)} placeholder="Doha, Riyadh, Dubai..." /></label>
         <label>From<input id="trip-from" name="trip-from" type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
         <label>To<input id="trip-to" name="trip-to" type="date" value={to} onChange={event => setTo(event.target.value)} /></label>
         <label>Per diem<input id="trip-per-diem" name="trip-per-diem" type="number" min="0" value={perDiem} onChange={event => setPerDiem(event.target.value)} /></label>
@@ -1953,7 +1954,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
     </div>}
     <div className="panel">
       <div className="panel-head"><h3>Trip Register</h3><span>{state.businessTrips.length} records</span></div>
-      <DataTable label="Business trips" empty="No business trips yet." columns={["Employee", "Destination", "Dates", "Days", "Cost", "Advance", "Status", "Actions"]} rows={state.businessTrips.map(trip => {
+      <DataTable label="Business trips" empty={canCreate ? <div className="empty-state"><span>No business trips yet.</span><button type="button" onClick={() => destinationRef.current?.focus()}>Add trip request</button></div> : "No business trips yet."} columns={["Employee", "Destination", "Dates", "Days", "Cost", "Advance", "Status", "Actions"]} rows={state.businessTrips.map(trip => {
         const employee = state.employees.find(item => item.id === trip.employeeId);
         return [
           employeeName(employee),
@@ -1987,6 +1988,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
   const [date, setDate] = useState(todayISO());
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const amountRef = useRef<HTMLInputElement>(null);
   const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const totals = expenseTotals(state.expenses);
   const employeeTrips = state.businessTrips.filter(item => item.employeeId === employeeId);
@@ -2031,14 +2033,14 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
         <label>Trip<select id="expense-trip" name="expense-trip" value={tripId} onChange={event => setTripId(event.target.value)}><option value="">No trip link</option>{employeeTrips.map(trip => <option key={trip.id} value={trip.id}>{trip.destination} - {formatDate(trip.from)}</option>)}</select></label>
         <label>Category<select id="expense-category" name="expense-category" value={category} onChange={event => setCategory(event.target.value)}><option>Travel</option><option>Hotel</option><option>Meal</option><option>Medical</option><option>Fuel</option><option>Other</option></select></label>
         <label>Date<input id="expense-date" name="expense-date" type="date" value={date} onChange={event => setDate(event.target.value)} /></label>
-        <label htmlFor="expense-amount">Amount<input id="expense-amount" name="expense-amount" type="number" min="0" value={amount} onChange={event => setAmount(event.target.value)} /></label>
+        <label htmlFor="expense-amount">Amount<input ref={amountRef} id="expense-amount" name="expense-amount" type="number" min="0" value={amount} onChange={event => setAmount(event.target.value)} /></label>
         <label className="wide" htmlFor="expense-description">Description<textarea id="expense-description" name="expense-description" value={description} onChange={event => setDescription(event.target.value)} /></label>
       </div>
       <div className="form-actions"><button className="primary" onClick={submit}>Submit expense</button></div>
     </div>}
     <div className="panel">
       <div className="panel-head"><h3>Expense Register</h3><span>{state.expenses.length} records</span></div>
-      <DataTable label="Employee expenses" empty="No expenses yet." columns={["Employee", "Category", "Date", "Amount", "Trip", "Status", "Actions"]} rows={state.expenses.map(expense => {
+      <DataTable label="Employee expenses" empty={canCreate ? <div className="empty-state"><span>No expenses yet.</span><button type="button" onClick={() => amountRef.current?.focus()}>Submit expense</button></div> : "No expenses yet."} columns={["Employee", "Category", "Date", "Amount", "Trip", "Status", "Actions"]} rows={state.expenses.map(expense => {
         const employee = state.employees.find(item => item.id === expense.employeeId);
         const trip = state.businessTrips.find(item => item.id === expense.tripId);
         return [
@@ -2843,7 +2845,7 @@ function SignedInDevicesPanel({ session, notify }: { session: BackendSession; no
   </section>;
 }
 
-function DataTable({ columns, rows, empty, label = "Data table" }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string; label?: string }) {
+function DataTable({ columns, rows, empty, label = "Data table" }: { columns: React.ReactNode[]; rows: React.ReactNode[][]; empty?: React.ReactNode; label?: string }) {
   if (!rows.length) return <div className="empty">{empty || "No records."}</div>;
   const wide = columns.length >= 4;
   const actions = typeof columns.at(-1) === "string" && /actions?/i.test(String(columns.at(-1)));

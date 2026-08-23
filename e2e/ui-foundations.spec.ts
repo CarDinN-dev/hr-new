@@ -224,6 +224,7 @@ test("mobile dashboard, wide tables and shared dialog retain usable geometry", a
   expect(employeeEditor).not.toBeNull();
   expect(employeeEditor!.x + employeeEditor!.width).toBeLessThanOrEqual(390);
   await page.keyboard.press("Escape");
+  await expect(dialog).toHaveClass(/is-closing/);
   await expect(dialog).toHaveCount(0);
   await expect(page.locator("dialog")).toHaveCount(0);
   await expect(addEmployee).toBeFocused();
@@ -826,6 +827,7 @@ test("notification actions stay right-aligned and the popover remains visible be
       expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
 
       await page.keyboard.press("Escape");
+      await expect(popover).toHaveClass(/is-closing/);
       await expect(popover).toHaveCount(0);
       await expect(trigger).toBeFocused();
     });
