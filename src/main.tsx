@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Link,
@@ -15,6 +16,7 @@ import {
   BarChart3,
   BriefcaseBusiness,
   CalendarCheck,
+  ChevronDown,
   Download,
   Eye,
   FileText,
@@ -1180,6 +1182,62 @@ function pageDescription(nav: NavItem) {
   return descriptions[nav];
 }
 
+function DepartmentFilter({ value, departments, onChange }: { value: string; departments: readonly string[]; onChange: (value: string) => void }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = React.useId();
+  const choices = ["", ...departments];
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 0 });
+
+  function placeMenu() {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPosition({ top: rect.bottom + 4, left: rect.left, width: rect.width, maxHeight: Math.max(44, window.innerHeight - rect.bottom - 8) });
+  }
+
+  function showMenu() {
+    setActiveIndex(Math.max(0, choices.indexOf(value)));
+    placeMenu();
+    setOpen(true);
+  }
+
+  function choose(index: number) {
+    onChange(choices[index]);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!triggerRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnScroll = () => setOpen(false);
+    window.addEventListener("resize", placeMenu);
+    window.addEventListener("scroll", closeOnScroll, true);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener("resize", placeMenu);
+      window.removeEventListener("scroll", closeOnScroll, true);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [open]);
+
+  return <div className="department-filter">
+    <button ref={triggerRef} className="department-filter__trigger" type="button" aria-label="Filter employees by department" aria-haspopup="listbox" aria-controls={menuId} aria-expanded={open} onClick={() => open ? setOpen(false) : showMenu()} onKeyDown={event => {
+      if (event.key === "Escape" && open) { event.preventDefault(); setOpen(false); }
+      else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!open) showMenu();
+        else setActiveIndex(current => (current + (event.key === "ArrowDown" ? 1 : -1) + choices.length) % choices.length);
+      } else if ((event.key === "Enter" || event.key === " ") && open) { event.preventDefault(); choose(activeIndex); }
+    }}><span>{value || "All departments"}</span><ChevronDown size={16} aria-hidden="true" /></button>
+    {open && createPortal(<div ref={menuRef} id={menuId} className="department-filter__options" role="listbox" aria-label="Employee department choices" style={position}>{choices.map((choice, index) => <button className={[choice === value && "is-selected", index === activeIndex && "is-active"].filter(Boolean).join(" ")} type="button" role="option" aria-selected={choice === value} key={choice || "all"} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(index)}>{choice || "All departments"}</button>)}</div>, document.body)}
+  </div>;
+}
+
 function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
   const { active: searchActive } = usePageSearch();
   const searchResults = usePageSearchList<{ id: string }>("employees", "/employees");
@@ -1247,7 +1305,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
       <div className="panel employee-directory-panel">
         <div className="filters employee-filters">
           <PageSearchBar page="Employees" />
-          <select aria-label="Filter employees by department" value={department} onChange={event => setDepartment(event.target.value)}><option value="">All departments</option>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select>
+          <DepartmentFilter value={department} departments={state.settings.departments} onChange={setDepartment} />
           <select aria-label="Filter employees by status" value={status} onChange={event => setStatus(event.target.value)}><option value="">All statuses</option>{statusOptions.map(item => <option key={item}>{item}</option>)}</select>
         </div>
         {employees.length ? (

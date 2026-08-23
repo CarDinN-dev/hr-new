@@ -184,7 +184,16 @@ test("employee directory filters remain available and combine with directory sea
   await expect(page.locator(".topbar").getByRole("searchbox")).toHaveCount(0);
   await expect(page.getByLabel("Filter employees by department")).toBeVisible();
   await expect(page.getByLabel("Filter employees by status")).toBeVisible();
-  await page.getByLabel("Filter employees by department").selectOption("Finance");
+  await page.getByLabel("Filter employees by department").click();
+  const [departmentTrigger, departmentOptions] = await Promise.all([
+    page.getByLabel("Filter employees by department").boundingBox(),
+    page.locator(".department-filter__options").boundingBox(),
+  ]);
+  expect(departmentTrigger).not.toBeNull();
+  expect(departmentOptions).not.toBeNull();
+  expect(departmentOptions!.y).toBeGreaterThanOrEqual(departmentTrigger!.y + departmentTrigger!.height);
+  expect(departmentOptions!.y + departmentOptions!.height).toBeLessThanOrEqual(900);
+  await page.getByRole("option", { name: "Finance" }).click();
   const searched = page.waitForRequest(request => {
     const url = new URL(request.url());
     return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "Alice";

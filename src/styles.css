@@ -5195,6 +5195,45 @@ summary:focus-visible,
   flex: 0 1 12rem;
 }
 
+.app .employee-filters .department-filter {
+  flex: 0 1 12rem;
+}
+
+.app .department-filter__trigger {
+  width: 100%;
+  justify-content: space-between;
+  background: var(--control-bg);
+  color: var(--ink);
+}
+
+.department-filter__options {
+  position: fixed;
+  z-index: var(--z-popover);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-overlay);
+  box-shadow: var(--clinical-shadow-raised);
+}
+
+.department-filter__options button {
+  width: 100%;
+  min-height: var(--control-height);
+  justify-content: flex-start;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.department-filter__options button.is-active,
+.department-filter__options button.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--brand-red);
+}
+
 .app .form-actions,
 .app .modal-actions,
 .app .employee-modal-actions {
@@ -7855,6 +7894,11 @@ summary:focus-visible,
 
   .app .employee-filters select,
   .app .filters select {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .app .employee-filters .department-filter {
     width: 100%;
     flex-basis: auto;
   }
