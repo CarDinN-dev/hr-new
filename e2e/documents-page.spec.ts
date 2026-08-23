@@ -56,6 +56,7 @@ for (const role of ["HR", "SUPER_ADMIN"] as const) {
     await page.getByLabel("Payslip month").fill("2025-03");
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Generate payslip", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("downloaded", { timeout: 10_000 });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("Payslip-EMP-001-2025-03.pdf");
   });

@@ -364,7 +364,7 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef(new Map<string, HTMLElement>());
-  const pendingAnchorRef = useRef<{ id: string; left: number; top: number } | null>(null);
+  const anchoredShellRef = useRef<HTMLElement | null>(null);
   const searchOriginDepartmentId = useRef<string | null>(null);
   const previousSearch = useRef("");
   const query = search.trim();
@@ -447,15 +447,6 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     const viewport = viewportRef.current;
     const canvas = canvasRef.current;
     if (!viewport || !canvas) return;
-    const anchor = pendingAnchorRef.current;
-    const anchoredNode = anchor ? nodeRefs.current.get(anchor.id) : undefined;
-    if (anchor && anchoredNode) {
-      const after = anchoredNode.getBoundingClientRect();
-      const viewportRect = viewport.getBoundingClientRect();
-      viewport.scrollLeft += after.left - viewportRect.left - anchor.left;
-      viewport.scrollTop += after.top - viewportRect.top - anchor.top;
-      pendingAnchorRef.current = null;
-    }
     let frame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
@@ -583,6 +574,8 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     requestAnimationFrame(() => requestAnimationFrame(() => centerNode(id)));
   };
   const selectNode = (id: string) => {
+    const shell = nodeRefs.current.get(id)?.closest<HTMLElement>(".company-role-card-shell") ?? nodeRefs.current.get(id);
+    if (anchoredShellRef.current && anchoredShellRef.current !== shell) anchoredShellRef.current.style.translate = "";
     setSelectedId(id);
     setFocusId(id);
   };
@@ -595,16 +588,22 @@ export function DepartmentRoleHierarchy({ employees, search, rankedMatchIds, sea
     const before = nodeRefs.current.get(id)?.getBoundingClientRect();
     const viewportRect = viewport?.getBoundingClientRect();
     const anchor = viewport && viewportRect && before && !roleHierarchyIsCompact() ? { id, left: before.left - viewportRect.left, top: before.top - viewportRect.top } : null;
-    if (anchor) pendingAnchorRef.current = anchor;
+    if (!viewport || !anchor) return update();
     update();
-    if (!viewport || !anchor) return;
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const after = nodeRefs.current.get(id)?.getBoundingClientRect();
-      if (!after) return;
+      const node = nodeRefs.current.get(id);
+      if (!node) return;
+      const after = node.getBoundingClientRect();
       const currentViewport = viewport.getBoundingClientRect();
       viewport.scrollLeft += after.left - currentViewport.left - anchor.left;
       viewport.scrollTop += after.top - currentViewport.top - anchor.top;
-      pendingAnchorRef.current = null;
+      const corrected = node.getBoundingClientRect();
+      const correctedViewport = viewport.getBoundingClientRect();
+      const shell = node.closest<HTMLElement>(".company-role-card-shell") ?? node;
+      // ponytail: scrolling cannot compensate for an expansion beyond the left edge, so keep only this shell anchored.
+      shell.style.translate = `${anchor.left - (corrected.left - correctedViewport.left)}px ${anchor.top - (corrected.top - correctedViewport.top)}px`;
+      anchoredShellRef.current = shell;
+      window.dispatchEvent(new Event("resize"));
     }));
   };
   const openAncestors = (id: string) => {

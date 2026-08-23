@@ -333,11 +333,11 @@ test("Admin can explore and export the department role hierarchy without changin
   await expect.poll(async () => operationsManager.evaluate((element, before) => {
     const viewport = element.closest(".company-role-viewport")!.getBoundingClientRect();
     return Math.abs(element.getBoundingClientRect().left - viewport.left - before.x);
-  }, managerBeforeExpansion)).toBeLessThan(64);
+  }, managerBeforeExpansion)).toBeLessThan(4);
   await expect.poll(async () => operationsManager.evaluate((element, before) => {
     const viewport = element.closest(".company-role-viewport")!.getBoundingClientRect();
     return Math.abs(element.getBoundingClientRect().top - viewport.top - before.y);
-  }, managerBeforeExpansion)).toBeLessThan(64);
+  }, managerBeforeExpansion)).toBeLessThan(4);
   const operationsReport = operations.getByRole("button", { name: /Riley Report.*Employee.*OPS-003/ });
   const operationsLineLead = operations.getByRole("button", { name: /Avery Lead.*Line Manager.*OPS-004/ });
   const operationsFieldReport = operations.getByRole("button", { name: /Jordan Field.*Employee.*OPS-005/ });
@@ -508,14 +508,16 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   const searched = page.waitForRequest(request => request.url().includes("/api/v1/system/sessions?") && request.url().includes("filterSearch=target"));
   await page.getByLabel("Email search").fill("target");
   await searched;
-  await expect(page.getByRole("row", { name: /target@example\.invalid/ })).toBeVisible();
-  await page.getByRole("button", { name: "Disable" }).click();
+  const targetUser = page.getByRole("row", { name: /target@example\.invalid/ });
+  await expect(targetUser).toBeVisible();
+  await targetUser.locator("summary").click();
+  await targetUser.getByRole("button", { name: "Disable" }).click();
   const statusDialog = page.getByRole("dialog");
   await statusDialog.getByLabel("Reason").fill("System UI status regression");
   await statusDialog.getByRole("button", { name: "Confirm" }).click();
   await expect(page.getByText("Account status updated.")).toBeVisible();
 
-  await page.getByRole("button", { name: "Access" }).click();
+  await targetUser.getByRole("button", { name: "Access" }).click();
   const accessDialog = page.getByRole("dialog");
   await accessDialog.getByLabel("Permission").selectOption("permission-department-read");
   await accessDialog.getByLabel("Reason").fill("System UI access regression");

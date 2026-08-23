@@ -9902,3 +9902,125 @@ body {
   border-color: var(--bad);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent);
 }
+
+/* Rollout-safety and accessibility refinements reuse the existing theme tokens. */
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 10px;
+  left: 10px;
+  padding: 10px 14px;
+  border-radius: var(--control-radius);
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 750;
+  transform: translateY(-160%);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.app .toast .toast-action {
+  min-width: auto;
+  min-height: 32px;
+  padding: 0 8px;
+  border-color: color-mix(in srgb, currentColor 38%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: currentColor;
+  font-weight: 800;
+}
+
+.app .toast .toast-action:hover:not(:disabled) {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 13%, transparent);
+}
+
+.form-error-summary,
+.employee-discard-confirmation {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--border));
+  border-left: 3px solid var(--bad);
+  border-radius: var(--control-radius);
+  background: var(--bad-bg);
+  color: var(--text);
+}
+
+.form-error-summary ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.form-error-summary a,
+.field-error {
+  color: var(--bad);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.employee-discard-confirmation {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.employee-discard-confirmation > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.login-card .primary {
+  border-color: var(--action-red);
+  background: var(--action-red);
+}
+
+.login-card .primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--action-red) 88%, #000);
+  background: color-mix(in srgb, var(--action-red) 88%, #000);
+}
+
+@media (max-width: 720px) {
+  .app :is(button, .button-like, summary, input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    min-height: 44px;
+  }
+
+  .app .panel-head span,
+  .app .muted,
+  .app .form-grid label,
+  .app .document-grid label,
+  .app .employee-status label {
+    font-size: max(0.75rem, 12px);
+  }
+}
+
+@media (max-width: 460px) {
+  .app .topbar-inner {
+    grid-template-rows: auto auto;
+  }
+
+  .app .topbar-heading {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+  }
+
+  .app .topbar-actions {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .app .page-search {
+    grid-row: 3;
+  }
+
+  .app .page-title h1,
+  .app .topbar h1 {
+    font-size: 1.1rem;
+    white-space: nowrap;
+  }
+}

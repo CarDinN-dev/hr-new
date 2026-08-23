@@ -461,7 +461,6 @@ function finish(doc: jsPDF, settings: HrSettings, filename: string): GeneratedPd
     doc.text(`Confidential  |  Page ${current} of ${pages}`, 196, 287, { align: "right" });
   }
   const dataUrl = doc.output("datauristring");
-  doc.save(filename);
   return { filename, dataUrl, sizeBytes: Math.round((dataUrl.length * 3) / 4) };
 }
 

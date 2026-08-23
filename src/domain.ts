@@ -190,10 +190,8 @@ export function deleteEmployee(state: HrState, employeeId: string) {
 
 export function markAllAttendance(state: HrState, date: string, code: AttendanceCode) {
   const existing = state.attendance[date] || {};
-  const day = Object.fromEntries(activeEmployees(state.employees).map(employee => [employee.id, existing[employee.id] === "L" ? "L" : code]));
-  const attendanceApprovals = { ...state.attendanceApprovals };
-  delete attendanceApprovals[date];
-  return { ...state, attendance: { ...state.attendance, [date]: day }, attendanceApprovals };
+  const day = Object.fromEntries(activeEmployees(state.employees).map(employee => [employee.id, existing[employee.id] ?? code]));
+  return { ...state, attendance: { ...state.attendance, [date]: day } };
 }
 
 export function clearAttendanceDay(state: HrState, date: string) {

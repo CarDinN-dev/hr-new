@@ -230,9 +230,13 @@ describe("HR domain", () => {
 
   it("uses local calendar dates and preserves leave during bulk attendance actions", () => {
     const state = testState();
-    const [employee] = state.employees;
+    const [employee, secondEmployee] = state.employees;
     const withLeave = setAttendance(state, "2026-07-12", employee.id, "L");
-    expect(markAllAttendance(withLeave, "2026-07-12", "P").attendance["2026-07-12"][employee.id]).toBe("L");
+    const withExistingStatus = setAttendance(withLeave, "2026-07-12", secondEmployee.id, "A");
+    const marked = markAllAttendance(withExistingStatus, "2026-07-12", "P");
+    expect(marked.attendance["2026-07-12"][employee.id]).toBe("L");
+    expect(marked.attendance["2026-07-12"][secondEmployee.id]).toBe("A");
+    expect(marked.attendanceApprovals["2026-07-12"]).toEqual(withExistingStatus.attendanceApprovals["2026-07-12"]);
     expect(clearAttendanceDay(withLeave, "2026-07-12").attendance["2026-07-12"][employee.id]).toBe("L");
     expect(todayISO(new Date(2026, 6, 12, 1))).toBe("2026-07-12");
     expect(serviceYears("2026-02-30", "2026-07-12")).toBe(0);

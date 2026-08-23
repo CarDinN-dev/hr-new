@@ -128,7 +128,7 @@ import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { workflowKey } from "./features/workflow-utils";
 import { NotificationsPanel } from "./features/notifications-panel";
-import { Dialog } from "./dialog";
+import { Dialog, useDialogCloseGuard } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
 import { Pagination } from "./pagination";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
@@ -138,6 +138,9 @@ const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
 const compactNavigationQuery = "(max-width: 1280px)";
 type Theme = "light" | "dark";
+type NotifyAction = { label: string; onAction: () => void };
+type Notify = (message: string, action?: NotifyAction) => void;
+type ConfirmAction = { title: string; description: string; confirmLabel: string; danger?: boolean; onConfirm: () => void };
 const employeeFieldOptions: Record<string, readonly string[]> = {
   "Employee Category": ["Staff", "Management", "Worker", "Intern"],
   "Work Shift": ["Standard day", "Morning shift", "Evening shift", "Night shift", "Rotating shift"],
@@ -311,7 +314,7 @@ function App() {
   const queryClient = useQueryClient();
   const nav = useRouterState({ select: routerState => navItemForPath(routerState.location.pathname) });
   const [state, setState] = useState<HrState>(() => loadState());
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<{ message: string; action?: NotifyAction } | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -468,10 +471,15 @@ function App() {
         : "Page not found | MedTech HR ERP";
   }, [backendSession, nav]);
 
-  function notify(message: string) {
+  function dismissToast() {
     window.clearTimeout(toastTimer.current);
-    setToast(message);
-    toastTimer.current = window.setTimeout(() => setToast(""), 2400);
+    setToast(null);
+  }
+
+  function notify(message: string, action?: NotifyAction) {
+    window.clearTimeout(toastTimer.current);
+    setToast({ message, action });
+    toastTimer.current = window.setTimeout(() => setToast(null), action ? 5000 : 2400);
   }
 
   function saveBackendNow(): Promise<BackendSession> {
@@ -525,6 +533,7 @@ function App() {
   function savePdf(file: GeneratedPdf | undefined, _template: PdfTemplate, _employeeId = "") {
     if (!file) return;
     // ponytail: a browser download must not mutate HR data; document archival uses the Documents upload flow.
+    downloadDataUrl(file.dataUrl, file.filename);
     notify(`${file.filename} downloaded.`);
   }
 
@@ -576,7 +585,7 @@ function App() {
     return (
       <>
         <LoginPage onLogin={session => { setBackendSession(session); notify(`Signed in as ${session.email}.`); }} />
-        {toast && <div className="toast" role="status" aria-live="polite"><span>{toast}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast("")}><X size={16} aria-hidden="true" /></button></div>}
+        <Toast toast={toast} dismiss={dismissToast} />
       </>
     );
   }
@@ -613,6 +622,7 @@ function App() {
 
   return (
     <AuthorizationProvider session={backendSession}><PageSearchProvider key={nav} page={nav}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside
         id="main-navigation"
         className={`sidebar ${sidebarOpen ? "open" : ""}`}
@@ -637,7 +647,7 @@ function App() {
         </nav>
       </aside>
 
-      <main className={`workspace page-layout-${pageLayout}`}>
+      <main id="main-content" className={`workspace page-layout-${pageLayout}`}>
         {syncError && !syncAlertDismissed && <div className="sync-alert" role="alert">
           <span><strong>Changes are not saved.</strong> {syncError}</span>
           <button type="button" onClick={() => void retrySave()}>Retry save</button>
@@ -727,7 +737,7 @@ function App() {
 
       {compactNavigation && sidebarOpen && <button type="button" aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
       {modal && <Dialog onClose={closeModal}>{modal}</Dialog>}
-      {toast && <div className="toast" role="status" aria-live="polite"><span>{toast}</span><button type="button" aria-label="Dismiss notification" onClick={() => setToast("")}><X size={16} aria-hidden="true" /></button></div>}
+      <Toast toast={toast} dismiss={dismissToast} />
     </div></PageSearchProvider></AuthorizationProvider>
   );
 }
@@ -1426,19 +1436,52 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
   template?: EmployeeRecord;
   save: (employee: EmployeeRecord) => void;
   close: () => void;
-  notify: (message: string) => void;
+  notify: Notify;
 }) {
   const [draft, setDraft] = useState<EmployeeRecord>(() => structuredClone(employee ?? template ?? createEmptyEmployee(nextEmployeeCode(state.employees))));
-  const setField = (field: string, value: string) => setDraft(prev => ({
-    ...prev,
-    fields: {
-      ...prev.fields,
-      [field]: value,
-      ...(field === "Full Name"
-        ? { "First Name": splitEmployeeName(value).firstName, "Last Name": splitEmployeeName(value).lastName }
-        : {})
-    }
-  }));
+  const initialDraft = useRef<EmployeeRecord | null>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const discardFocusRef = useRef<HTMLButtonElement>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [discardRequested, setDiscardRequested] = useState(false);
+  if (!initialDraft.current) initialDraft.current = structuredClone(draft);
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(initialDraft.current);
+  const setField = (field: string, value: string) => {
+    setDraft(prev => ({
+      ...prev,
+      fields: {
+        ...prev.fields,
+        [field]: value,
+        ...(field === "Full Name"
+          ? { "First Name": splitEmployeeName(value).firstName, "Last Name": splitEmployeeName(value).lastName }
+          : {})
+      }
+    }));
+    setErrors(previous => { const { [field]: _cleared, ...remaining } = previous; return remaining; });
+  };
+
+  useDialogCloseGuard(() => {
+    if (!isDirty) return true;
+    setDiscardRequested(true);
+    return false;
+  });
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [isDirty]);
+
+  useEffect(() => {
+    if (!discardRequested) return;
+    discardFocusRef.current?.focus();
+  }, [discardRequested]);
+
+  function requestClose() {
+    if (isDirty) { setDiscardRequested(true); return; }
+    close();
+  }
 
   async function updateEmployeePhoto(file?: File) {
     if (!file) return;
@@ -1453,8 +1496,13 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
 
   function submit() {
     const email = draft.fields["E-Mail ID (Work)"].trim();
-    if (!draft.fields["Employee Code"].trim() || !draft.fields["Full Name"].trim() || !/^\S+@\S+\.\S+$/.test(email)) {
-      notify("Employee code, full name, and a valid work email are required.");
+    const nextErrors: Record<string, string> = {};
+    if (!draft.fields["Employee Code"].trim()) nextErrors["Employee Code"] = "Enter the employee code.";
+    if (!draft.fields["Full Name"].trim()) nextErrors["Full Name"] = "Enter the employee’s full name.";
+    if (!/^\S+@\S+\.\S+$/.test(email)) nextErrors["E-Mail ID (Work)"] = "Enter a valid work email address.";
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      window.requestAnimationFrame(() => summaryRef.current?.focus());
       return;
     }
     save({ ...draft, fields: { ...draft.fields, "E-Mail ID (Work)": email } });
@@ -1467,6 +1515,7 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
       <div className="employee-modal-body">
         <h2>{employee ? "Edit employee" : "Add employee"}</h2>
         <p className="muted">Complete the employee details below.</p>
+        {Object.keys(errors).length > 0 && <div ref={summaryRef} className="form-error-summary" tabIndex={-1} role="alert"><strong>Fix the highlighted employee details.</strong><ul>{Object.entries(errors).map(([field, message]) => { const id = `employee-${field.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`; return <li key={field}><a href={`#${id}`} onClick={event => { event.preventDefault(); document.getElementById(id)?.focus(); }}>{message}</a></li>; })}</ul></div>}
         <div className="employee-photo-editor">
           <EmployeeAvatar employee={draft} />
           <div>
@@ -1489,10 +1538,14 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
                 {section.fields.map(field => {
                   const options = field === "Department" ? state.settings.departments : employeeFieldOptions[field];
                   const values = options && Array.from(new Set([...options, draft.fields[field] || ""])).filter(Boolean);
-                  return <label key={field}>{field}
+                  const id = `employee-${field.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+                  const error = errors[field];
+                  const required = ["Employee Code", "Full Name", "E-Mail ID (Work)"].includes(field);
+                  return <label key={field} htmlFor={id}>{field}{required && <span aria-hidden="true"> *</span>}
                     {values
-                      ? <select aria-label={field} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
-                      : <input aria-label={field} type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
+                      ? <select id={id} name={id} aria-label={field} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} aria-required={required || undefined} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)}><option value="" />{values.map(item => <option key={item}>{item}</option>)}</select>
+                      : <input id={id} name={id} aria-label={field} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} aria-required={required || undefined} type={fieldType(field)} value={draft.fields[field] || ""} onChange={event => setField(field, event.target.value)} />}
+                    {error && <span id={`${id}-error`} className="field-error" role="alert">{error}</span>}
                   </label>;
                 })}
               </div>
@@ -1500,7 +1553,8 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
           ))}
         </div>
       </div>
-      <div className="modal-actions employee-modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={submit}>Save employee</button></div>
+      {discardRequested && <div className="employee-discard-confirmation" role="alert"><strong>Discard unsaved employee changes?</strong><span>Your edits have not been saved.</span><div><button ref={discardFocusRef} type="button" onClick={() => setDiscardRequested(false)}>Keep editing</button><button type="button" className="danger-outline" onClick={close}>Discard changes</button></div></div>}
+      <div className="modal-actions employee-modal-actions"><button type="button" onClick={requestClose}>Cancel</button><button type="button" className="primary" onClick={submit}>Save employee</button></div>
     </div>
   );
 }
@@ -1543,7 +1597,7 @@ function EmployeeProfile({ employee, state, edit, close, savePdf, canExport, can
   );
 }
 
-function Attendance({ state, setState, savePdf, notify, canManage, canExport }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: (message: string) => void; canManage: boolean; canExport: boolean }) {
+function Attendance({ state, setState, savePdf, notify, canManage, canExport }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void; notify: Notify; canManage: boolean; canExport: boolean }) {
   const authorization = useAuthorization();
   const now = new Date();
   const [date, setDate] = useState(todayISO);
@@ -1551,6 +1605,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
   const [year, setYear] = useState(now.getFullYear());
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const { active: searchActive } = usePageSearch();
   const canSearchEmployees = authorization.hasAnyPermission("employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all");
   const attendanceSearch = usePageSearchList<{ employeeId: string }>("attendance-records", `/attendance?dateFrom=${date}&dateTo=${date}`, true, false);
@@ -1617,8 +1672,47 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
     }
   }
 
+  function restoreDay(snapshot: { attendance?: Record<string, AttendanceCode>; approvals?: Record<string, "Approved" | "Not approved"> }) {
+    setState(previous => {
+      const attendance = { ...previous.attendance };
+      const attendanceApprovals = { ...previous.attendanceApprovals };
+      if (snapshot.attendance) attendance[date] = snapshot.attendance;
+      else delete attendance[date];
+      if (snapshot.approvals) attendanceApprovals[date] = snapshot.approvals;
+      else delete attendanceApprovals[date];
+      return { ...previous, attendance, attendanceApprovals };
+    });
+  }
+
+  function snapshotDay() {
+    return {
+      attendance: state.attendance[date] ? { ...state.attendance[date] } : undefined,
+      approvals: state.attendanceApprovals[date] ? { ...state.attendanceApprovals[date] } : undefined
+    };
+  }
+
+  function requestMarkUnmarkedPresent() {
+    const count = active.filter(employee => !day[employee.id]).length;
+    if (!count) return notify("Everyone already has an attendance status for this day.");
+    const snapshot = snapshotDay();
+    setConfirmation({ title: "Mark unmarked employees present?", description: `This marks ${count} currently unmarked employee${count === 1 ? "" : "s"} as present. Existing attendance and approvals stay unchanged.`, confirmLabel: "Mark present", onConfirm: () => {
+      setState(previous => markAllAttendance(previous, date, "P"));
+      notify(`${count} employee${count === 1 ? "" : "s"} marked present.`, { label: "Undo", onAction: () => restoreDay(snapshot) });
+    } });
+  }
+
+  function requestClearDay() {
+    const count = Object.values(day).filter(code => code !== "L").length;
+    if (!count) return notify("There are no non-leave attendance records to clear.");
+    const snapshot = snapshotDay();
+    setConfirmation({ title: "Clear this attendance day?", description: `This clears ${count} non-leave attendance record${count === 1 ? "" : "s"}. Leave records remain protected.`, confirmLabel: "Clear day", danger: true, onConfirm: () => {
+      setState(previous => clearAttendanceDay(previous, date));
+      notify("Attendance day cleared.", { label: "Undo", onAction: () => restoreDay(snapshot) });
+    } });
+  }
+
   return (
-    <section className="stack attendance-workspace">
+    <><section className="stack attendance-workspace">
       <div className="panel attendance-control">
         <div className="attendance-hero">
           <div>
@@ -1628,8 +1722,8 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
           {canManage && <div className="inline-controls">
             <button onClick={() => void downloadAttendanceTemplate().catch(error => notify(errorMessage(error)))}><Download size={16} /> Template</button>
             <label className="button-like"><Upload size={16} /> Import attendance<input type="file" accept=".xls,.html,.csv,.tsv,application/vnd.ms-excel,text/html,text/csv" onChange={event => { void importAttendance(event.target.files?.[0]); event.target.value = ""; }} /></label>
-            <button onClick={() => setState(prev => markAllAttendance(prev, date, "P"))}>Mark all present</button>
-            <button onClick={() => setState(prev => clearAttendanceDay(prev, date))}>Clear day</button>
+            <button onClick={requestMarkUnmarkedPresent}>Mark unmarked present</button>
+            <button className="danger-outline" onClick={requestClearDay}>Clear day</button>
           </div>}
         </div>
 
@@ -1706,7 +1800,7 @@ function Attendance({ state, setState, savePdf, notify, canManage, canExport }: 
         </div>
         <DataTable label="Monthly attendance report" columns={["Code", "Employee", "Present", "Half-day", "Leave", "Absent", "%"]} rows={stats.map(row => [row.employee.fields["Employee Code"], employeeName(row.employee), row.P, row.H, row.L, row.A, `${row.pct}%`])} />
       </div>
-    </section>
+    </section>{confirmation && <ActionConfirmation action={confirmation} close={() => setConfirmation(null)} />}</>
   );
 }
 
@@ -1723,7 +1817,7 @@ function AttendanceMetric({ label, value, tone }: { label: string; value: React.
   return <div className={`attendance-metric ${tone}`}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function BusinessTrips({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
+function BusinessTrips({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: Notify }) {
   const authorization = useAuthorization();
   const canCreate = authorization.hasAnyPermission("trip.self.create", "trip.hr.manage");
   const canReview = authorization.hasAnyPermission("trip.team.approve_manager", "trip.department.approve_manager", "trip.hr.manage");
@@ -1740,6 +1834,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
   const [perDiem, setPerDiem] = useState("250");
   const [travelCost, setTravelCost] = useState("0");
   const [advanceAmount, setAdvanceAmount] = useState("0");
+  const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const days = from && to && to >= from ? inclusiveDays(from, to) : 0;
 
   useEffect(() => {
@@ -1748,6 +1843,13 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
 
   function updateTrip(id: string, patch: Partial<BusinessTrip>) {
     setState(prev => ({ ...prev, businessTrips: prev.businessTrips.map(item => item.id === id ? { ...item, ...patch } : item) }));
+  }
+
+  function requestStatusChange(trip: BusinessTrip, status: BusinessTrip["status"]) {
+    setConfirmation({ title: `${status} this trip?`, description: `This changes the trip to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: status, danger: status === "Rejected", onConfirm: () => {
+      updateTrip(trip.id, { status });
+      notify(`Trip ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateTrip(trip.id, { status: trip.status }) });
+    } });
   }
 
   function submit() {
@@ -1775,7 +1877,7 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
     notify("Business trip request added.");
   }
 
-  return <section className="stack">
+  return <><section className="stack">
     {canCreate && <div className="panel">
       <div className="panel-head"><div><h3>Business Trips</h3><span>Requests, costs and advances.</span></div></div>
       <div className="form-grid compact">
@@ -1804,17 +1906,17 @@ function BusinessTrips({ state, setState, notify }: { state: HrState; setState: 
           formatMoney(trip.advanceAmount, state.settings.company.currency),
           <Badge key="status" value={trip.status} />,
           <div className="row-actions" key="actions">
-            {canReview && trip.status === "Pending" && <><button onClick={() => updateTrip(trip.id, { status: "Approved" })}>Approve</button><button onClick={() => updateTrip(trip.id, { status: "Rejected" })}>Reject</button></>}
-            {canClose && trip.status === "Approved" && <button onClick={() => updateTrip(trip.id, { status: "Closed" })}>Close</button>}
+            {canReview && trip.status === "Pending" && <><button onClick={() => requestStatusChange(trip, "Approved")}>Approve</button><button className="danger-outline" onClick={() => requestStatusChange(trip, "Rejected")}>Reject</button></>}
+            {canClose && trip.status === "Approved" && <button onClick={() => requestStatusChange(trip, "Closed")}>Close</button>}
             {(authorization.hasPermission("trip.hr.manage") || (authorization.hasPermission("trip.self.create") && trip.employeeId === authorization.scopes.employeeId)) && trip.status === "Pending" && <button onClick={() => confirmDelete(`trip to ${trip.destination}`) && setState(prev => ({ ...prev, businessTrips: prev.businessTrips.filter(item => item.id !== trip.id) }))}>Delete</button>}
           </div>
         ];
       })} />
     </div>
-  </section>;
+  </section>{confirmation && <ActionConfirmation action={confirmation} close={() => setConfirmation(null)} />}</>;
 }
 
-function Expenses({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void }) {
+function Expenses({ state, setState, notify }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: Notify }) {
   const authorization = useAuthorization();
   const canCreate = authorization.hasPermission("expense.self.create");
   const canReview = authorization.hasAnyPermission("expense.team.approve_manager", "expense.department.approve_manager", "expense.hr.approve");
@@ -1827,6 +1929,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
   const [date, setDate] = useState(todayISO());
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const totals = expenseTotals(state.expenses);
   const employeeTrips = state.businessTrips.filter(item => item.employeeId === employeeId);
 
@@ -1836,6 +1939,13 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
 
   function updateExpense(id: string, patch: Partial<EmployeeExpense>) {
     setState(prev => ({ ...prev, expenses: prev.expenses.map(item => item.id === id ? { ...item, ...patch } : item) }));
+  }
+
+  function requestStatusChange(expense: EmployeeExpense, status: EmployeeExpense["status"]) {
+    setConfirmation({ title: `${status} this expense?`, description: `This changes the expense to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: status === "Paid" ? "Mark paid" : status, danger: status === "Rejected", onConfirm: () => {
+      updateExpense(expense.id, { status });
+      notify(`Expense ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateExpense(expense.id, { status: expense.status }) });
+    } });
   }
 
   function submit() {
@@ -1850,7 +1960,7 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
     notify("Expense submitted.");
   }
 
-  return <section className="stack">
+  return <><section className="stack">
     <div className="settlement-preview">
       <div><span>Submitted</span><strong>{formatMoney(totals.submitted, state.settings.company.currency)}</strong></div>
       <div><span>Approved unpaid</span><strong>{formatMoney(totals.approved, state.settings.company.currency)}</strong></div>
@@ -1881,21 +1991,21 @@ function Expenses({ state, setState, notify }: { state: HrState; setState: React
           trip?.destination || "-",
           <Badge key="status" value={expense.status} />,
           <div className="row-actions" key="actions">
-            {canReview && expense.status === "Submitted" && <><button onClick={() => updateExpense(expense.id, { status: "Approved" })}>Approve</button><button onClick={() => updateExpense(expense.id, { status: "Rejected" })}>Reject</button></>}
-            {canPay && expense.status === "Approved" && <button onClick={() => updateExpense(expense.id, { status: "Paid" })}>Mark paid</button>}
+            {canReview && expense.status === "Submitted" && <><button onClick={() => requestStatusChange(expense, "Approved")}>Approve</button><button className="danger-outline" onClick={() => requestStatusChange(expense, "Rejected")}>Reject</button></>}
+            {canPay && expense.status === "Approved" && <button onClick={() => requestStatusChange(expense, "Paid")}>Mark paid</button>}
             {(authorization.hasPermission("expense.hr.approve") || (authorization.hasPermission("expense.self.create") && expense.employeeId === authorization.scopes.employeeId)) && expense.status === "Submitted" && <button onClick={() => confirmDelete(`${expense.category} expense`) && setState(prev => ({ ...prev, expenses: prev.expenses.filter(item => item.id !== expense.id) }))}>Delete</button>}
           </div>
         ];
       })} />
     </div>
-  </section>;
+  </section>{confirmation && <ActionConfirmation action={confirmation} close={() => setConfirmation(null)} />}</>;
 }
 
 function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
   state: HrState;
   setState: React.Dispatch<React.SetStateAction<HrState>>;
   setModal: (content: React.ReactNode) => void;
-  notify: (message: string) => void;
+  notify: Notify;
   close: () => void;
   canOverrideLimit: boolean;
 }) {
@@ -1903,6 +2013,7 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
   const searchResults = usePageSearchList<{ id: string }>("loans", "/loans");
   const [status, setStatus] = useState("");
   const [department, setDepartment] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const loans = state.loans ?? [];
   const active = loans.filter(loan => loan.status === "Active");
   const outstanding = loans.filter(loan => loan.status === "Active" || loan.status === "Paused").reduce((sum, loan) => sum + loanBalance(state, loan.id), 0);
@@ -1920,14 +2031,21 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
 
   function updateStatus(loan: EmployeeLoan, nextStatus: EmployeeLoan["status"]) {
     setState(prev => ({ ...prev, loans: prev.loans.map(item => item.id === loan.id ? { ...item, status: nextStatus } : item) }));
-    notify(`Loan ${nextStatus.toLowerCase()}.`);
+  }
+
+  function requestStatusChange(loan: EmployeeLoan, status: EmployeeLoan["status"]) {
+    const description = status === "Cancelled" ? "Future payroll deductions will stop. You can undo this immediately after confirmation." : `This changes the loan to ${status.toLowerCase()}. You can undo it immediately after confirmation.`;
+    setConfirmation({ title: `${status} this loan?`, description, confirmLabel: status === "Cancelled" ? "Cancel loan" : status, danger: status === "Cancelled", onConfirm: () => {
+      updateStatus(loan, status);
+      notify(`Loan ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateStatus(loan, loan.status) });
+    } });
   }
 
   function openLoanForm(loan?: EmployeeLoan) {
     setModal(<LoanForm state={state} loan={loan} save={saveLoan} close={close} notify={notify} />);
   }
 
-  return <section className="stack">
+  return <><section className="stack">
     <div className="payroll-grid">
       <div className="payroll-tile"><span>Active loans</span><strong>{active.length}</strong><p>{loans.filter(loan => loan.status === "Paused").length} paused</p></div>
       <div className="payroll-tile"><span>Total outstanding</span><strong>{formatMoney(outstanding, state.settings.company.currency)}</strong><p>Active and paused loans</p></div>
@@ -1959,15 +2077,15 @@ function Loans({ state, setState, setModal, notify, close, canOverrideLimit }: {
           <Badge key="status" value={loan.status} />,
           <div className="row-actions" key="actions">
             <button onClick={() => setModal(<LoanDetails state={state} loan={loan} close={close} />)}>View</button>
-            {canOverrideLimit && loan.status === "Draft" && <><button onClick={() => openLoanForm(loan)}>Edit</button><button className="primary" onClick={() => updateStatus(loan, "Active")}>Activate</button></>}
-            {canOverrideLimit && loan.status === "Active" && <button onClick={() => updateStatus(loan, "Paused")}>Pause</button>}
-            {canOverrideLimit && loan.status === "Paused" && <button onClick={() => updateStatus(loan, "Active")}>Resume</button>}
-            {canOverrideLimit && (loan.status === "Active" || loan.status === "Paused") && <><button onClick={() => setModal(<LoanDeductionForm state={state} loan={loan} setState={setState} notify={notify} close={close} canOverrideLimit={canOverrideLimit} />)}>Set deduction</button><button onClick={() => setModal(<LoanPaymentForm state={state} loan={loan} setState={setState} notify={notify} close={close} />)}>Record payment</button><button className="danger-outline" onClick={() => window.confirm("Cancel this loan? Future payroll deductions will stop.") && updateStatus(loan, "Cancelled")}>Cancel</button></>}
+            {canOverrideLimit && loan.status === "Draft" && <><button onClick={() => openLoanForm(loan)}>Edit</button><button className="primary" onClick={() => requestStatusChange(loan, "Active")}>Activate</button></>}
+            {canOverrideLimit && loan.status === "Active" && <button onClick={() => requestStatusChange(loan, "Paused")}>Pause</button>}
+            {canOverrideLimit && loan.status === "Paused" && <button onClick={() => requestStatusChange(loan, "Active")}>Resume</button>}
+            {canOverrideLimit && (loan.status === "Active" || loan.status === "Paused") && <><button onClick={() => setModal(<LoanDeductionForm state={state} loan={loan} setState={setState} notify={notify} close={close} canOverrideLimit={canOverrideLimit} />)}>Set deduction</button><button onClick={() => setModal(<LoanPaymentForm state={state} loan={loan} setState={setState} notify={notify} close={close} />)}>Record payment</button><button className="danger-outline" onClick={() => requestStatusChange(loan, "Cancelled")}>Cancel</button></>}
           </div>
         ];
       })} />
     </div>
-  </section>;
+  </section>{confirmation && <ActionConfirmation action={confirmation} close={() => setConfirmation(null)} />}</>;
 }
 
 function LoanForm({ state, loan, save, close, notify }: { state: HrState; loan?: EmployeeLoan; save: (loan: EmployeeLoan) => void; close: () => void; notify: (message: string) => void }) {
@@ -2392,7 +2510,7 @@ function OfferDocumentsDialog({ candidate, job, value, saving, onChange, onSave,
   </Dialog>;
 }
 
-function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
+function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: React.Dispatch<React.SetStateAction<HrState>>; notify: Notify; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
   const authorization = useAuthorization();
   const canManage = authorization.hasPermission("eos.manage");
   const canExport = authorization.hasAnyPermission("document.hr.manage", "report.export");
@@ -2403,11 +2521,19 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
   const [employeeId, setEmployeeId] = useState(activeEmployees(employees)[0]?.id || employees[0]?.id || "");
   const [asOf, setAsOf] = useState(todayISO());
   const [reason, setReason] = useState("End of service");
+  const [confirmation, setConfirmation] = useState<ConfirmAction | null>(null);
   const employee = employees.find(item => item.id === employeeId);
   const summary = employee ? eosSummary(employee, state, asOf) : undefined;
 
   function updateRecord(id: string, patch: Partial<EosRecord>) {
     setState(prev => ({ ...prev, eosRecords: prev.eosRecords.map(item => item.id === id ? { ...item, ...patch } : item) }));
+  }
+
+  function requestRecordStatus(record: EosRecord, status: EosRecord["status"]) {
+    setConfirmation({ title: `${status} this settlement?`, description: `This changes the settlement to ${status.toLowerCase()}. You can undo it immediately after confirmation.`, confirmLabel: status === "Paid" ? "Mark paid" : status, onConfirm: () => {
+      updateRecord(record.id, { status });
+      notify(`Settlement ${status.toLowerCase()}.`, { label: "Undo", onAction: () => updateRecord(record.id, { status: record.status }) });
+    } });
   }
 
   function createRecord() {
@@ -2424,10 +2550,19 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
       ...prev,
       employees: prev.employees.map(item => item.id === record.employeeId ? { ...item, status: "Resigned", fields: { ...item.fields, "ESB Date": record.asOf } } : item)
     }));
-    notify("Employee marked resigned.");
   }
 
-  return <section className="stack">
+  function requestCloseEmployee(record: EosRecord) {
+    const employee = state.employees.find(item => item.id === record.employeeId);
+    if (!employee) return;
+    const fields = { ...employee.fields };
+    setConfirmation({ title: "Close this employee record?", description: "This marks the employee as resigned and records the settlement date. You can undo it immediately after confirmation.", confirmLabel: "Close employee", danger: true, onConfirm: () => {
+      closeEmployee(record);
+      notify("Employee marked resigned.", { label: "Undo", onAction: () => setState(previous => ({ ...previous, employees: previous.employees.map(item => item.id === employee.id ? { ...item, status: employee.status, fields } : item) })) });
+    } });
+  }
+
+  return <><section className="stack">
     <div className="panel">
       <div className="panel-head"><div><h3>EOS, Gratuity & Settlement</h3><span>Gratuity, leave balance, expenses and outstanding advances.</span></div></div>
       {employee && summary && <div className="eos-mode-grid">
@@ -2468,23 +2603,23 @@ function EOS({ state, setState, notify, savePdf }: { state: HrState; setState: R
           formatMoney(record.netSettlement, state.settings.company.currency),
           <Badge key="status" value={record.status} />,
           <div className="row-actions" key="actions">
-            {canManage && record.status === "Draft" && <button onClick={() => updateRecord(record.id, { status: "Approved" })}>Approve</button>}
-            {canManage && record.status === "Approved" && <button onClick={() => updateRecord(record.id, { status: "Paid" })}>Mark paid</button>}
-            {canManage && record.status === "Paid" && <button onClick={() => closeEmployee(record)}>Close employee</button>}
+            {canManage && record.status === "Draft" && <button onClick={() => requestRecordStatus(record, "Approved")}>Approve</button>}
+            {canManage && record.status === "Approved" && <button onClick={() => requestRecordStatus(record, "Paid")}>Mark paid</button>}
+            {canManage && record.status === "Paid" && <button className="danger-outline" onClick={() => requestCloseEmployee(record)}>Close employee</button>}
             {canExport && rowEmployee && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEosPdf(record, rowEmployee, state.settings), "final_settlement", rowEmployee.id))}>PDF</button>}
             {canManage && <button onClick={() => confirmDelete(`EOS record dated ${formatDate(record.asOf)}`) && setState(prev => ({ ...prev, eosRecords: prev.eosRecords.filter(item => item.id !== record.id) }))}>Delete</button>}
           </div>
         ];
       })} />
     </div>
-  </section>;
+  </section>{confirmation && <ActionConfirmation action={confirmation} close={() => setConfirmation(null)} />}</>;
 }
 
 function Documents({ state, session, notify, savePdf }: { state: HrState; session: BackendSession; notify: (message: string) => void; savePdf: (file: GeneratedPdf | undefined, template: PdfTemplate, employeeId?: string) => void }) {
   const authorization = useAuthorization();
   const canGenerate = authorization.hasPermission("document.hr.manage");
   const active = activeEmployees(state.employees);
-  const [employeeId, setEmployeeId] = useState("");
+  const [employeeId, setEmployeeId] = useState(active[0]?.id || "");
   const [template, setTemplate] = useState<PdfTemplate>("offer_letter");
   const [payslipPeriod, setPayslipPeriod] = useState(() => {
     const today = new Date();
@@ -2493,11 +2628,16 @@ function Documents({ state, session, notify, savePdf }: { state: HrState; sessio
   const [notes, setNotes] = useState("");
   const employee = state.employees.find(item => item.id === employeeId);
 
-  function generate() {
+  async function generate() {
     if (!employee) return notify("Select an employee first.");
     const [year, month] = payslipPeriod.split("-").map(Number);
     if (template === "payslip" && (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12)) return notify("Select a valid payslip month.");
-    void withPdf(pdf => savePdf(pdf.saveEmployeeDocumentPdf(template, employee, state, notes, template === "payslip" ? { year, month } : undefined), template, employee.id));
+    try {
+      const file = await withPdf(pdf => pdf.saveEmployeeDocumentPdf(template, employee, state, notes, template === "payslip" ? { year, month } : undefined));
+      savePdf(file, template, employee.id);
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   }
 
   return (
@@ -2510,7 +2650,7 @@ function Documents({ state, session, notify, savePdf }: { state: HrState; sessio
           {template === "payslip"
             ? <label className="wide">Payslip month<input type="month" min="2000-01" max="2100-12" required value={payslipPeriod} onChange={event => setPayslipPeriod(event.target.value)} /></label>
             : <label className="wide">Notes / purpose<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bank request, visa processing, warning details, settlement notes..." /></label>}
-          <button className="primary" onClick={generate}>{template === "payslip" ? "Generate payslip" : "Generate PDF"}</button>
+          <button className="primary" onClick={() => void generate()}>{template === "payslip" ? "Generate payslip" : "Generate PDF"}</button>
         </div>
         {employee && ["final_settlement", "gratuity_statement", "clearance_certificate"].includes(template) && <SettlementPreview employee={employee} state={state} />}
       </div>}
@@ -2687,6 +2827,17 @@ function Badge({ value }: { value: string }) {
   const lower = value.toLowerCase();
   const tone = lower.includes("active") || lower.includes("approved") || lower.includes("filled") || lower.includes("final") || lower.includes("present") ? "good" : lower.includes("pending") || lower.includes("draft") || lower.includes("review") || lower.includes("late") || lower.includes("half") || lower.includes("leave") ? "warn" : lower.includes("reject") || lower.includes("terminat") || lower.includes("absent") ? "bad" : "neutral";
   return <span className={`badge ${tone}`}>{value}</span>;
+}
+
+function Toast({ toast, dismiss }: { toast: { message: string; action?: NotifyAction } | null; dismiss: () => void }) {
+  if (!toast) return null;
+  return <div className="toast" role="status" aria-live="polite"><span>{toast.message}</span>{toast.action && <button className="toast-action" type="button" onClick={() => { const action = toast.action; dismiss(); action?.onAction(); }}>{toast.action.label}</button>}<button type="button" aria-label="Dismiss notification" onClick={dismiss}><X size={16} aria-hidden="true" /></button></div>;
+}
+
+function ActionConfirmation({ action, close }: { action: ConfirmAction; close: () => void }) {
+  return <Dialog title={action.title} description={action.description} onClose={close}>
+    <div className="modal-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className={action.danger ? "danger-outline" : "primary"} onClick={() => { action.onConfirm(); close(); }}>{action.confirmLabel}</button></div>
+  </Dialog>;
 }
 
 type CommonProps = {

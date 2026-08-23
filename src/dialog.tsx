@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -10,9 +10,21 @@ type DialogProps = {
   wide?: boolean;
 };
 
+const DialogCloseGuardContext = createContext<((guard: (() => boolean) | null) => void) | null>(null);
+
+export function useDialogCloseGuard(guard: () => boolean) {
+  const setCloseGuard = useContext(DialogCloseGuardContext);
+  useEffect(() => {
+    if (!setCloseGuard) return;
+    setCloseGuard(guard);
+    return () => setCloseGuard(null);
+  }, [guard, setCloseGuard]);
+}
+
 export function Dialog({ children, onClose, title, description, wide = false }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null);
+  const closeGuardRef = useRef<(() => boolean) | null>(null);
   const titleId = useId();
   const descriptionId = useId();
 
@@ -42,27 +54,32 @@ export function Dialog({ children, onClose, title, description, wide = false }: 
     };
   }, []);
 
+  const setCloseGuard = useCallback((guard: (() => boolean) | null) => { closeGuardRef.current = guard; }, []);
+
   function requestClose() {
+    if (closeGuardRef.current && !closeGuardRef.current()) return;
     if (dialogRef.current?.open) dialogRef.current.close();
     onClose();
   }
 
   return createPortal(
-    <dialog
-      ref={dialogRef}
-      className={`modal-dialog${wide ? " modal-dialog-wide" : ""}`}
-      aria-labelledby={title ? titleId : undefined}
-      aria-describedby={description ? descriptionId : undefined}
-      onCancel={event => { event.preventDefault(); requestClose(); }}
-      onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}
-    >
-      <div className={`modal${wide ? " modal-wide" : ""}`}>
-        <button className="modal-close" type="button" onClick={requestClose} aria-label="Close dialog"><X size={18} /></button>
-        {title && <h2 id={titleId}>{title}</h2>}
-        {description && <p id={descriptionId}>{description}</p>}
-        {children}
-      </div>
-    </dialog>,
+    <DialogCloseGuardContext.Provider value={setCloseGuard}>
+      <dialog
+        ref={dialogRef}
+        className={`modal-dialog${wide ? " modal-dialog-wide" : ""}`}
+        aria-labelledby={title ? titleId : undefined}
+        aria-describedby={description ? descriptionId : undefined}
+        onCancel={event => { event.preventDefault(); requestClose(); }}
+        onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}
+      >
+        <div className={`modal${wide ? " modal-wide" : ""}`}>
+          <button className="modal-close" type="button" onClick={requestClose} aria-label="Close dialog"><X size={18} /></button>
+          {title && <h2 id={titleId}>{title}</h2>}
+          {description && <p id={descriptionId}>{description}</p>}
+          {children}
+        </div>
+      </dialog>
+    </DialogCloseGuardContext.Provider>,
     document.body
   );
 }
