@@ -4,6 +4,7 @@ import { Download, ShieldCheck } from "lucide-react";
 import { apiDownload, apiList, apiPage, apiRequest, hasActiveSuperAdminRole, hasPermission, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { usePageSearch, usePageSearchStatus } from "../page-search";
+import { paginationLabel } from "./workflow-utils";
 
 type AuditEvent = {
   id: string;
@@ -172,7 +173,7 @@ export function AuditHistoryPage({ session, notify }: { session: BackendSession;
       {events.isPending ? <p className="muted">Loading audit history…</p> : events.isError ? <p className="sync-alert">{events.error.message}</p> : <>
         <div className="table-wrap table-wide" role="region" aria-label="Audit history"><table><thead><tr><th>Sequence</th><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Reason</th></tr></thead><tbody>{events.data?.data.map(item => <tr key={item.id}><td data-label="Sequence">{item.sequence}</td><td data-label="Time">{new Date(item.occurredAtUtc).toLocaleString()}</td><td data-label="Actor">{item.actorEmailSnapshot || "System"}</td><td data-label="Action">{item.action}</td><td data-label="Resource">{item.resourceType}{item.resourceId ? <small><br />{item.resourceId}</small> : null}</td><td data-label="Outcome">{item.outcome}</td><td data-label="Reason">{item.reason || "—"}</td></tr>)}</tbody></table></div>
         <div className="audit-pagination">
-          <span className="muted" aria-live="polite">Page {page} of {totalPages} · {total} entries</span>
+          <span className="muted" aria-live="polite">{paginationLabel(total, page, pagination.limit, "entries")} · Page {page} of {totalPages}</span>
           <label>Entries per page<select value={pagination.limit} onChange={event => setPagination({ page: 1, limit: Number(event.target.value) })}><option value={15}>15</option><option value={50}>50</option><option value={100}>100</option></select></label>
           <div className="inline-controls"><button disabled={page <= 1 || events.isFetching} onClick={() => setPagination(previous => ({ ...previous, page: previous.page - 1 }))}>Previous</button><button disabled={page >= totalPages || events.isFetching} onClick={() => setPagination(previous => ({ ...previous, page: previous.page + 1 }))}>Next</button></div>
         </div>

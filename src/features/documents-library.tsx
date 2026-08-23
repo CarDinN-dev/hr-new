@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Download, FileText } from "lucide-react";
 import { apiDownload, apiPage, hasAnyPermission, hasPermission, type BackendSession } from "../api";
 import { EmployeePicker, type EmployeePickerOption } from "../employee-picker";
-import { displayMoney, displayTitle, saveDownload, workflowKey } from "./workflow-utils";
+import { displayMoney, displayTitle, paginationLabel, saveDownload, workflowKey } from "./workflow-utils";
 import { usePageSearch, usePageSearchStatus } from "../page-search";
 
 type PaginationMeta = { total: number; page: number; limit: number; totalPages: number };
@@ -42,5 +42,5 @@ function TableLoading({ label }: { label: string }) {
 function Pagination({ meta, loading, onPage, label }: { meta?: PaginationMeta; loading: boolean; onPage: (page: number) => void; label: string }) {
   const page = meta?.page ?? 1;
   const totalPages = meta?.totalPages ?? 1;
-  return <div className="audit-pagination"><span className="muted" aria-live="polite">Page {page} of {totalPages} · {meta?.total ?? 0} {label}</span><div className="inline-controls"><button disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>Previous</button><button disabled={page >= totalPages || loading} onClick={() => onPage(page + 1)}>Next</button></div></div>;
+  return <div className="audit-pagination"><span className="muted" aria-live="polite">{paginationLabel(meta?.total ?? 0, page, meta?.limit ?? 15, label)} · Page {page} of {totalPages}</span><div className="inline-controls"><button disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>Previous</button><button disabled={page >= totalPages || loading} onClick={() => onPage(page + 1)}>Next</button></div></div>;
 }

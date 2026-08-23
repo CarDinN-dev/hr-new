@@ -126,7 +126,7 @@ import type { GeneratedPdf } from "./pdf";
 import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
-import { workflowKey } from "./features/workflow-utils";
+import { paginationLabel, workflowKey } from "./features/workflow-utils";
 import { NotificationsPanel } from "./features/notifications-panel";
 import { Dialog } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
@@ -1274,7 +1274,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
           </div>
         ) : <div className="empty">No employees match the filters.</div>}
         {employees.length > 20 && <div className="audit-pagination">
-          <span className="muted" aria-live="polite">Page {page} of {totalPages} · 20 employees per page</span>
+          <span className="muted" aria-live="polite">{paginationLabel(employees.length, page, 20, "employees")} · Page {page} of {totalPages}</span>
           <div className="inline-controls">
             <button disabled={page <= 1} onClick={() => setPage(current => current - 1)}>Previous</button>
             <button disabled={page >= totalPages} onClick={() => setPage(current => current + 1)}>Next</button>

@@ -9791,3 +9791,32 @@ body {
 .app .audit-pagination > .muted {
   font-variant-numeric: tabular-nums;
 }
+
+/* Shared operational states: native controls, themed consistently. */
+.app button[aria-busy="true"] {
+  cursor: progress;
+}
+
+.app button.danger-outline:hover:not(:disabled),
+.app .danger-outline:hover:not([aria-disabled="true"]) {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+}
+
+.app :is(button, summary, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.app .sync-alert {
+  border-left: 3px solid var(--bad);
+}
+
+.app .audit-pagination {
+  flex-wrap: wrap;
+}
+
+.app .audit-pagination > .muted {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
