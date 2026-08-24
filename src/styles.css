@@ -10352,6 +10352,45 @@ body {
   margin-left: auto;
 }
 
+.app .candidate-tile[draggable="true"] {
+  cursor: grab;
+  transition: opacity var(--motion-standard), border-color var(--motion-standard), background-color var(--motion-standard), box-shadow var(--motion-standard);
+}
+
+.app .candidate-tile[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.app .candidate-tile-dragging {
+  opacity: 0.48;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.app .pipeline-column-drop-target {
+  border-color: var(--action-red);
+  background: color-mix(in srgb, var(--action-red) 7%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--action-red) 28%, transparent);
+}
+
+.app .pipeline-drop-hint {
+  display: block;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed color-mix(in srgb, var(--action-red) 55%, transparent);
+  border-radius: 10px;
+  color: var(--action-red);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app .candidate-tile[draggable="true"] {
+    transition: none;
+  }
+}
+
 .app .settings-save-panel {
   display: grid;
   align-content: start;

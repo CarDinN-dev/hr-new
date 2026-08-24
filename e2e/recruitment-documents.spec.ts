@@ -25,20 +25,22 @@ const candidates = [
   },
   {
     id: "candidate-hired", version: 3, jobId: job.id, name: "Salem Driver", email: "salem@example.invalid", phone: "+974 5000 3000",
-    stage: "HIRED", rating: "5", notes: "", appliedOn: "2026-07-30", employeeId: "employee-driver"
+    stage: "HIRED", rating: "5", notes: "", appliedOn: "2026-07-30", hiredAt: new Date().toISOString(), employeeId: "employee-driver"
   }
 ];
 
 function envelope(data: unknown) { return { success: true, data }; }
 
-async function installApi(page: Page) {
+async function installApi(page: Page, expiredHired = false) {
   let assessmentLeaseToken = "";
+  const apiCandidates = structuredClone(candidates);
+  if (expiredHired) apiCandidates[2].hiredAt = "2020-01-01T00:00:00.000Z";
   await page.addInitScript(value => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify(value)), session);
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
     if (path === "/recruitment/jobs") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope([job])) });
-    if (path === "/recruitment/candidates" && request.method() === "GET") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(candidates)) });
+    if (path === "/recruitment/candidates" && request.method() === "GET") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(apiCandidates)) });
     if (/^\/recruitment\/candidates\/[^/]+\/(interview-assessment|offer-letter|nda)\.pdf$/.test(path)) {
       const name = path.split("/").at(-1) || "document.pdf";
       return route.fulfill({ contentType: "application/pdf", headers: { "content-disposition": `attachment; filename*=UTF-8''${name}` }, body: "%PDF-1.3\n%%EOF" });
@@ -50,15 +52,23 @@ async function installApi(page: Page) {
         assessmentLeaseToken = editorToken;
       }
       if (request.method() === "DELETE" && assessmentLeaseToken === editorToken) assessmentLeaseToken = "";
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 1 })) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...apiCandidates[0], version: 1 })) });
     }
     if (/^\/recruitment\/candidates\/[^/]+\/interview-assessment$/.test(path) && request.method() === "PATCH") {
       const assessment = request.postDataJSON().interviewAssessment;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 2, rating: assessment.overallRating || 0, interviewAssessment: { ...candidates[0].interviewAssessment, ...assessment } })) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...apiCandidates[0], version: 2, rating: assessment.overallRating || 0, interviewAssessment: { ...apiCandidates[0].interviewAssessment, ...assessment } })) });
+    }
+    if (/^\/recruitment\/candidates\/[^/]+\/stage$/.test(path) && request.method() === "PATCH") {
+      const id = path.split("/").at(-2)!;
+      const candidate = apiCandidates.find(item => item.id === id)!;
+      candidate.stage = request.postDataJSON().stage;
+      candidate.version += 1;
+      if (candidate.stage === "HIRED" && !candidate.hiredAt) candidate.hiredAt = new Date().toISOString();
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(candidate)) });
     }
     if (/^\/recruitment\/candidates\/[^/]+$/.test(path) && request.method() === "PATCH") {
       const offerDetails = request.postDataJSON().offerDetails;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[1], offerDetails: { ...candidates[1].offerDetails, ...offerDetails } })) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...apiCandidates[1], offerDetails: { ...apiCandidates[1].offerDetails, ...offerDetails } })) });
     }
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(path === "/organization-settings" ? null : [])) });
   });
@@ -139,6 +149,40 @@ test("recruitment keeps editors on demand and groups secondary actions", async (
   await expect(candidateCard.getByRole("button", { name: "Edit candidate" })).toBeVisible();
   await expect(candidateCard.getByRole("button", { name: "Delete candidate" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
+test("candidate tiles support direct drag, selector moves, and hired expiry", async ({ page }) => {
+  await installApi(page);
+  await page.goto("/recruitment");
+
+  const interviewTile = page.locator(".candidate-tile").filter({ hasText: "Amina Saleh" });
+  const offerColumn = page.locator(".pipeline-column").filter({ has: page.locator(".pipeline-head").getByText("Offer", { exact: true }) });
+  await expect(interviewTile).toHaveAttribute("draggable", "true");
+  const dragSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/stage") && request.method() === "PATCH");
+  const transfer = await page.evaluateHandle(() => new DataTransfer());
+  await interviewTile.dispatchEvent("dragstart", { dataTransfer: transfer });
+  await offerColumn.dispatchEvent("dragover", { dataTransfer: transfer });
+  await expect(offerColumn).toHaveClass(/pipeline-column-drop-target/);
+  await offerColumn.dispatchEvent("drop", { dataTransfer: transfer });
+  expect((await dragSave).postDataJSON()).toMatchObject({ stage: "OFFER", expectedVersion: 1 });
+  await expect(offerColumn).toContainText("Amina Saleh");
+
+  const offerTile = page.locator(".candidate-tile").filter({ hasText: "Noor Ahmed" });
+  const selectorSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-offer/stage") && request.method() === "PATCH");
+  await offerTile.getByLabel("Move Noor Ahmed").selectOption("Rejected");
+  expect((await selectorSave).postDataJSON()).toMatchObject({ stage: "REJECTED", expectedVersion: 2 });
+  await expect(page.locator(".pipeline-column").filter({ has: page.locator(".pipeline-head").getByText("Rejected", { exact: true }) })).toContainText("Noor Ahmed");
+
+  const hiredTile = page.locator(".candidate-tile").filter({ hasText: "Salem Driver" });
+  await expect(hiredTile).toHaveAttribute("draggable", "false");
+  await expect(hiredTile.getByRole("combobox")).toHaveCount(0);
+});
+
+test("hides hired tiles after their three-day visibility window", async ({ page }) => {
+  await installApi(page, true);
+  await page.goto("/recruitment");
+  await expect(page.getByText("Salem Driver", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Job openings" }).getByRole("row").filter({ hasText: job.title }).getByRole("cell").nth(3)).toHaveText("1");
 });
 
 test("assessment autosaves on blur and releases its edit lease when closed", async ({ page }) => {

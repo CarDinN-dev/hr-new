@@ -288,7 +288,7 @@ export async function loadBackendState(current: HrState, session: BackendSession
       candidates: candidates.map(item => ({
         id: String(item.id), version: Number(item.version ?? 1), jobId: String(item.jobId), name: String(item.name || ""), email: String(item.email || ""), phone: String(item.phone || ""),
         stage: titleCase(String(item.stage)) as HrState["candidates"][number]["stage"], rating: Number(item.rating || 0), notes: String(item.notes || ""),
-        appliedOn: dateOnly(String(item.appliedOn || "")), employeeId: item.employeeId ? String(item.employeeId) : undefined,
+        appliedOn: dateOnly(String(item.appliedOn || "")), hiredAt: item.hiredAt ? String(item.hiredAt) : undefined, employeeId: item.employeeId ? String(item.employeeId) : undefined,
         interviewAssessment: jsonObject(item.interviewAssessment) as HrState["candidates"][number]["interviewAssessment"],
         offerDetails: jsonObject(item.offerDetails) as HrState["candidates"][number]["offerDetails"]
       })),

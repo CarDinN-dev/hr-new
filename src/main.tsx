@@ -140,6 +140,7 @@ import "./styles.css";
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
 const compactNavigationQuery = "(max-width: 1280px)";
+const hiredCandidateVisibilityMs = 3 * 24 * 60 * 60 * 1000;
 type Theme = "light" | "dark";
 type NotifyAction = { label: string; onAction: () => void };
 type Notify = (message: string, action?: NotifyAction) => void;
@@ -2287,7 +2288,12 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const jobSearch = usePageSearchList<{ id: string }>("recruitment-jobs", "/recruitment/jobs");
   const candidateSearch = usePageSearchList<{ id: string }>("recruitment-candidates", "/recruitment/candidates");
   const visibleJobs = rankedPageSearchItems(state.jobs, jobSearch.data, searchActive, job => job.id, match => match.id);
-  const visibleCandidates = rankedPageSearchItems(state.candidates, candidateSearch.data, searchActive, candidate => candidate.id, match => match.id);
+  const [pipelineTime, setPipelineTime] = useState(() => Date.now());
+  const [draggedCandidateId, setDraggedCandidateId] = useState("");
+  const draggedCandidateIdRef = useRef("");
+  const [dropStage, setDropStage] = useState<RecruitmentCandidate["stage"] | "">("");
+  const pipelineCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" || !candidate.hiredAt || Date.parse(candidate.hiredAt) > pipelineTime - hiredCandidateVisibilityMs);
+  const visibleCandidates = rankedPageSearchItems(pipelineCandidates, candidateSearch.data, searchActive, candidate => candidate.id, match => match.id);
   const [editingJobId, setEditingJobId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [jobDept, setJobDept] = useState(state.settings.departments[0] || "");
@@ -2314,13 +2320,23 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [assessmentVersion, setAssessmentVersion] = useState(0);
   const [assessmentInitialDraft, setAssessmentInitialDraft] = useState<InterviewAssessment>({});
   const [offerCandidateId, setOfferCandidateId] = useState("");
-  const pipeline = candidatePipeline(state.candidates);
+  const pipeline = candidatePipeline(pipelineCandidates);
   const vacancies = new Map(state.jobs.map(job => [job.id, recruitmentJobVacancies(job, state.candidates)]));
   const openJobs = state.jobs.filter(job => job.status === "Open" && !vacancies.get(job.id)?.isFilled);
   const openPositions = openJobs.reduce((sum, job) => sum + (vacancies.get(job.id)?.remaining ?? 0), 0);
   const editingCandidateJobId = state.candidates.find(candidate => candidate.id === editingCandidateId)?.jobId;
   const candidateJobs = state.jobs.filter(job => openJobs.some(openJob => openJob.id === job.id) || job.id === editingCandidateJobId);
   const activeCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" && candidate.stage !== "Rejected");
+
+  useEffect(() => {
+    const nextExpiry = Math.min(...state.candidates
+      .filter(candidate => candidate.stage === "Hired" && candidate.hiredAt)
+      .map(candidate => Date.parse(candidate.hiredAt!) + hiredCandidateVisibilityMs)
+      .filter(expiry => expiry > pipelineTime));
+    if (!Number.isFinite(nextExpiry)) return;
+    const timer = window.setTimeout(() => setPipelineTime(Date.now()), Math.max(0, nextExpiry - Date.now()) + 1);
+    return () => window.clearTimeout(timer);
+  }, [pipelineTime, state.candidates]);
 
   useEffect(() => {
     if (!candidateJobId && candidateJobs[0]) setCandidateJobId(candidateJobs[0].id);
@@ -2475,6 +2491,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       rating: Math.min(5, Math.max(0, Number(candidateRating) || 0)),
       notes: candidateNotes.trim(),
       appliedOn: editingCandidateId ? existingCandidate?.appliedOn || todayISO() : todayISO(),
+      hiredAt: existingCandidate?.hiredAt,
       employeeId: existingCandidate?.employeeId,
       interviewAssessment: existingCandidate?.interviewAssessment,
       offerDetails: existingCandidate?.offerDetails
@@ -2492,15 +2509,48 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
 
   function moveCandidate(id: string, stage: RecruitmentCandidate["stage"]) {
     const candidate = state.candidates.find(item => item.id === id);
+    if (!candidate || candidate.stage === stage) return false;
     if (candidate?.stage === "Hired" && stage !== "Hired") return notify("A hired candidate must be managed through the employee offboarding process.");
     const job = candidate && state.jobs.find(item => item.id === candidate.jobId);
     if (candidate && job && candidate.stage !== "Hired" && stage === "Hired" && (job.status !== "Open" || vacancies.get(job.id)?.isFilled)) {
-      return notify("All openings for this job are filled or closed.");
+      notify("All openings for this job are filled or closed.");
+      return false;
     }
     setState(prev => ({
       ...prev,
       candidates: prev.candidates.map(candidate => candidate.id === id ? { ...candidate, stage } : candidate)
     }));
+    notify(`${candidate.name} moved to ${stage}.`);
+    return true;
+  }
+
+  function dragCandidate(event: React.DragEvent<HTMLElement>, candidate: RecruitmentCandidate) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", candidate.id);
+    draggedCandidateIdRef.current = candidate.id;
+    setDraggedCandidateId(candidate.id);
+  }
+
+  function draggedCandidate(event: React.DragEvent<HTMLElement>) {
+    const id = draggedCandidateIdRef.current || draggedCandidateId || event.dataTransfer.getData("text/plain");
+    return state.candidates.find(candidate => candidate.id === id);
+  }
+
+  function allowCandidateDrop(event: React.DragEvent<HTMLElement>, stage: RecruitmentCandidate["stage"]) {
+    const candidate = draggedCandidate(event);
+    if (!candidate || candidate.stage === "Hired" || candidate.stage === stage) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dropStage !== stage) setDropStage(stage);
+  }
+
+  function dropCandidate(event: React.DragEvent<HTMLElement>, stage: RecruitmentCandidate["stage"]) {
+    event.preventDefault();
+    const candidate = draggedCandidate(event);
+    if (candidate) moveCandidate(candidate.id, stage);
+    draggedCandidateIdRef.current = "";
+    setDraggedCandidateId("");
+    setDropStage("");
   }
 
   function addAsEmployee(candidate: RecruitmentCandidate) {
@@ -2616,7 +2666,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
 
     <div className="panel">
       <div className="panel-head">
-        <div><h3>Candidate Pipeline</h3><span>Move candidates between stages with the dropdown on each card.</span></div>
+        <div><h3>Candidate Pipeline</h3><span id="candidate-pipeline-help">Drag a candidate tile to any stage, or use its stage selector. Hired candidates are final.</span></div>
         {canManage && (candidateEditorOpen ? <button type="button" onClick={closeCandidateEditor}>Cancel</button> : <button className="primary" type="button" onClick={openCandidateEditor} disabled={!candidateJobs.length}>Add candidate</button>)}
       </div>
       {canManage && candidateEditorOpen && <div className="recruitment-editor"><div className="form-grid compact">
@@ -2624,7 +2674,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
         <label>Applying for<select id="candidate-job" name="candidate-job" value={candidateJobId} disabled={!candidateJobs.length} onChange={event => setCandidateJobId(event.target.value)}>{candidateJobs.map(job => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
         <label htmlFor="candidate-email">Email<input id="candidate-email" name="candidate-email" type="email" autoComplete="email" spellCheck={false} value={candidateEmail} onChange={event => setCandidateEmail(event.target.value)} /></label>
         <label htmlFor="candidate-phone">Phone<input id="candidate-phone" name="candidate-phone" type="tel" autoComplete="tel" value={candidatePhone} onChange={event => setCandidatePhone(event.target.value)} /></label>
-        <label>Stage<select id="candidate-stage" name="candidate-stage" value={candidateStage} disabled={!editingCandidateId} onChange={event => setCandidateStage(event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(stage => <option key={stage}>{stage}</option>)}</select></label>
+        <label>Stage<select id="candidate-stage" name="candidate-stage" value={candidateStage} disabled={!editingCandidateId || candidateStage === "Hired"} onChange={event => setCandidateStage(event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(stage => <option key={stage}>{stage}</option>)}</select></label>
         <label>Rating (0-5)<input id="candidate-rating" name="candidate-rating" type="number" min="0" max="5" value={candidateRating} onChange={event => setCandidateRating(event.target.value)} /></label>
         <label className="wide" htmlFor="candidate-notes">Notes<textarea id="candidate-notes" name="candidate-notes" value={candidateNotes} onChange={event => setCandidateNotes(event.target.value)} /></label>
       </div>
@@ -2633,15 +2683,18 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       <div className="recruitment-pipeline">
         {candidateStages.map(stage => {
           const cards = visibleCandidates.filter(candidate => candidate.stage === stage);
-          return <div className="pipeline-column" key={stage}>
+          const isDropTarget = Boolean(draggedCandidateId && dropStage === stage);
+          return <div className={`pipeline-column${isDropTarget ? " pipeline-column-drop-target" : ""}`} key={stage} onDragOver={event => allowCandidateDrop(event, stage)} onDrop={event => dropCandidate(event, stage)}>
             <div className="pipeline-head"><strong>{stage}</strong><span>{cards.length}</span></div>
+            {isDropTarget && <span className="pipeline-drop-hint" aria-live="polite">Drop in {stage}</span>}
             {cards.length ? cards.map(candidate => {
               const job = state.jobs.find(item => item.id === candidate.jobId);
-              return <article className="candidate-card" key={candidate.id}>
+              const draggable = canManage && candidate.stage !== "Hired";
+              return <article className={`candidate-card candidate-tile${draggedCandidateId === candidate.id ? " candidate-tile-dragging" : ""}`} key={candidate.id} draggable={draggable} aria-describedby={draggable ? "candidate-pipeline-help" : undefined} title={draggable ? `Drag ${candidate.name} to another stage` : undefined} onDragStart={event => dragCandidate(event, candidate)} onDragEnd={() => { draggedCandidateIdRef.current = ""; setDraggedCandidateId(""); setDropStage(""); }}>
                 <div><strong>{candidate.name}</strong><span>{job?.title || "(no job)"}</span></div>
                 <p>{candidate.email || candidate.phone || "No contact added"}</p>
                 {candidate.rating > 0 && <em>Rating: {candidate.rating}/5</em>}
-                {canManage ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
+                {canManage && candidate.stage !== "Hired" ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
                 {candidate.notes && <small>{candidate.notes}</small>}
                 <div className="row-actions">
                   {candidate.stage === "Interview" && candidate.interviewAssessment && canManage && <button className="primary" type="button" onClick={() => void openAssessment(candidate)}>Open assessment</button>}

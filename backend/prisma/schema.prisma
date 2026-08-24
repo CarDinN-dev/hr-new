@@ -1536,6 +1536,7 @@ model RecruitmentCandidate {
   email      String
   phone      String?
   stage      CandidateStage @default(APPLIED)
+  hiredAt    DateTime?
   rating     Decimal        @default(0) @db.Decimal(3, 2)
   notes      String?
   interviewAssessment Json?

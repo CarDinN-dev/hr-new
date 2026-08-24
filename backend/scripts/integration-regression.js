@@ -543,12 +543,14 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     },
   }, sessions.HR);
   assert.equal(recruitmentCandidate.status, 201, JSON.stringify(recruitmentCandidate.payload));
-  for (const stage of ['SCREENING', 'INTERVIEW']) {
-    recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
-      method: 'PATCH', body: { stage, expectedVersion: recruitmentCandidate.data.version },
-    }, sessions.HR);
-    assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
-  }
+  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'INTERVIEW', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  assert.ok(recruitmentCandidate.data.interviewAssessment);
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'OFFER', expectedVersion: recruitmentCandidate.data.version - 1 },
+  }, sessions.HR)).status, 409);
   const assessmentEditorToken = randomUUID();
   const assessmentLease = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/interview-assessment/lease`, {
     method: 'POST', body: { editorToken: assessmentEditorToken },
@@ -589,6 +591,14 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     method: 'PATCH', body: { stage: 'OFFER', expectedVersion: recruitmentCandidate.data.version },
   }, sessions.HR);
   assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'REJECTED', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  recruitmentCandidate = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'OFFER', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR);
+  assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
   for (const document of ['offer-letter', 'nda']) {
     const pdf = await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/${document}.pdf`, {}, sessions.HR);
     assert.equal(pdf.status, 200);
@@ -605,12 +615,10 @@ test('real Nest application enforces production RBAC and workflow invariants', {
       },
     }, sessions.HR);
     assert.equal(candidate.status, 201, JSON.stringify(candidate.payload));
-    for (const stage of ['SCREENING', 'INTERVIEW', 'OFFER']) {
-      candidate = await api(`/recruitment/candidates/${candidate.data.id}/stage`, {
-        method: 'PATCH', body: { stage, expectedVersion: candidate.data.version },
-      }, sessions.HR);
-      assert.equal(candidate.status, 200, JSON.stringify(candidate.payload));
-    }
+    candidate = await api(`/recruitment/candidates/${candidate.data.id}/stage`, {
+      method: 'PATCH', body: { stage: 'OFFER', expectedVersion: candidate.data.version },
+    }, sessions.HR);
+    assert.equal(candidate.status, 200, JSON.stringify(candidate.payload));
     additionalRecruitmentCandidates.push(candidate);
   }
 
@@ -618,6 +626,10 @@ test('real Nest application enforces production RBAC and workflow invariants', {
     method: 'PATCH', body: { stage: 'HIRED', expectedVersion: recruitmentCandidate.data.version },
   }, sessions.HR);
   assert.equal(recruitmentCandidate.status, 200, JSON.stringify(recruitmentCandidate.payload));
+  assert.ok(recruitmentCandidate.data.hiredAt);
+  assert.equal((await api(`/recruitment/candidates/${recruitmentCandidate.data.id}/stage`, {
+    method: 'PATCH', body: { stage: 'SCREENING', expectedVersion: recruitmentCandidate.data.version },
+  }, sessions.HR)).status, 400);
   assert.equal((await prisma.recruitmentJob.findUniqueOrThrow({ where: { id: recruitmentJob.data.id } })).status, 'OPEN');
 
   let secondRecruitmentCandidate = await api(`/recruitment/candidates/${additionalRecruitmentCandidates[0].data.id}/stage`, {

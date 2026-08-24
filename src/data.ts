@@ -158,6 +158,7 @@ export type RecruitmentCandidate = {
   rating: number;
   notes: string;
   appliedOn: string;
+  hiredAt?: string;
   employeeId?: string;
   interviewAssessment?: InterviewAssessment;
   offerDetails?: OfferDetails;

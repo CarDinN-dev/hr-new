@@ -285,16 +285,12 @@ export class OperationsService {
       const candidate = await tx.recruitmentCandidate.findFirst({ where: { id, deletedAt: null }, include: { job: { include: { department: true } } } });
       if (!candidate) throw new NotFoundException('Candidate not found');
       this.assertExpectedVersion(candidate.version, dto.expectedVersion, 'Candidate');
-      const order: CandidateStage[] = [CandidateStage.APPLIED, CandidateStage.SCREENING, CandidateStage.INTERVIEW, CandidateStage.OFFER, CandidateStage.HIRED];
-      const rejection = dto.stage === CandidateStage.REJECTED;
       if (candidate.stage === CandidateStage.HIRED && dto.stage !== CandidateStage.HIRED) {
-        throw new BadRequestException('A hired candidate cannot be rejected; use the employee offboarding process instead');
+        throw new BadRequestException('A hired candidate must be managed through the employee offboarding process');
       }
-      const current = order.indexOf(candidate.stage);
-      const next = order.indexOf(dto.stage);
       const linkingHiredEmployee = candidate.stage === CandidateStage.HIRED && dto.stage === CandidateStage.HIRED && Boolean(dto.employeeId);
-      if (!rejection && !linkingHiredEmployee && (current < 0 || next !== current + 1)) throw new BadRequestException('Candidate stages must move forward one step at a time');
       const fillingOpening = candidate.stage !== CandidateStage.HIRED && dto.stage === CandidateStage.HIRED;
+      const now = new Date();
       let hiredCount = 0;
       if (fillingOpening) {
         if (candidate.job.status !== RecruitmentJobStatus.OPEN) throw new BadRequestException('This recruitment job is not open');
@@ -309,7 +305,8 @@ export class OperationsService {
       const updated = await tx.recruitmentCandidate.update({
         where: { id }, data: {
           stage: dto.stage,
-          employeeId: dto.stage === CandidateStage.HIRED ? dto.employeeId : candidate.employeeId,
+          employeeId: dto.stage === CandidateStage.HIRED ? dto.employeeId ?? candidate.employeeId : candidate.employeeId,
+          hiredAt: fillingOpening ? now : undefined,
           interviewAssessment: dto.stage === CandidateStage.INTERVIEW && !candidate.interviewAssessment ? {
             candidateName: candidate.name, position: candidate.job.title, department: candidate.job.department?.name ?? '',
             date: this.day(new Date()).toISOString(), time: '', venue: '', hiringName: '', hiringDepartment: candidate.job.department?.name ?? '', hiringPosition: '',

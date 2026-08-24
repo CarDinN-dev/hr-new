@@ -255,20 +255,8 @@ async function syncRecruitment(before: HrState, after: HrState, departmentIds: M
       if (!same(oldPayload, payload)) await request(`/recruitment/candidates/${candidate.id}`, "PATCH", payload);
     }
     if (old && old.stage !== candidate.stage) {
-      const stages = ["Applied", "Screening", "Interview", "Offer", "Hired"];
-      const oldIndex = stages.indexOf(old.stage);
-      const nextIndex = stages.indexOf(candidate.stage);
-      if (candidate.stage === "Rejected") {
-        await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: "REJECTED", expectedVersion: nextVersion });
-        nextVersion = (nextVersion ?? 0) + 1;
-      } else if (oldIndex >= 0 && nextIndex > oldIndex) {
-        for (let index = oldIndex + 1; index <= nextIndex; index += 1) {
-          await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: enumValue(stages[index]), expectedVersion: nextVersion });
-          nextVersion = (nextVersion ?? 0) + 1;
-        }
-      } else {
-        throw new Error("Candidate stages can only move forward or be rejected.");
-      }
+      await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: enumValue(candidate.stage), expectedVersion: nextVersion });
+      nextVersion = (nextVersion ?? 0) + 1;
     }
     if (old && candidate.stage === "Hired" && candidate.employeeId && candidate.employeeId !== old.employeeId) {
       await request(`/recruitment/candidates/${candidate.id}/stage`, "PATCH", { stage: "HIRED", employeeId: candidate.employeeId, expectedVersion: nextVersion });
