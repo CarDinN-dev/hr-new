@@ -10377,7 +10377,18 @@ body {
 
 .app .candidate-card .row-actions > :is(button, .card-actions-menu),
 .app .candidate-card .card-actions-menu > summary {
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
+}
+
+.app .candidate-card .card-actions-menu {
+  justify-self: stretch;
+}
+
+.app .candidate-card .card-actions-menu > summary {
+  display: flex;
+  justify-content: space-between;
 }
 
 .app .candidate-tile-dragging {
