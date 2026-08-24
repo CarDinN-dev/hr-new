@@ -32,6 +32,7 @@ const candidates = [
 function envelope(data: unknown) { return { success: true, data }; }
 
 async function installApi(page: Page) {
+  let assessmentLeaseToken = "";
   await page.addInitScript(value => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify(value)), session);
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
@@ -43,6 +44,12 @@ async function installApi(page: Page) {
       return route.fulfill({ contentType: "application/pdf", headers: { "content-disposition": `attachment; filename*=UTF-8''${name}` }, body: "%PDF-1.3\n%%EOF" });
     }
     if (/^\/recruitment\/candidates\/[^/]+\/interview-assessment\/lease$/.test(path)) {
+      const editorToken = request.postDataJSON().editorToken;
+      if (request.method() === "POST") {
+        if (assessmentLeaseToken && assessmentLeaseToken !== editorToken) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ success: false, message: "Assessment is being edited by Recruitment HR" }) });
+        assessmentLeaseToken = editorToken;
+      }
+      if (request.method() === "DELETE" && assessmentLeaseToken === editorToken) assessmentLeaseToken = "";
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 1 })) });
     }
     if (/^\/recruitment\/candidates\/[^/]+\/interview-assessment$/.test(path) && request.method() === "PATCH") {
@@ -115,6 +122,20 @@ test("assessment autosaves on blur and releases its edit lease when closed", asy
   const release = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment/lease") && request.method() === "DELETE");
   await assessment.getByRole("button", { name: "Close", exact: true }).click();
   await release;
+});
+
+test("assessment reuses its edit lease after a page refresh", async ({ page }) => {
+  await installApi(page);
+  await page.goto("/recruitment");
+  const firstLease = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment/lease") && request.method() === "POST");
+  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  const firstToken = (await firstLease).postDataJSON().editorToken;
+
+  await page.reload();
+  const refreshedLease = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment/lease") && request.method() === "POST");
+  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  expect((await refreshedLease).postDataJSON().editorToken).toBe(firstToken);
+  await expect(page.getByRole("dialog", { name: "Interview assessment" })).toBeVisible();
 });
 
 test("interview assessment stays aligned and actionable across screen sizes", async ({ page }) => {

@@ -2447,7 +2447,9 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
 
   async function openAssessment(candidate: RecruitmentCandidate) {
     const job = state.jobs.find(item => item.id === candidate.jobId);
-    const editorToken = crypto.randomUUID();
+    const editorTokenKey = `medtech-hr-assessment-lease:${authorization.session.sessionId}:${candidate.id}`;
+    const editorToken = sessionStorage.getItem(editorTokenKey) || crypto.randomUUID();
+    sessionStorage.setItem(editorTokenKey, editorToken);
     try {
       const locked = await apiRequest<AssessmentResponse>(`/recruitment/candidates/${candidate.id}/interview-assessment/lease`, { method: "POST", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ editorToken }) });
       setAssessmentInitialDraft(locked.interviewAssessment ?? candidate.interviewAssessment ?? { date: todayISO(), hiringDepartment: job?.dept || "" });
@@ -2477,7 +2479,10 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     const candidateId = assessmentCandidateId;
     const editorToken = assessmentEditorToken;
     if (candidateId && editorToken) {
-      try { await apiRequest(`/recruitment/candidates/${candidateId}/interview-assessment/lease`, { method: "DELETE", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ editorToken }) }); }
+      try {
+        await apiRequest(`/recruitment/candidates/${candidateId}/interview-assessment/lease`, { method: "DELETE", csrfToken: authorization.session.csrfToken, body: JSON.stringify({ editorToken }) });
+        sessionStorage.removeItem(`medtech-hr-assessment-lease:${authorization.session.sessionId}:${candidateId}`);
+      }
       catch (error) { notify(`${errorMessage(error)} The edit lock will expire shortly.`); }
     }
     setAssessmentCandidateId("");
@@ -2663,10 +2668,11 @@ function InterviewAssessmentDialog({ candidate, job, value, version, onSave, onR
   function set(key: keyof InterviewAssessment, next: string | number | undefined, immediately = false) {
     const updated = { ...draftRef.current, [key]: next };
     draftRef.current = updated;
+    dirtyKeys.current.add(key);
     setDraft(updated); setSaveState("unsaved");
     window.clearTimeout(timer.current);
     if (immediately) void persist();
-    else timer.current = window.setTimeout(() => { void persist(); }, 600);
+    else timer.current = window.setTimeout(() => { void persist(); }, 200);
   }
 
   async function requestClose() {
@@ -2744,7 +2750,7 @@ function OfferDocumentsDialog({ candidate, job, value, onSave, onDownload, onClo
     setDraft(updated); setSaveState("unsaved");
     window.clearTimeout(timer.current);
     if (immediately) void persist();
-    else timer.current = window.setTimeout(() => { void persist(); }, 600);
+    else timer.current = window.setTimeout(() => { void persist(); }, 200);
   }
 
   async function requestClose() {
