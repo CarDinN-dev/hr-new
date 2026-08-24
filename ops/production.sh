@@ -86,7 +86,7 @@ deploy() {
   rollback() {
     docker tag "medtech-hr-erp-api:rollback-$stamp" medtech-hr-erp-api:latest
     docker tag "medtech-hr-erp:rollback-$stamp" medtech-hr-erp:latest
-    "${compose[@]}" up -d --no-deps api hr-erp
+    "${compose[@]}" up -d --force-recreate --no-deps api hr-erp
     echo "Deployment failed; application images rolled back to $stamp." >&2
   }
   trap rollback ERR
@@ -96,9 +96,9 @@ deploy() {
   "${compose[@]}" build api hr-erp
   "${compose[@]}" run --rm --no-deps api npx prisma migrate deploy
   "${compose[@]}" run --rm --no-deps api npm run rbac:sync
-  "${compose[@]}" up -d --no-deps api
+  "${compose[@]}" up -d --force-recreate --no-deps api
   wait_healthy medtech-hr-erp-api-1
-  "${compose[@]}" up -d --no-deps hr-erp
+  "${compose[@]}" up -d --force-recreate --no-deps hr-erp
   wait_healthy medtech-hr-erp-hr-erp-1
   curl --fail --silent --show-error http://127.0.0.1:8080/healthz >/dev/null
   curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/health >/dev/null
