@@ -2635,11 +2635,12 @@ function InterviewAssessmentDialog({ candidate, job, value, version, onSave, onR
         const updated = await onSave(changes, versionRef.current);
         versionRef.current = updated.version;
         const saved = updated.interviewAssessment ?? draftRef.current;
-        if (draftRef.current === before) {
+        const unchanged = draftRef.current === before;
+        if (unchanged) {
           draftRef.current = saved;
           setDraft(saved);
         }
-        changedKeys.forEach(key => { if (draftRef.current[key] === before[key]) dirtyKeys.current.delete(key); });
+        changedKeys.forEach(key => { if (unchanged || draftRef.current[key] === before[key]) dirtyKeys.current.delete(key); });
         retryCount.current = 0;
         setSaveState(dirtyKeys.current.size ? "unsaved" : "saved");
         return true;
@@ -2715,11 +2716,12 @@ function OfferDocumentsDialog({ candidate, job, value, onSave, onDownload, onClo
       setSaveState("saving");
       try {
         const saved = await onSave(changes);
-        if (draftRef.current === before) {
+        const unchanged = draftRef.current === before;
+        if (unchanged) {
           draftRef.current = { ...before, ...saved };
           setDraft(draftRef.current);
         }
-        changedKeys.forEach(key => { if (draftRef.current[key] === before[key]) dirtyKeys.current.delete(key); });
+        changedKeys.forEach(key => { if (unchanged || draftRef.current[key] === before[key]) dirtyKeys.current.delete(key); });
         retryCount.current = 0;
         setSaveState(dirtyKeys.current.size ? "unsaved" : "saved");
         return true;
