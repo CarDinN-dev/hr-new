@@ -151,19 +151,30 @@ test("recruitment keeps editors on demand and groups secondary actions", async (
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
-test("candidate tiles support direct drag, selector moves, and hired expiry", async ({ page }) => {
+test("candidate tiles support pointer drag, selector moves, and hired expiry", async ({ page }) => {
   await installApi(page);
   await page.goto("/recruitment");
 
   const interviewTile = page.locator(".candidate-tile").filter({ hasText: "Amina Saleh" });
   const offerColumn = page.locator(".pipeline-column").filter({ has: page.locator(".pipeline-head").getByText("Offer", { exact: true }) });
-  await expect(interviewTile).toHaveAttribute("draggable", "true");
+  await interviewTile.scrollIntoViewIfNeeded();
+  const dragHandle = interviewTile.getByTitle("Drag Amina Saleh to another stage");
+  expect((await dragHandle.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  const primaryActionBox = await interviewTile.getByRole("button", { name: "Open assessment" }).boundingBox();
+  const moreActionsBox = await interviewTile.getByText("More actions", { exact: true }).boundingBox();
+  if (!primaryActionBox || !moreActionsBox) throw new Error("Candidate actions were not visible.");
+  expect(Math.abs(primaryActionBox.x - moreActionsBox.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(primaryActionBox.width - moreActionsBox.width)).toBeLessThanOrEqual(1);
   const dragSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/stage") && request.method() === "PATCH");
-  const transfer = await page.evaluateHandle(() => new DataTransfer());
-  await interviewTile.dispatchEvent("dragstart", { dataTransfer: transfer });
-  await offerColumn.dispatchEvent("dragover", { dataTransfer: transfer });
+  const sourceBox = await dragHandle.boundingBox();
+  const targetBox = await offerColumn.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error("Candidate drag targets were not visible.");
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 8, sourceBox.y + sourceBox.height / 2 + 8);
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 48);
   await expect(offerColumn).toHaveClass(/pipeline-column-drop-target/);
-  await offerColumn.dispatchEvent("drop", { dataTransfer: transfer });
+  await page.mouse.up();
   expect((await dragSave).postDataJSON()).toMatchObject({ stage: "OFFER", expectedVersion: 1 });
   await expect(offerColumn).toContainText("Amina Saleh");
 
@@ -174,7 +185,7 @@ test("candidate tiles support direct drag, selector moves, and hired expiry", as
   await expect(page.locator(".pipeline-column").filter({ has: page.locator(".pipeline-head").getByText("Rejected", { exact: true }) })).toContainText("Noor Ahmed");
 
   const hiredTile = page.locator(".candidate-tile").filter({ hasText: "Salem Driver" });
-  await expect(hiredTile).toHaveAttribute("draggable", "false");
+  await expect(hiredTile.locator(".candidate-drag-handle")).toHaveCount(0);
   await expect(hiredTile.getByRole("combobox")).toHaveCount(0);
 });
 

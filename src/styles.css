@@ -10343,22 +10343,41 @@ body {
   flex: 0 0 auto;
 }
 
-.app .candidate-card .row-actions {
-  flex-wrap: wrap;
+.app .candidate-tile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app .candidate-drag-handle {
+  display: inline-flex;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
   align-items: center;
-}
-
-.app .candidate-card .card-actions-menu {
-  margin-left: auto;
-}
-
-.app .candidate-tile[draggable="true"] {
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  color: var(--text-muted);
   cursor: grab;
-  transition: opacity var(--motion-standard), border-color var(--motion-standard), background-color var(--motion-standard), box-shadow var(--motion-standard);
+  touch-action: none;
+  user-select: none;
 }
 
-.app .candidate-tile[draggable="true"]:active {
+.app .candidate-drag-handle:active {
   cursor: grabbing;
+}
+
+.app .candidate-card .row-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.app .candidate-card .row-actions > :is(button, .card-actions-menu),
+.app .candidate-card .card-actions-menu > summary {
+  width: 100%;
 }
 
 .app .candidate-tile-dragging {
@@ -10386,7 +10405,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app .candidate-tile[draggable="true"] {
+  .app .candidate-tile,
+  .app .candidate-drag-handle {
     transition: none;
   }
 }
@@ -10433,13 +10453,8 @@ body {
     padding: 12px;
   }
 
-  .app .candidate-card .row-actions > .primary,
   .app .settings-save-panel .primary {
     width: 100%;
-  }
-
-  .app .candidate-card .card-actions-menu {
-    margin-left: 0;
   }
 
   .app .recruitment-workspace .card-actions-menu[open] {

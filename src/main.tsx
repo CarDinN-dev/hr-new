@@ -21,6 +21,7 @@ import {
   Eye,
   FileText,
   GitBranch,
+  GripVertical,
   HandCoins,
   ImagePlus,
   LayoutDashboard,
@@ -2290,7 +2291,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const visibleJobs = rankedPageSearchItems(state.jobs, jobSearch.data, searchActive, job => job.id, match => match.id);
   const [pipelineTime, setPipelineTime] = useState(() => Date.now());
   const [draggedCandidateId, setDraggedCandidateId] = useState("");
-  const draggedCandidateIdRef = useRef("");
+  const candidatePointerDragRef = useRef<{ id: string; pointerId: number; startX: number; startY: number; active: boolean } | null>(null);
   const [dropStage, setDropStage] = useState<RecruitmentCandidate["stage"] | "">("");
   const pipelineCandidates = state.candidates.filter(candidate => candidate.stage !== "Hired" || !candidate.hiredAt || Date.parse(candidate.hiredAt) > pipelineTime - hiredCandidateVisibilityMs);
   const visibleCandidates = rankedPageSearchItems(pipelineCandidates, candidateSearch.data, searchActive, candidate => candidate.id, match => match.id);
@@ -2524,33 +2525,42 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     return true;
   }
 
-  function dragCandidate(event: React.DragEvent<HTMLElement>, candidate: RecruitmentCandidate) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", candidate.id);
-    draggedCandidateIdRef.current = candidate.id;
-    setDraggedCandidateId(candidate.id);
-  }
-
-  function draggedCandidate(event: React.DragEvent<HTMLElement>) {
-    const id = draggedCandidateIdRef.current || draggedCandidateId || event.dataTransfer.getData("text/plain");
-    return state.candidates.find(candidate => candidate.id === id);
-  }
-
-  function allowCandidateDrop(event: React.DragEvent<HTMLElement>, stage: RecruitmentCandidate["stage"]) {
-    const candidate = draggedCandidate(event);
-    if (!candidate || candidate.stage === "Hired" || candidate.stage === stage) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    if (dropStage !== stage) setDropStage(stage);
-  }
-
-  function dropCandidate(event: React.DragEvent<HTMLElement>, stage: RecruitmentCandidate["stage"]) {
-    event.preventDefault();
-    const candidate = draggedCandidate(event);
-    if (candidate) moveCandidate(candidate.id, stage);
-    draggedCandidateIdRef.current = "";
+  function clearCandidatePointerDrag() {
+    candidatePointerDragRef.current = null;
     setDraggedCandidateId("");
     setDropStage("");
+  }
+
+  function candidateDropStageAtPoint(clientX: number, clientY: number, candidateId: string) {
+    const candidate = state.candidates.find(item => item.id === candidateId);
+    const stage = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-stage]")?.dataset.stage;
+    if (!candidate || candidate.stage === "Hired" || !stage || !candidateStages.includes(stage as RecruitmentCandidate["stage"]) || stage === candidate.stage) return "";
+    return stage as RecruitmentCandidate["stage"];
+  }
+
+  function beginCandidatePointerDrag(event: React.PointerEvent<HTMLSpanElement>, candidate: RecruitmentCandidate) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    candidatePointerDragRef.current = { id: candidate.id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false };
+  }
+
+  function updateCandidatePointerDrag(event: React.PointerEvent<HTMLSpanElement>) {
+    const drag = candidatePointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+    drag.active = true;
+    setDraggedCandidateId(drag.id);
+    const stage = candidateDropStageAtPoint(event.clientX, event.clientY, drag.id);
+    setDropStage(current => current === stage ? current : stage);
+  }
+
+  function finishCandidatePointerDrag(event: React.PointerEvent<HTMLSpanElement>) {
+    const drag = candidatePointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const stage = drag.active ? candidateDropStageAtPoint(event.clientX, event.clientY, drag.id) : "";
+    clearCandidatePointerDrag();
+    if (stage) moveCandidate(drag.id, stage);
   }
 
   function addAsEmployee(candidate: RecruitmentCandidate) {
@@ -2665,8 +2675,8 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     </div>
 
     <div className="panel">
-      <div className="panel-head">
-        <div><h3>Candidate Pipeline</h3><span id="candidate-pipeline-help">Drag a candidate tile to any stage, or use its stage selector. Hired candidates are final.</span></div>
+        <div className="panel-head">
+        <div><h3>Candidate Pipeline</h3><span id="candidate-pipeline-help">Use a tile's drag handle to move it to any stage, or use its stage selector. Hired candidates are final.</span></div>
         {canManage && (candidateEditorOpen ? <button type="button" onClick={closeCandidateEditor}>Cancel</button> : <button className="primary" type="button" onClick={openCandidateEditor} disabled={!candidateJobs.length}>Add candidate</button>)}
       </div>
       {canManage && candidateEditorOpen && <div className="recruitment-editor"><div className="form-grid compact">
@@ -2684,14 +2694,14 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
         {candidateStages.map(stage => {
           const cards = visibleCandidates.filter(candidate => candidate.stage === stage);
           const isDropTarget = Boolean(draggedCandidateId && dropStage === stage);
-          return <div className={`pipeline-column${isDropTarget ? " pipeline-column-drop-target" : ""}`} key={stage} onDragOver={event => allowCandidateDrop(event, stage)} onDrop={event => dropCandidate(event, stage)}>
+          return <div className={`pipeline-column${isDropTarget ? " pipeline-column-drop-target" : ""}`} data-stage={stage} key={stage}>
             <div className="pipeline-head"><strong>{stage}</strong><span>{cards.length}</span></div>
             {isDropTarget && <span className="pipeline-drop-hint" aria-live="polite">Drop in {stage}</span>}
             {cards.length ? cards.map(candidate => {
               const job = state.jobs.find(item => item.id === candidate.jobId);
-              const draggable = canManage && candidate.stage !== "Hired";
-              return <article className={`candidate-card candidate-tile${draggedCandidateId === candidate.id ? " candidate-tile-dragging" : ""}`} key={candidate.id} draggable={draggable} aria-describedby={draggable ? "candidate-pipeline-help" : undefined} title={draggable ? `Drag ${candidate.name} to another stage` : undefined} onDragStart={event => dragCandidate(event, candidate)} onDragEnd={() => { draggedCandidateIdRef.current = ""; setDraggedCandidateId(""); setDropStage(""); }}>
-                <div><strong>{candidate.name}</strong><span>{job?.title || "(no job)"}</span></div>
+              const movable = canManage && candidate.stage !== "Hired";
+              return <article className={`candidate-card candidate-tile${draggedCandidateId === candidate.id ? " candidate-tile-dragging" : ""}`} key={candidate.id} aria-describedby={movable ? "candidate-pipeline-help" : undefined}>
+                <div className="candidate-tile-header"><div><strong>{candidate.name}</strong><span>{job?.title || "(no job)"}</span></div>{movable && <span className="candidate-drag-handle" aria-hidden="true" title={`Drag ${candidate.name} to another stage`} onPointerDown={event => beginCandidatePointerDrag(event, candidate)} onPointerMove={updateCandidatePointerDrag} onPointerUp={finishCandidatePointerDrag} onPointerCancel={clearCandidatePointerDrag} onLostPointerCapture={clearCandidatePointerDrag}><GripVertical size={18} strokeWidth={2.25} /></span>}</div>
                 <p>{candidate.email || candidate.phone || "No contact added"}</p>
                 {candidate.rating > 0 && <em>Rating: {candidate.rating}/5</em>}
                 {canManage && candidate.stage !== "Hired" ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
