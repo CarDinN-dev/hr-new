@@ -2295,6 +2295,9 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [jobStatus, setJobStatus] = useState<RecruitmentJob["status"]>("Open");
   const [jobPostedOn, setJobPostedOn] = useState(todayISO());
   const [jobDescription, setJobDescription] = useState("");
+  const [jobEditorOpen, setJobEditorOpen] = useState(false);
+  const [jobEditorBaseline, setJobEditorBaseline] = useState("");
+  const [jobTitleError, setJobTitleError] = useState(false);
   const [editingCandidateId, setEditingCandidateId] = useState("");
   const [candidateName, setCandidateName] = useState("");
   const [candidateJobId, setCandidateJobId] = useState(state.jobs[0]?.id || "");
@@ -2303,6 +2306,9 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
   const [candidateStage, setCandidateStage] = useState<RecruitmentCandidate["stage"]>("Applied");
   const [candidateRating, setCandidateRating] = useState("0");
   const [candidateNotes, setCandidateNotes] = useState("");
+  const [candidateEditorOpen, setCandidateEditorOpen] = useState(false);
+  const [candidateEditorBaseline, setCandidateEditorBaseline] = useState("");
+  const [candidateNameError, setCandidateNameError] = useState(false);
   const [assessmentCandidateId, setAssessmentCandidateId] = useState("");
   const [assessmentEditorToken, setAssessmentEditorToken] = useState("");
   const [assessmentVersion, setAssessmentVersion] = useState(0);
@@ -2321,28 +2327,53 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     if (candidateJobId && !candidateJobs.some(job => job.id === candidateJobId)) setCandidateJobId(candidateJobs[0]?.id || "");
   }, [candidateJobId, editingCandidateId, state.jobs, state.candidates]);
 
+  function jobEditorValue() {
+    return JSON.stringify({ title: jobTitle, department: jobDept, openings: jobOpenings, status: jobStatus, postedOn: jobPostedOn, description: jobDescription });
+  }
+
   function resetJobForm() {
+    const initial = { title: "", department: state.settings.departments[0] || "", openings: "1", status: "Open" as const, postedOn: todayISO(), description: "" };
     setEditingJobId("");
-    setJobTitle("");
-    setJobDept(state.settings.departments[0] || "");
-    setJobOpenings("1");
-    setJobStatus("Open");
-    setJobPostedOn(todayISO());
-    setJobDescription("");
+    setJobTitle(initial.title);
+    setJobDept(initial.department);
+    setJobOpenings(initial.openings);
+    setJobStatus(initial.status);
+    setJobPostedOn(initial.postedOn);
+    setJobDescription(initial.description);
+    setJobTitleError(false);
+    return JSON.stringify(initial);
+  }
+
+  function openJobEditor() {
+    setJobEditorBaseline(resetJobForm());
+    setJobEditorOpen(true);
   }
 
   function editJob(job: RecruitmentJob) {
+    const initial = { title: job.title, department: job.dept, openings: String(job.openings), status: job.status, postedOn: job.postedOn, description: job.description };
     setEditingJobId(job.id);
-    setJobTitle(job.title);
-    setJobDept(job.dept);
-    setJobOpenings(String(job.openings));
-    setJobStatus(job.status);
-    setJobPostedOn(job.postedOn);
-    setJobDescription(job.description);
+    setJobTitle(initial.title);
+    setJobDept(initial.department);
+    setJobOpenings(initial.openings);
+    setJobStatus(initial.status);
+    setJobPostedOn(initial.postedOn);
+    setJobDescription(initial.description);
+    setJobEditorBaseline(JSON.stringify(initial));
+    setJobEditorOpen(true);
+  }
+
+  function closeJobEditor() {
+    if (jobEditorBaseline && jobEditorBaseline !== jobEditorValue() && !window.confirm("Discard unsaved job opening changes?")) return;
+    resetJobForm();
+    setJobEditorBaseline("");
+    setJobEditorOpen(false);
   }
 
   function saveJob() {
-    if (!jobTitle.trim()) return notify("Job title is required.");
+    if (!jobTitle.trim()) {
+      setJobTitleError(true);
+      return notify("Enter a job title.");
+    }
     const record: RecruitmentJob = {
       id: editingJobId || newId(),
       version: editingJobId ? state.jobs.find(job => job.id === editingJobId)?.version ?? 1 : 1,
@@ -2361,6 +2392,8 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     if (!candidateJobId) setCandidateJobId(record.id);
     notify(editingJobId ? "Opening updated." : "Opening added.");
     resetJobForm();
+    setJobEditorBaseline("");
+    setJobEditorOpen(false);
   }
 
   function deleteJob(id: string) {
@@ -2370,34 +2403,64 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
       ...prev,
       jobs: prev.jobs.filter(job => job.id !== id)
     }));
-    if (editingJobId === id) resetJobForm();
+    if (editingJobId === id) {
+      resetJobForm();
+      setJobEditorBaseline("");
+      setJobEditorOpen(false);
+    }
     notify("Opening archived. Candidate history was retained.");
   }
 
+  function candidateEditorValue() {
+    return JSON.stringify({ name: candidateName, jobId: candidateJobId, email: candidateEmail, phone: candidatePhone, stage: candidateStage, rating: candidateRating, notes: candidateNotes });
+  }
+
   function resetCandidateForm() {
+    const initial = { name: "", jobId: candidateJobs[0]?.id || "", email: "", phone: "", stage: "Applied" as const, rating: "0", notes: "" };
     setEditingCandidateId("");
-    setCandidateName("");
-    setCandidateEmail("");
-    setCandidatePhone("");
-    setCandidateStage("Applied");
-    setCandidateRating("0");
-    setCandidateNotes("");
+    setCandidateName(initial.name);
+    setCandidateJobId(initial.jobId);
+    setCandidateEmail(initial.email);
+    setCandidatePhone(initial.phone);
+    setCandidateStage(initial.stage);
+    setCandidateRating(initial.rating);
+    setCandidateNotes(initial.notes);
+    setCandidateNameError(false);
+    return JSON.stringify(initial);
+  }
+
+  function openCandidateEditor() {
+    setCandidateEditorBaseline(resetCandidateForm());
+    setCandidateEditorOpen(true);
   }
 
   function editCandidate(candidate: RecruitmentCandidate) {
+    const initial = { name: candidate.name, jobId: candidate.jobId, email: candidate.email, phone: candidate.phone, stage: candidate.stage, rating: String(candidate.rating || 0), notes: candidate.notes };
     setEditingCandidateId(candidate.id);
-    setCandidateName(candidate.name);
-    setCandidateJobId(candidate.jobId);
-    setCandidateEmail(candidate.email);
-    setCandidatePhone(candidate.phone);
-    setCandidateStage(candidate.stage);
-    setCandidateRating(String(candidate.rating || 0));
-    setCandidateNotes(candidate.notes);
+    setCandidateName(initial.name);
+    setCandidateJobId(initial.jobId);
+    setCandidateEmail(initial.email);
+    setCandidatePhone(initial.phone);
+    setCandidateStage(initial.stage);
+    setCandidateRating(initial.rating);
+    setCandidateNotes(initial.notes);
+    setCandidateEditorBaseline(JSON.stringify(initial));
+    setCandidateEditorOpen(true);
+  }
+
+  function closeCandidateEditor() {
+    if (candidateEditorBaseline && candidateEditorBaseline !== candidateEditorValue() && !window.confirm("Discard unsaved candidate changes?")) return;
+    resetCandidateForm();
+    setCandidateEditorBaseline("");
+    setCandidateEditorOpen(false);
   }
 
   function saveCandidate() {
     if (!editingCandidateId && !openJobs.length) return notify("Add or reopen a job with an available position first.");
-    if (!candidateName.trim()) return notify("Candidate name is required.");
+    if (!candidateName.trim()) {
+      setCandidateNameError(true);
+      return notify("Enter the candidate's full name.");
+    }
     const selectedJobId = candidateJobs.some(job => job.id === candidateJobId) ? candidateJobId : candidateJobs[0]?.id;
     if (!selectedJobId) return notify("Select an available job opening.");
     const existingCandidate = state.candidates.find(candidate => candidate.id === editingCandidateId);
@@ -2423,6 +2486,8 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     }));
     notify(editingCandidateId ? "Candidate updated." : "Candidate added.");
     resetCandidateForm();
+    setCandidateEditorBaseline("");
+    setCandidateEditorOpen(false);
   }
 
   function moveCandidate(id: string, stage: RecruitmentCandidate["stage"]) {
@@ -2516,17 +2581,17 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     <div className="panel">
       <div className="panel-head">
         <div><h3>Job Openings</h3><span>{openJobs.length} open</span></div>
-        {canManage && editingJobId && <button onClick={resetJobForm}>Cancel edit</button>}
+        {canManage && (jobEditorOpen ? <button type="button" onClick={closeJobEditor}>Cancel</button> : <button className="primary" type="button" onClick={openJobEditor}>Add job</button>)}
       </div>
-      {canManage && <><div className="form-grid compact">
-        <label htmlFor="recruitment-job-title">Job title *<input id="recruitment-job-title" name="recruitment-job-title" value={jobTitle} onChange={event => setJobTitle(event.target.value)} /></label>
+      {canManage && jobEditorOpen && <div className="recruitment-editor"><div className="form-grid compact">
+        <label htmlFor="recruitment-job-title">Job title *<input id="recruitment-job-title" name="recruitment-job-title" autoComplete="off" aria-invalid={jobTitleError || undefined} aria-describedby={jobTitleError ? "recruitment-job-title-error" : undefined} value={jobTitle} onChange={event => { setJobTitle(event.target.value); if (jobTitleError) setJobTitleError(false); }} />{jobTitleError && <span className="field-error" id="recruitment-job-title-error">Enter a job title.</span>}</label>
         <label>Department<select id="recruitment-job-dept" name="recruitment-job-dept" value={jobDept} onChange={event => setJobDept(event.target.value)}>{state.settings.departments.map(item => <option key={item}>{item}</option>)}</select></label>
         <label>No. of openings<input id="recruitment-job-openings" name="recruitment-job-openings" type="number" min="1" value={jobOpenings} onChange={event => setJobOpenings(event.target.value)} /></label>
         <label>Status<select id="recruitment-job-status" name="recruitment-job-status" value={jobStatus} onChange={event => setJobStatus(event.target.value as RecruitmentJob["status"])}><option>Open</option><option>On Hold</option><option>Closed</option></select></label>
         <label>Posted on<input id="recruitment-job-posted" name="recruitment-job-posted" type="date" value={jobPostedOn} onChange={event => setJobPostedOn(event.target.value)} /></label>
         <label className="wide" htmlFor="recruitment-job-description">Description<textarea id="recruitment-job-description" name="recruitment-job-description" value={jobDescription} onChange={event => setJobDescription(event.target.value)} /></label>
       </div>
-      <div className="form-actions"><button className="primary" onClick={saveJob}>{editingJobId ? "Update opening" : "Add opening"}</button></div></>}
+      <div className="form-actions"><button className="primary" type="button" onClick={saveJob}>{editingJobId ? "Update opening" : "Add opening"}</button></div></div>}
       <DataTable
         label="Job openings"
         empty="No job openings yet."
@@ -2543,7 +2608,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
             count,
             formatDate(job.postedOn),
             <Badge key="status" value={vacancy.isFilled ? "Filled" : job.status} />,
-            canManage ? <div className="row-actions" key="actions"><button onClick={() => editJob(job)}>Edit</button><button onClick={() => deleteJob(job.id)}>Delete</button></div> : "-"
+            canManage ? <details className="card-actions-menu" key="actions"><summary>More actions</summary><div className="card-actions-menu__items"><button type="button" onClick={() => editJob(job)}>Edit opening</button><button type="button" className="danger-outline" onClick={() => deleteJob(job.id)}>Delete opening</button></div></details> : "-"
           ];
         })}
       />
@@ -2552,18 +2617,18 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
     <div className="panel">
       <div className="panel-head">
         <div><h3>Candidate Pipeline</h3><span>Move candidates between stages with the dropdown on each card.</span></div>
-        {canManage && editingCandidateId && <button onClick={resetCandidateForm}>Cancel edit</button>}
+        {canManage && (candidateEditorOpen ? <button type="button" onClick={closeCandidateEditor}>Cancel</button> : <button className="primary" type="button" onClick={openCandidateEditor} disabled={!candidateJobs.length}>Add candidate</button>)}
       </div>
-      {canManage && <><div className="form-grid compact">
-        <label htmlFor="candidate-name">Full name *<input id="candidate-name" name="candidate-name" value={candidateName} onChange={event => setCandidateName(event.target.value)} /></label>
+      {canManage && candidateEditorOpen && <div className="recruitment-editor"><div className="form-grid compact">
+        <label htmlFor="candidate-name">Full name *<input id="candidate-name" name="candidate-name" autoComplete="name" aria-invalid={candidateNameError || undefined} aria-describedby={candidateNameError ? "candidate-name-error" : undefined} value={candidateName} onChange={event => { setCandidateName(event.target.value); if (candidateNameError) setCandidateNameError(false); }} />{candidateNameError && <span className="field-error" id="candidate-name-error">Enter the candidate's full name.</span>}</label>
         <label>Applying for<select id="candidate-job" name="candidate-job" value={candidateJobId} disabled={!candidateJobs.length} onChange={event => setCandidateJobId(event.target.value)}>{candidateJobs.map(job => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
-        <label htmlFor="candidate-email">Email<input id="candidate-email" name="candidate-email" type="email" value={candidateEmail} onChange={event => setCandidateEmail(event.target.value)} /></label>
-        <label htmlFor="candidate-phone">Phone<input id="candidate-phone" name="candidate-phone" value={candidatePhone} onChange={event => setCandidatePhone(event.target.value)} /></label>
+        <label htmlFor="candidate-email">Email<input id="candidate-email" name="candidate-email" type="email" autoComplete="email" spellCheck={false} value={candidateEmail} onChange={event => setCandidateEmail(event.target.value)} /></label>
+        <label htmlFor="candidate-phone">Phone<input id="candidate-phone" name="candidate-phone" type="tel" autoComplete="tel" value={candidatePhone} onChange={event => setCandidatePhone(event.target.value)} /></label>
         <label>Stage<select id="candidate-stage" name="candidate-stage" value={candidateStage} disabled={!editingCandidateId} onChange={event => setCandidateStage(event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(stage => <option key={stage}>{stage}</option>)}</select></label>
         <label>Rating (0-5)<input id="candidate-rating" name="candidate-rating" type="number" min="0" max="5" value={candidateRating} onChange={event => setCandidateRating(event.target.value)} /></label>
         <label className="wide" htmlFor="candidate-notes">Notes<textarea id="candidate-notes" name="candidate-notes" value={candidateNotes} onChange={event => setCandidateNotes(event.target.value)} /></label>
       </div>
-      <div className="form-actions"><button className="primary" onClick={saveCandidate}>{editingCandidateId ? "Update candidate" : "Add candidate"}</button></div></>}
+      <div className="form-actions"><button className="primary" type="button" onClick={saveCandidate}>{editingCandidateId ? "Update candidate" : "Add candidate"}</button></div></div>}
 
       <div className="recruitment-pipeline">
         {candidateStages.map(stage => {
@@ -2579,11 +2644,16 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
                 {canManage ? <select aria-label={`Move ${candidate.name}`} value={candidate.stage} onChange={event => moveCandidate(candidate.id, event.target.value as RecruitmentCandidate["stage"])}>{candidateStages.map(option => <option key={option}>{option}</option>)}</select> : <Badge value={candidate.stage} />}
                 {candidate.notes && <small>{candidate.notes}</small>}
                 <div className="row-actions">
-                  {candidate.stage === "Interview" && candidate.interviewAssessment && (canManage ? <button className="primary" onClick={() => void openAssessment(candidate)}>Assessment</button> : <button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button>)}
+                  {candidate.stage === "Interview" && candidate.interviewAssessment && canManage && <button className="primary" type="button" onClick={() => void openAssessment(candidate)}>Open assessment</button>}
                   {candidate.stage === "Interview" && !candidate.interviewAssessment && <small>Preparing assessment…</small>}
-                  {candidate.stage === "Offer" && candidate.offerDetails && (canManage ? <button className="primary" onClick={() => openOffer(candidate)}>Offer documents</button> : <><button onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button><button onClick={() => void downloadRecruitment(candidate, "offer-letter")}>Offer PDF</button><button onClick={() => void downloadRecruitment(candidate, "nda")}>NDA PDF</button></>)}
+                  {candidate.stage === "Offer" && candidate.offerDetails && canManage && <button className="primary" type="button" onClick={() => openOffer(candidate)}>Offer documents</button>}
                   {candidate.stage === "Offer" && !candidate.offerDetails && <small>Preparing offer…</small>}
-                  {canManage && <>{candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : canHire ? <button className="primary" onClick={() => addAsEmployee(candidate)}>Add as employee</button> : null)}<button onClick={() => editCandidate(candidate)}>Edit</button><button onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete</button></>}
+                  {candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : canManage && canHire ? <button className="primary" type="button" onClick={() => addAsEmployee(candidate)}>Add as employee</button> : null)}
+                  {(canManage || (candidate.stage === "Interview" && candidate.interviewAssessment) || (candidate.stage === "Offer" && candidate.offerDetails)) && <details className="card-actions-menu"><summary>More actions</summary><div className="card-actions-menu__items">
+                    {!canManage && candidate.stage === "Interview" && candidate.interviewAssessment && <button type="button" onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button>}
+                    {!canManage && candidate.stage === "Offer" && candidate.offerDetails && <><button type="button" onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button><button type="button" onClick={() => void downloadRecruitment(candidate, "offer-letter")}>Offer PDF</button><button type="button" onClick={() => void downloadRecruitment(candidate, "nda")}>NDA PDF</button></>}
+                    {canManage && <><button type="button" onClick={() => editCandidate(candidate)}>Edit candidate</button><button type="button" className="danger-outline" onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete candidate</button></>}
+                  </div></details>}
                 </div>
               </article>;
             }) : <div className="empty compact">No {stage.toLowerCase()} candidates.</div>}
@@ -3033,7 +3103,7 @@ function SettingsPage({
     {canConfigureSystem && sections.visible("payroll-policy") && <div className="panel"><div className="panel-head"><h3>Attendance Defaults</h3><span>Used for manual attendance</span></div><div className="form-grid compact"><label>Full day hours<input type="number" min="0.25" step="0.25" value={workdayHours} onChange={event => setWorkdayHours(Number(event.target.value))} /></label><label>Half-day hours<input type="number" min="0.25" step="0.25" max={workdayHours} value={halfDayHours} onChange={event => setHalfDayHours(Number(event.target.value))} /></label></div></div>}
     {canConfigureSystem && sections.visible("loan-policy") && <div className="panel"><div className="panel-head"><h3>Loan Deduction Limit</h3><span>Per employee, per payroll month</span></div><div className="form-grid compact"><label>Limit type<select value={loanCapType} onChange={event => setLoanCapType(event.target.value as "Amount" | "Percent")}><option>Amount</option><option>Percent</option></select></label><label>{loanCapType === "Percent" ? "Maximum % of gross salary" : `Maximum ${state.settings.company.currency} per month`}<input type="number" min="0" max={loanCapType === "Percent" ? 100 : undefined} step="0.01" value={loanCapValue} onChange={event => setLoanCapValue(Number(event.target.value) || 0)} /></label></div><p className="muted">Enter 0 for no company-wide cap. Individual loans can have a lower limit.</p></div>}
     {canConfigureSystem && sections.visible("payroll-policy") && <div className="panel"><div className="panel-head"><h3>Payroll Controls</h3><span>These values are snapshotted on every run.</span></div><div className="form-grid compact"><label>Proration basis<select value={payrollProrationBasis} onChange={event => setPayrollProrationBasis(event.target.value as "Fixed 30" | "Calendar Days")}><option>Fixed 30</option><option>Calendar Days</option></select></label><label>Net pay variance warning (%)<input type="number" min="0" max="1000" step="0.01" value={payrollVarianceThreshold} onChange={event => setPayrollVarianceThreshold(Number(event.target.value) || 0)} /></label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireBankDetails} onChange={event => setPayrollRequireBankDetails(event.target.checked)} /> Require bank details before payroll</label><label className="checkbox-row"><input type="checkbox" checked={payrollRequireAttendance} onChange={event => setPayrollRequireAttendance(event.target.checked)} /> Block payroll when attendance is missing</label></div><p className="muted">Bank data is required by default. Attendance can remain a warning while the rollout is in progress.</p></div>}
-    {canSaveOrganizationSettings && <div className="panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p>{attemptedSave && !editableSettingsValid && <p className="sync-alert" role="alert">Some department or leave type fields need attention.</p>}<button className="primary" type="button" onClick={saveSettings}>Save settings</button></div>}
+    {canSaveOrganizationSettings && <div className="panel settings-save-panel"><div className="panel-head"><h3>Save Changes</h3></div><p className="muted">Save company, attendance, loan, department and leave settings.</p>{attemptedSave && !editableSettingsValid && <p className="sync-alert" role="alert">Some department or leave type fields need attention.</p>}<button className="primary" type="button" onClick={saveSettings}>Save settings</button></div>}
   </section>;
 }
 

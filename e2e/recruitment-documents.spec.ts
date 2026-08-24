@@ -74,7 +74,7 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   await expect(jobRow).toContainText("Filled");
   await expect(page.locator(".settlement-preview").getByText("Remaining", { exact: true }).locator("..")).toContainText("0");
 
-  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  await page.getByRole("button", { name: "Open assessment", exact: true }).click();
   const assessment = page.getByRole("dialog", { name: "Interview assessment" });
   await expect(assessment.getByLabel("Candidate name")).toHaveValue("Amina Saleh");
   await expect(assessment.getByLabel("Vacancy title")).toHaveValue(job.title);
@@ -110,10 +110,41 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   }
 });
 
+test("recruitment keeps editors on demand and groups secondary actions", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installApi(page);
+  await page.goto("/recruitment");
+
+  await expect(page.getByLabel("Job title *")).toHaveCount(0);
+  const addJob = page.getByRole("button", { name: "Add job" });
+  await expect(addJob).toBeVisible();
+  expect((await addJob.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await addJob.click();
+  await page.getByRole("button", { name: "Add opening" }).click();
+  const jobTitleError = page.locator("#recruitment-job-title-error");
+  await expect(jobTitleError).toBeVisible();
+  await page.getByLabel("Job title *").fill("Temporary vacancy");
+  await expect(jobTitleError).toHaveCount(0);
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Cancel", exact: true }).first().click();
+  await expect(page.getByLabel("Job title *")).toHaveCount(0);
+
+  const jobRow = page.getByRole("region", { name: "Job openings" }).getByRole("row").filter({ hasText: job.title });
+  await jobRow.locator("summary").click();
+  await expect(jobRow.getByRole("button", { name: "Edit opening" })).toBeVisible();
+  await expect(jobRow.getByRole("button", { name: "Delete opening" })).toBeVisible();
+
+  const candidateCard = page.locator(".candidate-card").filter({ hasText: "Amina Saleh" });
+  await candidateCard.locator("summary").click();
+  await expect(candidateCard.getByRole("button", { name: "Edit candidate" })).toBeVisible();
+  await expect(candidateCard.getByRole("button", { name: "Delete candidate" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
 test("assessment autosaves on blur and releases its edit lease when closed", async ({ page }) => {
   await installApi(page);
   await page.goto("/recruitment");
-  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  await page.getByRole("button", { name: "Open assessment", exact: true }).click();
   const assessment = page.getByRole("dialog", { name: "Interview assessment" });
   const autoSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment") && request.method() === "PATCH");
   await assessment.getByLabel("Interviewer comments").fill("Autosaved on blur.");
@@ -128,12 +159,12 @@ test("assessment reuses its edit lease after a page refresh", async ({ page }) =
   await installApi(page);
   await page.goto("/recruitment");
   const firstLease = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment/lease") && request.method() === "POST");
-  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  await page.getByRole("button", { name: "Open assessment", exact: true }).click();
   const firstToken = (await firstLease).postDataJSON().editorToken;
 
   await page.reload();
   const refreshedLease = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment/lease") && request.method() === "POST");
-  await page.getByRole("button", { name: "Assessment", exact: true }).click();
+  await page.getByRole("button", { name: "Open assessment", exact: true }).click();
   expect((await refreshedLease).postDataJSON().editorToken).toBe(firstToken);
   await expect(page.getByRole("dialog", { name: "Interview assessment" })).toBeVisible();
 });
@@ -143,7 +174,7 @@ test("interview assessment stays aligned and actionable across screen sizes", as
     await page.setViewportSize(viewport);
     await installApi(page);
     await page.goto("/recruitment");
-    await page.getByRole("button", { name: "Assessment", exact: true }).click();
+    await page.getByRole("button", { name: "Open assessment", exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: "Interview assessment" });
     const modal = dialog.locator(".modal");

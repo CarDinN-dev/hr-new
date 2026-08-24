@@ -5158,9 +5158,9 @@ summary:focus-visible,
   resize: vertical;
 }
 
-.app input:focus,
-.app select:focus,
-.app textarea:focus {
+.app input:focus-visible,
+.app select:focus-visible,
+.app textarea:focus-visible {
   border-color: var(--brand-red);
   outline: 0;
   box-shadow: 0 0 0 3px var(--focus-ring);
@@ -10324,6 +10324,44 @@ body {
   gap: 8px;
 }
 
+/* Recruitment editors stay out of the way until the user starts a create or edit task. */
+.app .recruitment-editor {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-subtle);
+}
+
+.app .recruitment-editor .form-actions {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.app .recruitment-workspace .panel-head > button {
+  flex: 0 0 auto;
+}
+
+.app .candidate-card .row-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.app .candidate-card .card-actions-menu {
+  margin-left: auto;
+}
+
+.app .settings-save-panel {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+
+.app .settings-save-panel .primary {
+  justify-self: start;
+}
+
 .login-card .primary {
   border-color: var(--action-red);
   background: var(--action-red);
@@ -10345,6 +10383,34 @@ body {
   .app .document-grid label,
   .app .employee-status label {
     font-size: max(0.75rem, 12px);
+  }
+
+  .app .settlement-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 0;
+  }
+
+  .app .recruitment-editor {
+    padding: 12px;
+  }
+
+  .app .candidate-card .row-actions > .primary,
+  .app .settings-save-panel .primary {
+    width: 100%;
+  }
+
+  .app .candidate-card .card-actions-menu {
+    margin-left: 0;
+  }
+
+  .app .recruitment-workspace .card-actions-menu[open] {
+    width: 100%;
+  }
+
+  .app .recruitment-workspace .card-actions-menu__items {
+    position: static;
+    width: 100%;
+    margin-top: 8px;
   }
 }
 
