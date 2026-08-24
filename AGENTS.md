@@ -1,5 +1,10 @@
 # Project defaults
 
+## Source of truth
+
+- Use this repository (`C:\Users\Lenovo\OneDrive\Documents\HR NEw`) for MedTech HR ERP work. Its GitHub origin is `CarDinN-dev/hr-new` on `main`.
+- The live application is the existing `medtech-hr-erp` Compose deployment in `/opt/medtech-hr-erp` on Google Cloud project `hr-erp-502412`; do not use older HR/ERP folders as deployment sources.
+
 For every task in this repository, including new chats, use Ponytail at the `full` level by default.
 
 - Read the relevant flow end-to-end before editing.

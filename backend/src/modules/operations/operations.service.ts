@@ -568,13 +568,13 @@ export class OperationsService {
   private interviewJson(value: NonNullable<UpdateCandidateDto['interviewAssessment']>): Prisma.InputJsonObject {
     return {
       ...value,
-      date: value.date?.toISOString(),
-      expectedJoiningDate: value.expectedJoiningDate?.toISOString(),
+      date: value.date ? value.date.toISOString() : value.date,
+      expectedJoiningDate: value.expectedJoiningDate ? value.expectedJoiningDate.toISOString() : value.expectedJoiningDate,
     } as Prisma.InputJsonObject;
   }
 
   private offerJson(value: NonNullable<UpdateCandidateDto['offerDetails']>): Prisma.InputJsonObject {
-    return { ...value, issueDate: value.issueDate?.toISOString() } as Prisma.InputJsonObject;
+    return { ...value, issueDate: value.issueDate ? value.issueDate.toISOString() : value.issueDate } as Prisma.InputJsonObject;
   }
 
   private jsonObject(value: Prisma.JsonValue | null | undefined) {

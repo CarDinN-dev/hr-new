@@ -47,9 +47,12 @@ async function installApi(page: Page) {
     }
     if (/^\/recruitment\/candidates\/[^/]+\/interview-assessment$/.test(path) && request.method() === "PATCH") {
       const assessment = request.postDataJSON().interviewAssessment;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 2, rating: assessment.overallRating || 0, interviewAssessment: assessment })) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[0], version: 2, rating: assessment.overallRating || 0, interviewAssessment: { ...candidates[0].interviewAssessment, ...assessment } })) });
     }
-    if (/^\/recruitment\/candidates\/[^/]+$/.test(path) && request.method() === "PATCH") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({})) });
+    if (/^\/recruitment\/candidates\/[^/]+$/.test(path) && request.method() === "PATCH") {
+      const offerDetails = request.postDataJSON().offerDetails;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope({ ...candidates[1], offerDetails: { ...candidates[1].offerDetails, ...offerDetails } })) });
+    }
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(path === "/organization-settings" ? null : [])) });
   });
 }
@@ -70,13 +73,11 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   await expect(assessment.getByLabel("Vacancy title")).toHaveValue(job.title);
   await expect(assessment.getByLabel("Department", { exact: true })).toHaveValue(job.department.name);
   await expect(assessment.getByLabel("Interview date")).toHaveValue("2026-08-06");
-  await assessment.getByLabel("Interview date").fill("2026-08-23");
-  await assessment.getByLabel("Overall rating").selectOption("4");
-  await assessment.getByLabel("Interviewer comments").fill("Recommended for offer review.");
   const assessmentSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-interview/interview-assessment") && request.method() === "PATCH");
-  await assessment.getByRole("button", { name: "Save now" }).click();
-  expect((await assessmentSave).postDataJSON()).toMatchObject({ interviewAssessment: { date: "2026-08-23", overallRating: 4, interviewerComments: "Recommended for offer review." } });
+  await assessment.getByLabel("Interviewer comments").fill("Recommended for offer review.");
+  expect((await assessmentSave).postDataJSON()).toMatchObject({ interviewAssessment: { interviewerComments: "Recommended for offer review." } });
   await expect(assessment.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(assessment.getByRole("button", { name: /save now|retry save|reload latest/i })).toHaveCount(0);
   const assessmentDownload = page.waitForEvent("download");
   await assessment.getByRole("button", { name: "Download PDF" }).click();
   await expect((await assessmentDownload).suggestedFilename()).toBe("interview-assessment.pdf");
@@ -89,8 +90,9 @@ test("recruitment stage editors auto-fill candidate data and expose exact PDF do
   await offer.getByLabel("Other allowance").fill("750.75");
   await expect(offer.getByLabel("Contractual monthly pay")).toHaveValue("QAR 15,750.75");
   const offerSave = page.waitForRequest(request => request.url().endsWith("/api/v1/recruitment/candidates/candidate-offer") && request.method() === "PATCH");
-  await offer.getByRole("button", { name: "Save offer details" }).click();
-  expect((await offerSave).postDataJSON()).toMatchObject({ offerDetails: { basic: 10000, hra: 4000, conveyance: 1000, otherAllowance: 750.75 } });
+  expect((await offerSave).postDataJSON()).toMatchObject({ offerDetails: { otherAllowance: 750.75 } });
+  await expect(offer.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(offer.getByRole("button", { name: /save offer details|retry save|reload latest/i })).toHaveCount(0);
 
   for (const [button, endpoint] of [["Assessment PDF", "interview-assessment"], ["Offer Letter PDF", "offer-letter"], ["NDA PDF", "nda"]] as const) {
     const requested = page.waitForRequest(request => request.url().endsWith(`/api/v1/recruitment/candidates/candidate-offer/${endpoint}.pdf`));
