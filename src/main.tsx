@@ -137,6 +137,7 @@ import { Pagination } from "./pagination";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
 import { commonSearch, operationalPageSize, paginate, settingsEditorErrors, shellSearch, statusActionLabel, type AttendanceSearch, type CommonSearch, type DepartmentDraft } from "./ui-state";
 import "./styles.css";
+import "./production-polish.css";
 
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";

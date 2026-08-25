@@ -8,7 +8,7 @@ const routePermissions: Record<NavItem, string[]> = {
   "My HR": ["employee.self.read", "leave.self.read", "service_request.self.read", "payroll.self.read_payslip", "session.self.read"],
   Team: ["employee.self.read", "employee.team.read", "employee.management.read", "leave.team.read", "leave.management.read"],
   Employees: ["employee.hr.read", "employee.read_all"],
-  Attendance: ["attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"],
+  Attendance: ["attendance.hr.read", "attendance.hr.manage", "attendance.audit.read", "attendance.read_all"],
   Leave: ["leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.audit.read", "leave.read_all"],
   "Business Trips": ["trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all"],
   Expenses: ["expense.team.read", "expense.management.read", "expense.hr.read", "expense.read_all"],
@@ -56,6 +56,6 @@ export function useAuthorization() {
 export function canAccessRoute(session: BackendSession, route: NavItem) {
   if (route === "System") return hasActiveSystemAdministratorRole(session);
   if (route === "Hierarchy") return hasActiveHierarchyRole(session);
-  if (route === "Payroll") return hasActiveSuperAdminRole(session) || ["HR", "CPO", "COO"].some(role => session.roles.includes(role));
+  if (route === "Payroll") return hasActiveSuperAdminRole(session) || ["HR", "CPO", "COO"].some(role => session.roles.includes(role)) || hasPermission(session, "payroll.self.read_payslip");
   return hasAnyPermission(session, ...routePermissions[route]);
 }
