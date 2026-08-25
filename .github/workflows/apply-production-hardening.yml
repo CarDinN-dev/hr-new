@@ -1,0 +1,35 @@
+name: Apply production hardening patch
+
+on:
+  push:
+    branches:
+      - agent/production-readiness-rbac-hardening
+    paths:
+      - scripts/apply-production-hardening.mjs
+      - .github/workflows/apply-production-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/production-readiness-rbac-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply deterministic source patches
+        run: node scripts/apply-production-hardening.mjs
+      - name: Commit patched source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/src/modules/authorization/authorization.service.ts backend/src/modules/attendance/attendance.service.ts src/api.ts
+          git diff --cached --check
+          git commit -m "fix: close RBAC and step-up gaps"
+          git push origin HEAD:agent/production-readiness-rbac-hardening
