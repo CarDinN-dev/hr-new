@@ -11,14 +11,68 @@ def replace_once(relative_path: str, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+# The Playwright web-server command must work on Linux CI as well as Windows.
 replace_once(
     "playwright.config.ts",
     'command: "npm.cmd run dev -- --host 127.0.0.1 --port 4173 --strictPort",',
     'command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort",',
 )
 
-replace_once("src/production-polish.css", "  --card-radius: 18px;", "  --card-radius: 16px;")
+# Keep this layer deliberately presentation-only. The canonical stylesheet already
+# owns every responsive measurement, focus target, login contrast, and motion token.
+# Broad control/layout overrides here previously caused horizontal overflow and
+# weakened the dark login contrast, so this file is constrained to non-geometric
+# surface refinement only.
+(ROOT / "src/production-polish.css").write_text(
+    '''/*
+ * MedTech production polish
+ *
+ * A restrained, geometry-safe finishing layer over the canonical clinical design
+ * system in styles.css. No component dimensions, breakpoints, navigation widths,
+ * login colours, or workflow layout rules are overridden here.
+ */
 
+html {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body,
+.app {
+  letter-spacing: -0.004em;
+}
+
+.app :is(.panel, .metric, .report-card, .employee-card, .template-card, .pipeline-column, .candidate-card, .payroll-tile, .workflow-card, .table-wrap, .workflow-disclosure) {
+  border-color: color-mix(in srgb, var(--border) 90%, transparent);
+}
+
+.app :is(.panel-head h2, .panel-head h3, .page-head h1, .page-header h1) {
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.app :is(.badge, .status-badge, .chip) {
+  font-weight: 700;
+}
+
+.app tbody tr td {
+  transition: background-color var(--motion-standard);
+}
+
+.app tbody tr:hover td {
+  background: color-mix(in srgb, var(--brand-navy) 2.6%, var(--surface));
+}
+
+:root[data-theme="dark"] .app tbody tr:hover td {
+  background: color-mix(in srgb, var(--brand-navy) 14%, var(--surface));
+}
+''',
+    encoding="utf-8",
+)
+
+# Lint-clean the existing implementation without altering behaviour.
 replace_once(
     "backend/src/common/utils/hybrid-search.util.ts",
     """  const { page: _page, limit: _limit, skip: _skip, take: _take, ...authorizedArgs } = listArgs(
