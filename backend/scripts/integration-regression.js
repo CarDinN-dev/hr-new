@@ -226,6 +226,16 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   }
   const blocked = await login('rbac.blocked@example.invalid', blockedPassword);
 
+  for (const role of ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER']) {
+    assert.equal((await api('/attendance', {}, sessions[role])).status, 403, `${role} must not list attendance`);
+    assert.equal((await api('/attendance/reports/summary', {}, sessions[role])).status, 403, `${role} must not read attendance reports`);
+    assert.equal((await mutate('/attendance/check-in', sessions[role], {})).status, 403, `${role} must not check in through the HR attendance module`);
+  }
+  for (const role of ['HR', 'CPO', 'COO', 'ADMIN', 'SUPER_ADMIN']) {
+    assert.equal((await api('/attendance', {}, sessions[role])).status, 200, `${role} must retain authorized attendance read access`);
+    assert.equal((await api('/attendance/reports/summary', {}, sessions[role])).status, 200, `${role} must retain authorized attendance report access`);
+  }
+
   assert.equal((await api('/employees/me', {}, sessions.EMPLOYEE)).status, 200);
   assert.equal((await api('/system/users', {}, sessions.EMPLOYEE)).status, 403);
   assert.equal((await api('/system/users', {}, sessions.HR)).status, 403);
