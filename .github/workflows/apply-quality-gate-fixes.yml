@@ -1,5 +1,6 @@
 name: Apply quality gate fixes
 
+# Rerun 2: preserve the canonical responsive geometry and dark login.
 on:
   push:
     branches:
@@ -36,6 +37,17 @@ jobs:
           npm run build
           npx playwright install --with-deps chromium
           npm run test:system-ui
+
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate-browser-failure
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Verify backend lint, build, RBAC, and security
         working-directory: backend
