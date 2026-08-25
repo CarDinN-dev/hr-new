@@ -27,42 +27,22 @@ body,
   background-image: none !important;
 }
 
+/* The canonical theme already owns sidebar colour, logo contrast and active-state
+   treatment. This finishing layer only removes buoyant interaction effects. */
 .app .sidebar {
-  background: linear-gradient(180deg, var(--sidebar) 0%, var(--sidebar-deep) 100%) !important;
-  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.07), 10px 0 28px rgba(7, 18, 37, 0.06) !important;
-}
-
-.app .brand-block,
-.app .account-menu {
-  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 1px 0 0 rgba(23, 33, 58, 0.04), 10px 0 28px rgba(7, 18, 37, 0.04);
 }
 
 .app .sidebar .nav-list a {
-  border: 1px solid transparent;
   border-radius: 10px;
   box-shadow: none;
   transform: none;
 }
 
-.app .sidebar .nav-list a:hover {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.055);
-  color: #ffffff;
+.app .sidebar .nav-list a:hover,
+.app .sidebar .nav-list a.active {
   box-shadow: none;
   transform: none;
-}
-
-.app .sidebar .nav-list a.active,
-:root[data-theme="dark"] .app .sidebar .nav-list a.active {
-  border-color: rgba(255, 255, 255, 0.09);
-  background: rgba(255, 255, 255, 0.095);
-  color: #ffffff;
-  box-shadow: inset 3px 0 0 var(--brand-red);
-  transform: none;
-}
-
-.app .sidebar .nav-list a.active svg {
-  color: #ffffff;
 }
 
 .app .account-trigger {
