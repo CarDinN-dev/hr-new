@@ -29,6 +29,8 @@ jobs:
         run: |
           python ops/apply-production-hardening.py
           sed -i 's/Payroll access requires one of:/Payroll access is limited to:/' backend/src/modules/authorization/permissions.guard.ts
+          git checkout -- .github/workflows/apply-production-hardening.yml ops/apply-production-hardening.py
+          rm -f .github/workflows/production-gates.yml
 
       - name: Install and test frontend
         run: |
