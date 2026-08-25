@@ -20,26 +20,36 @@ const baseSession = {
 };
 
 async function installSession(page: Page, override: SessionOverride) {
-  await page.addInitScript(({ base, value }) => {
-    sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...base, ...value }));
+  const activeSession = { ...baseSession, ...override };
+  await page.addInitScript(({ key, value }) => {
+    sessionStorage.setItem(key, JSON.stringify(value));
     localStorage.setItem("medtech-hr-theme", "light");
-  }, { base: baseSession, value: override });
+  }, { key: "medtech-hr-erp-backend-session-v2", value: activeSession });
 
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
-    const data = pathname === "/api/v1/employees/me"
-      ? {
-          id: "employee-1",
-          employeeCode: "MTC001",
-          firstName: "RBAC",
-          lastName: "User",
-          email: "rbac.ui@example.invalid",
-          hireDate: "2024-01-01",
-          employmentStatus: "ACTIVE",
-        }
-      : pathname === "/api/v1/approvals/inbox"
-        ? { leave: [], certificates: [], payroll: [] }
-        : [];
+    const data = pathname === "/api/v1/auth/me"
+      ? { csrfToken: activeSession.csrfToken, user: activeSession }
+      : pathname === "/api/v1/employees/me"
+        ? {
+            id: "employee-1",
+            employeeCode: "MTC001",
+            firstName: "RBAC",
+            lastName: "User",
+            email: "rbac.ui@example.invalid",
+            hireDate: "2024-01-01",
+            employmentStatus: "ACTIVE",
+          }
+        : pathname === "/api/v1/attendance/reports/summary"
+          ? {
+              summary: {
+                totalRecords: 0,
+                byStatus: { PRESENT: 0, HALF_DAY: 0, LEAVE: 0, ABSENT: 0, LATE: 0 },
+              },
+            }
+          : pathname === "/api/v1/approvals/inbox"
+            ? { leave: [], certificates: [], payroll: [] }
+            : [];
 
     return route.fulfill({
       status: 200,
