@@ -26,22 +26,23 @@ jobs:
           path = Path('backend/scripts/integration-regression.js')
           text = path.read_text()
           anchor = "  const blocked = await login('rbac.blocked@example.invalid', blockedPassword);\n\n"
-          addition = """  const blocked = await login('rbac.blocked@example.invalid', blockedPassword);
-
-  for (const role of ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER']) {
-    assert.equal((await api('/attendance', {}, sessions[role])).status, 403, `${role} must not list attendance`);
-    assert.equal((await api('/attendance/reports/summary', {}, sessions[role])).status, 403, `${role} must not read attendance reports`);
-    assert.equal((await mutate('/attendance/check-in', sessions[role], {})).status, 403, `${role} must not check in through the HR attendance module`);
-  }
-  for (const role of ['HR', 'CPO', 'COO', 'ADMIN', 'SUPER_ADMIN']) {
-    assert.equal((await api('/attendance', {}, sessions[role])).status, 200, `${role} must retain authorized attendance read access`);
-    assert.equal((await api('/attendance/reports/summary', {}, sessions[role])).status, 200, `${role} must retain authorized attendance report access`);
-  }
-
-"""
+          lines = [
+              "  const blocked = await login('rbac.blocked@example.invalid', blockedPassword);",
+              "",
+              "  for (const role of ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER']) {",
+              "    assert.equal((await api('/attendance', {}, sessions[role])).status, 403, `${role} must not list attendance`);",
+              "    assert.equal((await api('/attendance/reports/summary', {}, sessions[role])).status, 403, `${role} must not read attendance reports`);",
+              "    assert.equal((await mutate('/attendance/check-in', sessions[role], {})).status, 403, `${role} must not check in through the HR attendance module`);",
+              "  }",
+              "  for (const role of ['HR', 'CPO', 'COO', 'ADMIN', 'SUPER_ADMIN']) {",
+              "    assert.equal((await api('/attendance', {}, sessions[role])).status, 200, `${role} must retain authorized attendance read access`);",
+              "    assert.equal((await api('/attendance/reports/summary', {}, sessions[role])).status, 200, `${role} must retain authorized attendance report access`);",
+              "  }",
+              "",
+          ]
           if anchor not in text:
               raise SystemExit('Integration insertion point not found')
-          path.write_text(text.replace(anchor, addition, 1))
+          path.write_text(text.replace(anchor, "\n".join(lines) + "\n", 1))
           PY
       - name: Commit integration coverage
         run: |
