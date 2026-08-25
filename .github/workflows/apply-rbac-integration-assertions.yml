@@ -1,0 +1,61 @@
+name: Apply live RBAC integration assertions
+
+on:
+  push:
+    branches:
+      - agent/production-rbac-ui-hardening
+    paths:
+      - .github/workflows/apply-rbac-integration-assertions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: medtech
+          POSTGRES_PASSWORD: medtech_integration
+          POSTGRES_DB: medtech_integration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U medtech -d medtech_integration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      INTEGRATION_DATABASE_URL: postgresql://medtech:medtech_integration@127.0.0.1:5432/medtech_integration?schema=public
+      TEST_PERSONA_PASSWORD: IntegrationPass123!
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/production-rbac-ui-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Apply integration assertions
+        run: python ops/patch-rbac-integration.py
+
+      - name: Run live PostgreSQL integration suite
+        working-directory: backend
+        run: |
+          npm ci
+          npm run prisma:generate
+          npm run test:integration
+
+      - name: Commit verified assertions
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/scripts/integration-regression.js
+          git commit -m "test: enforce attendance privacy and payslip self-service live"
+          git push origin HEAD:agent/production-rbac-ui-hardening
