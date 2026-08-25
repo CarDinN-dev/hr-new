@@ -220,8 +220,8 @@ export class AttendanceService {
   }
 
   async report(query: QueryAttendanceDto, user: RequestUser) {
-    if (!this.authorization.hasAny(user, ['attendance.team.read', 'attendance.management.read', 'attendance.hr.read', 'attendance.audit.read', 'attendance.read_all'])) {
-      throw new ForbiddenException('Only managers and HR can access attendance reports');
+    if (!this.authorization.hasAny(user, ['attendance.hr.read', 'attendance.hr.manage', 'attendance.audit.read', 'attendance.read_all'])) {
+      throw new ForbiddenException('Only HR and authorized auditors can access attendance reports');
     }
 
     const { page, limit, ...args } = listArgs(query, {
@@ -278,24 +278,12 @@ export class AttendanceService {
 
   private async accessWhere(user: RequestUser): Promise<Prisma.AttendanceWhereInput> {
     const scopes: Prisma.AttendanceWhereInput[] = [];
-    for (const permission of ['attendance.hr.read', 'attendance.audit.read', 'attendance.read_all'] as const) {
+    for (const permission of ['attendance.hr.read', 'attendance.hr.manage', 'attendance.audit.read', 'attendance.read_all'] as const) {
       const rule = this.authorization.scopeRule(user, permission, AccessScopeType.ALL_EMPLOYEES);
       if (rule.unrestricted) {
         if (!rule.excludeIds.length) return {};
         scopes.push({ employeeId: { notIn: rule.excludeIds } });
-      }
-      else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
-    }
-    if (user.employeeId && this.authorization.permissionAllowedForScope(user, 'attendance.self.read', AccessScopeType.SELF, user.employeeId)) scopes.push({ employeeId: user.employeeId });
-    if (user.employeeId && this.authorization.has(user, 'attendance.team.read')) {
-      const ids = (await this.prisma.employee.findMany({ where: { lineManagerId: user.employeeId, deletedAt: null }, select: { id: true } }))
-        .map(({ id }) => id).filter((id) => this.authorization.permissionAllowedForScope(user, 'attendance.team.read', AccessScopeType.DIRECT_REPORTS, id));
-      if (ids.length) scopes.push({ employeeId: { in: ids } });
-    }
-    if (user.employeeId && this.authorization.has(user, 'attendance.management.read')) {
-      const ids = (await this.authorization.managementTreeEmployeeIds(user.employeeId))
-        .filter((id) => this.authorization.permissionAllowedForScope(user, 'attendance.management.read', AccessScopeType.MANAGEMENT_TREE, id));
-      if (ids.length) scopes.push({ employeeId: { in: ids } });
+      } else if (rule.includeIds.length) scopes.push({ employeeId: { in: rule.includeIds } });
     }
     return scopes.length ? { OR: scopes } : { employeeId: '__no_employee_scope__' };
   }
@@ -303,9 +291,7 @@ export class AttendanceService {
   private async resolveSelfOrHrEmployee(employeeId: string | undefined, user: RequestUser) {
     const targetEmployeeId = employeeId ?? user.employeeId;
     if (!targetEmployeeId) throw new NotFoundException('No employee profile is linked to this user');
-    if (targetEmployeeId === user.employeeId) {
-      if (!this.authorization.permissionAllowedForScope(user, 'attendance.self.create', AccessScopeType.SELF, targetEmployeeId)) throw new NotFoundException('Employee not found');
-    } else await this.authorization.assertEmployeeScope(user, targetEmployeeId, { all: 'attendance.hr.manage' });
+    await this.authorization.assertEmployeeScope(user, targetEmployeeId, { all: 'attendance.hr.manage' });
     await this.ensureEmployee(targetEmployeeId);
     return targetEmployeeId;
   }

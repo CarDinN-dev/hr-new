@@ -216,7 +216,7 @@ export async function loadBackendState(current: HrState, session: BackendSession
     employeesRequest,
     listWhen<BackendDepartment>(hasPermission(session, "department.read"), "/departments"),
     listWhen<Record<string, unknown>>(hasAnyPermission(session, "leave.self.read", "leave.configure"), "/leave/types"),
-    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"), "/attendance"),
+    listWhen<Record<string, unknown>>(hasAnyPermission(session, "attendance.hr.read", "attendance.hr.manage", "attendance.audit.read", "attendance.read_all"), "/attendance"),
     Promise.resolve([] as BackendLeave[]),
     Promise.resolve([] as Array<BackendPayroll & { lineItems?: Array<Record<string, unknown>> }>),
     listWhen<Record<string, unknown>>(hasAnyPermission(session, "trip.self.read", "trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all"), "/business-trips"),

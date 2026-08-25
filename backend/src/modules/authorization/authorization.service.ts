@@ -39,10 +39,10 @@ export class AuthorizationService {
           select: {
             role: {
               select: {
+                id: true,
                 code: true,
                 protection: true,
                 permissions: { where: { permission: { isDeprecated: false } }, select: { permission: { select: { code: true } } } },
-                inheritedRoles: { select: { parentRole: { select: { permissions: { where: { permission: { isDeprecated: false } }, select: { permission: { select: { code: true } } } } } } } },
               },
             },
           },
@@ -67,7 +67,15 @@ export class AuthorizationService {
       throw new UnauthorizedException('User account is inactive');
     }
     if (!user.roles.length) throw new UnauthorizedException('User has no active role assignment');
-    return user;
+    const authorizationRoles = await this.prisma.role.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        permissions: { where: { permission: { isDeprecated: false } }, select: { permission: { select: { code: true } } } },
+        inheritedRoles: { select: { parentRoleId: true } },
+      },
+    });
+    return { ...user, authorizationRoles };
   }
 
   toRequestUser(
@@ -76,11 +84,19 @@ export class AuthorizationService {
   ): RequestUser {
     const rolePermissions = new Set<string>();
     const roles = new Set<string>();
+    const roleById = new Map(user.authorizationRoles.map((role) => [role.id, role]));
+    const collectRolePermissions = (roleId: string, stack = new Set<string>()) => {
+      if (stack.has(roleId)) throw new UnauthorizedException('Role inheritance cycle detected');
+      const role = roleById.get(roleId);
+      if (!role) return;
+      const next = new Set(stack).add(roleId);
+      for (const link of role.permissions) rolePermissions.add(link.permission.code);
+      for (const inherited of role.inheritedRoles) collectRolePermissions(inherited.parentRoleId, next);
+    };
     const isSuperAdmin = user.roles.some((assignment) => assignment.role.code === 'SUPER_ADMIN' && assignment.role.protection === RoleProtection.SUPER_ADMIN);
     for (const assignment of user.roles) {
       roles.add(assignment.role.code);
-      for (const link of assignment.role.permissions) rolePermissions.add(link.permission.code);
-      for (const inherited of assignment.role.inheritedRoles) for (const link of inherited.parentRole.permissions) rolePermissions.add(link.permission.code);
+      collectRolePermissions(assignment.role.id);
     }
     const permissionOverrides = user.permissionOverrides.map((override) => ({
       permission: override.permission.code,
@@ -137,7 +153,6 @@ export class AuthorizationService {
   }
 
   requireRecentStepUp(user: RequestUser, windowMs = 10 * 60 * 1000) {
-    if (user.isSuperAdmin) return;
     if (!user.reauthenticatedAt || Date.now() - user.reauthenticatedAt.getTime() > windowMs) {
       throw new ForbiddenException('Recent authentication is required');
     }
