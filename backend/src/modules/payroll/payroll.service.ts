@@ -19,7 +19,7 @@ import { DocumentStorageService } from '../documents/document-storage.service';
 import { LoansService } from '../loans/loans.service';
 import { CreateSalaryRecordDto } from './dto/create-salary-record.dto';
 import { GeneratePayrollDto } from './dto/generate-payroll.dto';
-import { CreatePayrollAdjustmentDto, QueryPayrollAdjustmentsDto, ReconcilePayrollPaymentItemDto } from './dto/payroll-adjustment.dto';
+import { CreatePayrollAdjustmentDto, QueryPayrollAdjustmentsDto } from './dto/payroll-adjustment.dto';
 import { MarkPayrollPaidDto, ReconcilePayrollPaymentsDto } from './dto/payment-reconciliation.dto';
 import { PayrollReasonTransitionDto, PayrollTransitionDto } from './dto/payroll-workflow.dto';
 import { QueryPayrollDto } from './dto/query-payroll.dto';

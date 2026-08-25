@@ -109,10 +109,14 @@ export async function hybridListRecords<T extends SearchableRecord>(
 
   const page = query.page || 1;
   const limit = query.limit || 20;
-  const { page: _page, limit: _limit, skip: _skip, take: _take, ...authorizedArgs } = listArgs(
+  const authorizedArgs = listArgs(
     { ...query, search: undefined },
     options,
   );
+  delete authorizedArgs.page;
+  delete authorizedArgs.limit;
+  delete authorizedArgs.skip;
+  delete authorizedArgs.take;
   const authorized = await delegate.findMany(authorizedArgs);
   const ranked = await rankSearchCandidates(
     prisma,

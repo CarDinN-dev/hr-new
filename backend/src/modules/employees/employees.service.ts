@@ -1,7 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AccessScopeType, AuditAction, EmploymentStatus, Gender, Prisma } from '@prisma/client';
 import { RequestUser } from '../../common/types/request-user.type';
-import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
