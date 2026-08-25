@@ -1,0 +1,37 @@
+name: Dependency audit
+
+on:
+  push:
+    branches:
+      - agent/production-rbac-ui-hardening
+    paths:
+      - .github/workflows/dependency-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Frontend audit
+        run: |
+          npm ci
+          echo '--- FRONTEND PRODUCTION AUDIT ---'
+          npm audit --omit=dev --json || true
+          echo '--- FRONTEND FULL AUDIT ---'
+          npm audit --json || true
+      - name: Backend audit
+        working-directory: backend
+        run: |
+          npm ci
+          echo '--- BACKEND PRODUCTION AUDIT ---'
+          npm audit --omit=dev --json || true
+          echo '--- BACKEND FULL AUDIT ---'
+          npm audit --json || true
