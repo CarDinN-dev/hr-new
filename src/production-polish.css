@@ -193,6 +193,16 @@ body,
   background: color-mix(in srgb, var(--brand-navy) 14%, var(--surface));
 }
 
+/* A four-column joiner list fits comfortably in the desktop dashboard column.
+   Keep it tabular there, while retaining the canonical stacked-card treatment
+   on tablets and phones. */
+@media (min-width: 900px) {
+  .app [data-dashboard-widget="recent-joiners"] .table-wrap {
+    container-type: normal;
+    overflow-x: auto;
+  }
+}
+
 /* Dialogs, menus and drawers are visually separated without theatrical shadows. */
 .app :is(.modal, .drawer, .account-popover, .popover, .menu-popover) {
   border-color: var(--border);
