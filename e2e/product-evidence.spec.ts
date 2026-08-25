@@ -136,7 +136,7 @@ async function installEvidenceApi(page: Page, signedIn: () => boolean) {
       }
       : pathname === "/api/v1/payroll/payslips" ? employees.map((employee, index) => ({
         id: `payslip-${index + 1}`, employeeId: employee.id, year: 2026, month: 8,
-        baseSalary: `${18000 + index * 1500}.00`, allowances: "3500.00", deductions: `${900 + index * 75}.00`,
+        baseSalary: `${18000 + index * 1500}.00`, allowances: "3500.00", deductions: `${900 + index * 75}.00`, taxAmount: "0.00",
         bonuses: "0.00", grossPay: `${21500 + index * 1500}.00`, netPay: `${20600 + index * 1425}.00`, status: "PUBLISHED", employee,
       }))
       : pathname === "/api/v1/notifications" ? [
@@ -178,6 +178,11 @@ test("capture the verified MedTech product experience", async ({ page }) => {
     await page.goto(route);
     await expect(page.locator(".content")).toBeVisible();
     await page.waitForLoadState("networkidle");
+    await expect(page.locator("body")).not.toContainText("NaN");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    if (route === navPaths.Attendance || route === navPaths.Payroll) {
+      await expect(page.locator(".table-wide thead").first()).toBeVisible();
+    }
     await page.screenshot({ path: resolve(evidenceDir, filename), fullPage: true });
   }
 
