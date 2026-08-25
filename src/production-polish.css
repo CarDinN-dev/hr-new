@@ -249,6 +249,18 @@ body,
   }
 }
 
+.app .workflow-disclosure > summary > span {
+  display: inline-grid;
+  gap: 3px;
+}
+
+.app .workflow-disclosure > summary small {
+  display: block;
+  color: var(--text-muted);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 /* Dialogs, menus and drawers are visually separated without theatrical shadows. */
 .app :is(.modal, .drawer, .account-popover, .popover, .menu-popover) {
   border-color: var(--border);
