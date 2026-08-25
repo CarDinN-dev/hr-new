@@ -151,10 +151,11 @@ test('payroll access is limited to payroll roles and Super Administrators regard
   assert.equal(await guard.canActivate(executionContext(user({ roles: ['CPO'], permissions: ['payroll.read'] }))), true);
 });
 
-test('Super Administrators bypass step-up authentication while other roles do not', () => {
+test('protected operations require recent step-up authentication for every role, including Super Administrators', () => {
   const authorization = new AuthorizationService({});
-  assert.doesNotThrow(() => authorization.requireRecentStepUp(user({ isSuperAdmin: true, reauthenticatedAt: new Date(0) })));
+  assert.throws(() => authorization.requireRecentStepUp(user({ isSuperAdmin: true, reauthenticatedAt: new Date(0) })), /Recent authentication is required/);
   assert.throws(() => authorization.requireRecentStepUp(user({ reauthenticatedAt: new Date(0) })), /Recent authentication is required/);
+  assert.doesNotThrow(() => authorization.requireRecentStepUp(user({ isSuperAdmin: true, reauthenticatedAt: new Date() })));
 });
 
 test('permissions catalogue rejects pagination parameters', () => {
@@ -259,14 +260,14 @@ test('authorization context unions roles, applies direct denies, and preserves t
     id: 'user-1', email: 'user@example.invalid', isActive: true, deletedAt: null, authorizationVersion: 4,
     employee: { id: 'employee-1', firstName: 'Test', lastName: 'User', deletedAt: null, managedDepartments: [{ id: 'department-1' }] },
     roles: [
-      { role: { code: 'EMPLOYEE', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.self.read' } }], inheritedRoles: [] } },
-      { role: { code: 'LINE_MANAGER', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.team.read' } }], inheritedRoles: [] } },
+      { role: { id: 'role-employee', code: 'EMPLOYEE', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.self.read' } }] } },
+      { role: { id: 'role-line-manager', code: 'LINE_MANAGER', protection: RoleProtection.STANDARD, permissions: [{ permission: { code: 'employee.team.read' } }] } },
     ],
     permissionOverrides: [{ permission: { code: 'employee.team.read' }, effect: PermissionOverrideEffect.DENY, scopeType: AccessScopeType.ALL_SYSTEM, scopeIds: [] }],
   };
   let record = structuredClone(baseRecord);
   let userQuery;
-  const service = new AuthorizationService({ user: { findUnique: async (query) => { userQuery = query; return record; } } });
+  const service = new AuthorizationService({ user: { findUnique: async (query) => { userQuery = query; return record; } }, role: { findMany: async () => record.roles.map(({ role }) => ({ id: role.id, permissions: role.permissions, inheritedRoles: [] })) } });
   const context = service.toRequestUser(await service.loadUserContext('user-1'), { id: 'session-1', csrfToken: 'csrf', provider: 'local' });
   assert.equal(userQuery.select.roles.where.revokedAt, null);
   assert.equal(userQuery.select.roles.where.role.isActive, true);
@@ -276,7 +277,7 @@ test('authorization context unions roles, applies direct denies, and preserves t
   assert.deepEqual(context.departmentScopeIds, ['department-1']);
 
   record = structuredClone(baseRecord);
-  record.roles.push({ role: { code: 'SUPER_ADMIN', protection: RoleProtection.SUPER_ADMIN, permissions: [{ permission: { code: 'employee.team.read' } }], inheritedRoles: [] } });
+  record.roles.push({ role: { id: 'role-super-admin', code: 'SUPER_ADMIN', protection: RoleProtection.SUPER_ADMIN, permissions: [{ permission: { code: 'employee.team.read' } }] } });
   const superContext = service.toRequestUser(await service.loadUserContext('user-1'), { id: 'session-2', csrfToken: 'csrf', provider: 'local' });
   assert.equal(superContext.isSuperAdmin, true);
   assert.equal(superContext.permissions.includes('employee.team.read'), true);
@@ -287,13 +288,18 @@ test('authorization context includes permissions inherited by custom roles', asy
     id: 'user-1', email: 'user@example.invalid', isActive: true, deletedAt: null, authorizationVersion: 1,
     employee: null,
     roles: [{ role: {
-      code: 'CUSTOM_REPORTER', protection: RoleProtection.STANDARD,
+      id: 'role-custom-reporter', code: 'CUSTOM_REPORTER', protection: RoleProtection.STANDARD,
       permissions: [{ permission: { code: 'report.read' } }],
-      inheritedRoles: [{ parentRole: { permissions: [{ permission: { code: 'employee.self.read' } }] } }],
     } }],
     permissionOverrides: [],
   };
-  const service = new AuthorizationService({ user: { findUnique: async () => record } });
+  const service = new AuthorizationService({
+    user: { findUnique: async () => record },
+    role: { findMany: async () => [
+      { id: 'role-custom-reporter', permissions: [{ permission: { code: 'report.read' } }], inheritedRoles: [{ parentRoleId: 'role-employee' }] },
+      { id: 'role-employee', permissions: [{ permission: { code: 'employee.self.read' } }], inheritedRoles: [] },
+    ] },
+  });
   const context = service.toRequestUser(await service.loadUserContext('user-1'), { id: 'session-1', csrfToken: 'csrf', provider: 'local' });
   assert.deepEqual(context.rolePermissions, ['employee.self.read', 'report.read']);
 });
