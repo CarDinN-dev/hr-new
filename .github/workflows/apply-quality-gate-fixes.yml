@@ -1,0 +1,66 @@
+name: Apply quality gate fixes
+
+on:
+  push:
+    branches:
+      - agent/production-rbac-ui-hardening
+    paths:
+      - .github/workflows/apply-quality-gate-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/production-rbac-ui-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply cross-platform and lint fixes
+        run: |
+          python ops/apply-quality-gate-fixes.py
+          rm ops/apply-quality-gate-fixes.py
+
+      - name: Verify frontend and browser behavior
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:system-ui
+
+      - name: Verify backend lint, build, RBAC, and security
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hr_erp?schema=public
+        run: |
+          npm ci
+          npm run prisma:generate
+          npm run build
+          npx eslint "{src,prisma}/**/*.ts" --max-warnings=0
+          npm run test:rbac
+          npm run test:production-rbac
+          npm run test:security
+
+      - name: Commit verified fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add playwright.config.ts src/production-polish.css \
+                  backend/src/common/utils/hybrid-search.util.ts \
+                  backend/src/modules/employees/employees.service.ts \
+                  backend/src/modules/loans/loans.service.ts \
+                  backend/src/modules/operations/operations.service.ts \
+                  backend/src/modules/operations/recruitment-pdf.ts \
+                  backend/src/modules/payroll/payroll.service.ts \
+                  ops/apply-quality-gate-fixes.py
+          git commit -m "fix: make production gates cross-platform and lint-clean"
+          git push origin HEAD:agent/production-rbac-ui-hardening
