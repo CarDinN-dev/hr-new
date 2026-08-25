@@ -1,5 +1,6 @@
 name: Apply live RBAC integration assertions
 
+# Rerun 2: employee payslip self-service assertions aligned with published-only access.
 on:
   push:
     branches:
