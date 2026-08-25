@@ -1,5 +1,6 @@
 name: Apply defense-in-depth RBAC hardening
 
+# Rerun 2: import the matching security regression contract as well.
 on:
   push:
     branches:
@@ -33,6 +34,7 @@ jobs:
           mkdir -p backend/prisma/migrations/20260825000000_attendance_hr_privacy
           git show origin/agent/production-readiness-rbac-hardening:backend/prisma/migrations/20260825000000_attendance_hr_privacy/migration.sql > backend/prisma/migrations/20260825000000_attendance_hr_privacy/migration.sql
           git show origin/agent/production-readiness-rbac-hardening:backend/scripts/production-rbac-regression.js > backend/scripts/production-rbac-regression.js
+          git show origin/agent/production-readiness-rbac-hardening:backend/scripts/security-regression.js > backend/scripts/security-regression.js
           git show origin/agent/production-readiness-rbac-hardening:src/attendance-authorization.test.ts > src/attendance-authorization.test.ts
           python <<'PY'
           from pathlib import Path
@@ -83,6 +85,7 @@ jobs:
                   backend/src/modules/authorization/authorization.service.ts \
                   backend/prisma/migrations/20260825000000_attendance_hr_privacy/migration.sql \
                   backend/scripts/production-rbac-regression.js \
+                  backend/scripts/security-regression.js \
                   backend/package.json src/api.ts src/attendance-authorization.test.ts
           git commit -m "fix: enforce attendance privacy and protected step-up defense in depth"
           git push origin HEAD:agent/production-rbac-ui-hardening
