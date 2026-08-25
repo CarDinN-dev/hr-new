@@ -28,7 +28,7 @@ body,
 }
 
 .app .sidebar {
-  background: var(--sidebar-deep) !important;
+  background: linear-gradient(180deg, var(--sidebar) 0%, var(--sidebar-deep) 100%) !important;
   box-shadow: 1px 0 0 rgba(255, 255, 255, 0.07), 10px 0 28px rgba(7, 18, 37, 0.06) !important;
 }
 
@@ -145,14 +145,6 @@ body,
   letter-spacing: -0.025em;
   line-height: 1.16;
   text-wrap: balance;
-}
-
-.app :is(.panel-head, .page-head, .page-header) {
-  align-items: flex-start;
-}
-
-.app :is(.panel-head, .page-head, .page-header) > :last-child {
-  flex: 0 0 auto;
 }
 
 .app :is(.badge, .status-badge, .chip) {
@@ -281,16 +273,6 @@ body,
 .login-shell :is(button, a, input, select, textarea):focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
-}
-
-@media (max-width: 720px) {
-  .app :is(.panel-head, .page-head, .page-header) {
-    align-items: stretch;
-  }
-
-  .app :is(.panel-head, .page-head, .page-header) > :last-child {
-    width: 100%;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
