@@ -193,13 +193,59 @@ body,
   background: color-mix(in srgb, var(--brand-navy) 14%, var(--surface));
 }
 
-/* A four-column joiner list fits comfortably in the desktop dashboard column.
-   Keep it tabular there, while retaining the canonical stacked-card treatment
-   on tablets and phones. */
+/* Operational data remains a compact, scannable table on desktop. The canonical
+   stacked-card table is retained below 900px for touch devices. */
 @media (min-width: 900px) {
+  .app .table-wide {
+    overflow-x: auto;
+  }
+
   .app [data-dashboard-widget="recent-joiners"] .table-wrap {
     container-type: normal;
     overflow-x: auto;
+  }
+}
+
+@container (min-width: 900px) {
+  .app .table-wide table {
+    display: table;
+  }
+
+  .app .table-wide thead {
+    display: table-header-group;
+  }
+
+  .app .table-wide tbody {
+    display: table-row-group;
+    padding: 0;
+  }
+
+  .app .table-wide tr,
+  .app .table-wide tbody tr {
+    display: table-row;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .app .table-wide td,
+  .app .table-wide td[colspan] {
+    min-height: 0;
+    display: table-cell;
+    grid-template-columns: none;
+    gap: 0;
+    padding: 10px 12px;
+  }
+
+  .app .table-wide td::before,
+  .app .table-wide td[colspan]::before {
+    display: none;
+    content: none;
+  }
+
+  .app .table-wide td .row-actions {
+    justify-content: flex-end;
   }
 }
 
