@@ -1267,26 +1267,23 @@ function DepartmentFilter({ value, departments, onChange }: { value: string; dep
 }
 
 function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
-  const { active: searchActive } = usePageSearch();
-  const searchResults = usePageSearchList<{ id: string }>("employees", "/employees");
+  const { active: searchActive, search } = usePageSearch();
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const activeCount = state.employees.filter(employee => employee.status === "Active").length;
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
-  const employees = useMemo(() => rankedPageSearchItems(
-    state.employees.filter(employee => (!department || employee.fields.Department === department) && (!status || employee.status === status))
-      .sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])),
-    searchResults.data,
-    searchActive,
-    employee => employee.id,
-    match => match.id,
-  ), [state.employees, searchActive, searchResults.data, department, status]);
+  const employees = useMemo(() => state.employees.filter(employee => {
+    const exactMatch = !searchActive || [employeeName(employee), employee.fields["Employee Code"]]
+      .some(value => value.trim().toLocaleLowerCase() === search.toLocaleLowerCase());
+    return exactMatch && (!department || employee.fields.Department === department) && (!status || employee.status === status);
+  }).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])), [state.employees, searchActive, search, department, status]);
+  usePageSearchStatus("employees", { count: employees.length }, searchActive);
   const totalPages = Math.max(1, Math.ceil(employees.length / 20));
   const pageEmployees = employees.slice((page - 1) * 20, page * 20);
 
-  useEffect(() => { setPage(1); }, [department, status, searchActive, searchResults.data]);
+  useEffect(() => { setPage(1); }, [department, status, search]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   function edit(employee?: EmployeeRecord) {

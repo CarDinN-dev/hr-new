@@ -76,43 +76,24 @@ test("every sidebar page exposes one page-specific search control", async ({ pag
   }
 });
 
-test("search is debounced, mapped to the page endpoint, clearable and reset by navigation", async ({ page }) => {
+test("employee directory search is debounced, exact, clearable and reset by navigation", async ({ page }) => {
   await installApi(page);
   await page.goto(navPaths.Employees);
   const input = page.getByRole("searchbox");
-  const request = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "Alice";
-  });
-  await input.fill("Alice");
-  await request;
+  await input.fill("alice smith");
   await expect(page.locator(".page-search-status")).toContainText(/result/i);
   await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Bob Jones/ })).toHaveCount(0);
+  await input.fill("MTC002");
+  await expect(page.getByRole("button", { name: /Alice Smith/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Bob Jones/ })).toBeVisible();
+  await input.fill("Alice");
+  await expect(page.locator(".employee-card-main")).toHaveCount(0);
   await page.getByRole("button", { name: "Clear search employees" }).click();
   await expect(input).toHaveValue("");
-  await input.fill("Finance");
+  await input.fill("MTC001");
   await page.goto(navPaths.Attendance);
   await expect(page.getByRole("searchbox")).toHaveValue("");
-});
-
-test("state-backed lists keep their content while loading, preserve database rank, and restore normal order after clear", async ({ page }) => {
-  const api = await installApi(page, { searchedEmployees: [employees[1], employees[0]], holdEmployeeSearch: true });
-  await page.goto(navPaths.Employees);
-  const searched = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "people";
-  });
-  await page.getByRole("searchbox").fill("people");
-  await searched;
-  await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Bob Jones/ })).toBeVisible();
-  api.releaseEmployeeSearch();
-  await expect.poll(async () => page.locator(".employee-card-main").evaluateAll(elements => elements.map(element => element.textContent?.trim() || "")))
-    .toEqual([expect.stringContaining("Bob Jones"), expect.stringContaining("Alice Smith")]);
-  await page.getByRole("button", { name: "Clear search employees" }).click();
-  await expect.poll(async () => page.locator(".employee-card-main").evaluateAll(elements => elements.map(element => element.textContent?.trim() || "")))
-    .toEqual([expect.stringContaining("Alice Smith"), expect.stringContaining("Bob Jones")]);
 });
 
 test("Team keeps its full-scope metric while filtering people", async ({ page }) => {
@@ -194,12 +175,7 @@ test("employee directory filters remain available and combine with directory sea
   expect(departmentOptions!.y).toBeGreaterThanOrEqual(departmentTrigger!.y + departmentTrigger!.height);
   expect(departmentOptions!.y + departmentOptions!.height).toBeLessThanOrEqual(900);
   await page.getByRole("option", { name: "Finance" }).click();
-  const searched = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    return url.pathname === "/api/v1/employees" && url.searchParams.get("search") === "Alice";
-  });
-  await page.getByRole("searchbox").fill("Alice");
-  await searched;
+  await page.getByRole("searchbox").fill("Alice Smith");
   await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();
   await page.getByLabel("Filter employees by status").selectOption("On Leave");
   await expect(page.getByRole("button", { name: /Alice Smith/ })).toHaveCount(0);
