@@ -1,0 +1,154 @@
+name: Production readiness
+
+on:
+  push:
+    branches:
+      - agent/production-readiness-rbac-hardening
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend build, unit tests, and dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  backend:
+    name: Backend build, RBAC, security, and financial regressions
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run prisma:generate
+      - run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hr_erp?schema=public
+      - run: npm run build
+      - run: npx eslint "{src,prisma}/**/*.ts"
+      - run: node scripts/production-rbac-regression.js
+      - run: npm run test:security
+      - run: npm run test:rbac
+      - run: npm run test:financial
+      - run: npm run test:leave
+      - run: npm run test:document-scanning
+      - run: npm run test:microsoft-provisioning
+      - run: npm run test:system-user-linking
+
+  integration:
+    name: Real PostgreSQL API integration suite
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hr_erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hr_erp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hr_erp?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run test:integration
+
+  browser:
+    name: Chromium end-to-end and accessibility smoke suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:system-ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-evidence
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  containers:
+    name: Container and Compose validation
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-postgres-password
+      JWT_SECRET: ci-jwt-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      AUDIT_HMAC_KEY: ci-audit-secret-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+      MICROSOFT_TENANT_ID: 11111111-1111-4111-8111-111111111111
+      MICROSOFT_CLIENT_ID: 22222222-2222-4222-8222-222222222222
+      MICROSOFT_CLIENT_SECRET: ci-microsoft-client-secret
+      MICROSOFT_REDIRECT_URI: https://example.invalid/api/v1/auth/microsoft/callback
+      DOCUMENT_SCAN_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: medtech-hr-erp:web-ci
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: medtech-hr-erp:api-ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
