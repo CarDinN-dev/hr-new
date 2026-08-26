@@ -174,6 +174,8 @@ test("employee directory filters remain available and combine with directory sea
   expect(departmentOptions).not.toBeNull();
   expect(departmentOptions!.y).toBeGreaterThanOrEqual(departmentTrigger!.y + departmentTrigger!.height);
   expect(departmentOptions!.y + departmentOptions!.height).toBeLessThanOrEqual(900);
+  await page.locator(".department-filter__options").evaluate(menu => menu.dispatchEvent(new Event("scroll")));
+  await expect(page.locator(".department-filter__options")).toBeVisible();
   await page.getByRole("option", { name: "Finance" }).click();
   await page.getByRole("searchbox").fill("Alice Smith");
   await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();

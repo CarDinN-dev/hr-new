@@ -1242,7 +1242,9 @@ function DepartmentFilter({ value, departments, onChange }: { value: string; dep
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (!triggerRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    const closeOnScroll = () => setOpen(false);
+    const closeOnScroll = (event: Event) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
     window.addEventListener("resize", placeMenu);
     window.addEventListener("scroll", closeOnScroll, true);
     document.addEventListener("pointerdown", closeOnOutsidePointer);
