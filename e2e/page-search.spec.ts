@@ -76,18 +76,18 @@ test("every sidebar page exposes one page-specific search control", async ({ pag
   }
 });
 
-test("employee directory search is debounced, exact, clearable and reset by navigation", async ({ page }) => {
+test("employee directory search is debounced, partial, clearable and reset by navigation", async ({ page }) => {
   await installApi(page);
   await page.goto(navPaths.Employees);
   const input = page.getByRole("searchbox");
-  await input.fill("alice smith");
+  await input.fill("li");
   await expect(page.locator(".page-search-status")).toContainText(/result/i);
   await expect(page.getByRole("button", { name: /Alice Smith/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Bob Jones/ })).toHaveCount(0);
-  await input.fill("MTC002");
+  await input.fill("tc002");
   await expect(page.getByRole("button", { name: /Alice Smith/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Bob Jones/ })).toBeVisible();
-  await input.fill("Alice");
+  await input.fill("alice@example.invalid");
   await expect(page.locator(".employee-card-main")).toHaveCount(0);
   await page.getByRole("button", { name: "Clear search employees" }).click();
   await expect(input).toHaveValue("");

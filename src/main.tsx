@@ -1275,9 +1275,9 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
   const onLeaveCount = state.employees.filter(employee => employee.status === "On Leave").length;
   const departmentCount = new Set(state.employees.map(employee => employee.fields.Department).filter(Boolean)).size;
   const employees = useMemo(() => state.employees.filter(employee => {
-    const exactMatch = !searchActive || [employeeName(employee), employee.fields["Employee Code"]]
-      .some(value => value.trim().toLocaleLowerCase() === search.toLocaleLowerCase());
-    return exactMatch && (!department || employee.fields.Department === department) && (!status || employee.status === status);
+    const matchesSearch = !searchActive || [employeeName(employee), employee.fields["Employee Code"]]
+      .some(value => value.trim().toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    return matchesSearch && (!department || employee.fields.Department === department) && (!status || employee.status === status);
   }).sort((a, b) => a.fields["Employee Code"].localeCompare(b.fields["Employee Code"])), [state.employees, searchActive, search, department, status]);
   usePageSearchStatus("employees", { count: employees.length }, searchActive);
   const totalPages = Math.max(1, Math.ceil(employees.length / 20));
