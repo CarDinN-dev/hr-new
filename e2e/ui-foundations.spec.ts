@@ -9,25 +9,27 @@ const session = {
     "session.self.read", "session.self.revoke", "employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all", "employee.hr.create",
     "department.read", "department.manage", "organization.read", "settings.read", "settings.manage", "position.manage",
     "attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.audit.read", "attendance.read_all",
-    "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.audit.read", "leave.read_all", "leave.configure",
+    "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.hr.approve", "leave.audit.read", "leave.read_all", "leave.configure",
     "trip.self.read", "trip.team.read", "trip.management.read", "trip.hr.read", "trip.read_all",
     "expense.self.read", "expense.team.read", "expense.management.read", "expense.hr.read", "expense.read_all",
     "loan.self.read", "loan.hr.read", "loan.audit.read", "loan.read_all",
     "payroll.self.read_payslip", "payroll.read", "payroll.audit.read", "payroll.generate", "payroll.payslip.read_all", "payroll.export",
-    "recruitment.read", "eos.read", "document.self.read", "document.hr.read", "document.read_all", "report.read", "audit.read",
+    "recruitment.read", "eos.read", "document.self.read", "document.hr.read", "document.read_all", "report.read", "audit.read", "performance.read_all", "announcement.read", "announcement.manage",
     "service_request.self.read", "role.read", "role.manage", "permission.read", "permission.assign", "role.assign", "user.read", "user.manage",
-    "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage", "notification.read"
+    "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage", "notification.self.read", "notification.self.manage"
   ]
 };
 
 async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = [], initialTheme: "light" | "dark" = "light", sessionOverride: Partial<typeof session> = {}) {
+  const activeSession = { ...session, ...sessionOverride, permissions: [...(sessionOverride.permissions || session.permissions), ...extraPermissions] };
   await page.addInitScript(({ value, permissions, theme, override }) => {
     sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, ...override, permissions: [...(override.permissions || value.permissions), ...permissions] }));
     localStorage.setItem("medtech-hr-theme", theme);
   }, { value: session, permissions: extraPermissions, theme: initialTheme, override: sessionOverride });
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
-    const data = pathname === "/api/v1/employees/me" ? employees[0] ?? { id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE" }
+    const data = pathname === "/api/v1/auth/me" ? { csrfToken: activeSession.csrfToken, user: activeSession }
+      : pathname === "/api/v1/employees/me" ? employees[0] ?? { id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE" }
       : pathname === "/api/v1/employees" ? employees
       : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }]
       : pathname === "/api/v1/approvals/inbox" ? { leave: [], certificates: [], payroll: [] }
@@ -124,12 +126,12 @@ for (const theme of ["light", "dark"] as const) {
 for (const viewport of [
   { width: 1920, height: 1080 },
   { width: 1440, height: 900 },
-  { width: 1366, height: 768 },
-  { width: 1280, height: 720 },
-  { width: 1152, height: 768 },
+  { width: 1280, height: 800 },
   { width: 1024, height: 768 },
-  { width: 768, height: 900 },
-  { width: 390, height: 844 },
+  { width: 834, height: 1112 },
+  { width: 768, height: 1024 },
+  { width: 430, height: 932 },
+  { width: 375, height: 812 },
 ] as const) {
   test(`all application routes retain aligned clinical geometry at ${viewport.width}px`, async ({ page }) => {
     test.setTimeout(60_000);
@@ -201,6 +203,29 @@ for (const viewport of [
     }
   });
 }
+
+test("compact headers keep the visible search row below navigation controls", async ({ page }) => {
+  await installUiApi(page);
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 834, height: 1112 }, { width: 768, height: 1024 }, { width: 430, height: 932 }, { width: 375, height: 812 }] as const) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const [heading, search, menu] = await Promise.all([
+      page.locator(".topbar-heading").boundingBox(),
+      page.getByRole("search").boundingBox(),
+      page.getByRole("button", { name: "Open menu" }).boundingBox(),
+    ]);
+    expect(heading).not.toBeNull();
+    expect(search).not.toBeNull();
+    expect(menu).not.toBeNull();
+    expect(search!.y).toBeGreaterThanOrEqual(heading!.y + heading!.height);
+    expect(search!.x).toBeGreaterThanOrEqual(0);
+    expect(search!.x + search!.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(menu!.width).toBeGreaterThanOrEqual(44);
+    expect(menu!.height).toBeGreaterThanOrEqual(44);
+    await page.getByRole("searchbox").fill("leave");
+    await expect(page.getByRole("button", { name: /Clear search/i })).toHaveCSS("width", "44px");
+  }
+});
 
 test("mobile dashboard, wide tables and shared dialog retain usable geometry", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

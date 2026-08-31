@@ -9,11 +9,11 @@ const session = {
     "session.self.read", "session.self.revoke", "session.manage", "employee.self.read", "employee.team.read", "employee.management.read", "employee.hr.read", "employee.read_all", "employee.hr.create",
     "department.read", "department.manage", "organization.read", "settings.read", "settings.manage", "system.configure", "position.manage",
     "attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.audit.read", "attendance.read_all",
-    "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.audit.read", "leave.read_all", "leave.configure", "trip.read_all", "expense.read_all",
+    "leave.self.read", "leave.team.read", "leave.management.read", "leave.hr.read", "leave.hr.approve", "leave.audit.read", "leave.read_all", "leave.configure", "trip.read_all", "expense.read_all",
     "loan.self.read", "loan.hr.read", "loan.audit.read", "loan.read_all", "payroll.self.read_payslip", "payroll.read", "payroll.audit.read", "payroll.generate", "payroll.payslip.read_all", "payroll.export",
-    "recruitment.read", "eos.read", "document.self.read", "document.hr.read", "document.read_all", "report.read", "audit.read", "service_request.self.read",
+    "recruitment.read", "eos.read", "document.self.read", "document.hr.read", "document.read_all", "report.read", "audit.read", "service_request.self.read", "performance.read_all", "announcement.read",
     "role.read", "role.manage", "permission.read", "permission.assign", "role.assign", "user.read", "user.manage",
-    "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage", "notification.read"
+    "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage", "notification.self.read"
   ]
 };
 
@@ -42,7 +42,8 @@ async function installApi(page: Page, options: ApiOptions = {}) {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/v1/employees" && url.searchParams.get("search") && options.holdEmployeeSearch) await employeeSearchGate;
     if (url.pathname === "/api/v1/approvals/inbox" && url.searchParams.get("search") && options.holdApprovalSearch) await approvalSearchGate;
-    const data = url.pathname === "/api/v1/search/sections" ? { data: [] }
+    const data = url.pathname === "/api/v1/auth/me" ? { csrfToken: session.csrfToken, user: session }
+      : url.pathname === "/api/v1/search/sections" ? { data: [] }
       : url.pathname === "/api/v1/approvals/inbox" ? (url.searchParams.get("search") ? options.searchedApprovals : options.approvals) ?? { leave: [], certificates: [], payroll: [] }
       : url.pathname === "/api/v1/attendance/reports/summary" ? { summary: { totalRecords: 0, byStatus: { PRESENT: 0, LATE: 0, ABSENT: 0 } } }
       : url.pathname === "/api/v1/payroll/preflight" ? { ready: true, runType: "REGULAR", policy: { prorationBasis: "FIXED_30", requireBankDetails: true, requireAttendance: false, varianceThreshold: "10" }, summary: { employees: 0, errors: 0, warnings: 0, grossPay: "0", deductions: "0", netPay: "0", adjustments: 0 }, issues: [] }
