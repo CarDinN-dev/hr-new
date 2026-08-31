@@ -53,4 +53,21 @@ describe("System route authorization", () => {
   it("allows employee Settings for signed-in device management", () => {
     expect(canAccessRoute(session(["EMPLOYEE"], ["session.self.read"]), "Settings")).toBe(true);
   });
+
+  it("keeps attendance private below HR and exposes only employee-owned payslips", () => {
+    const lowerRoles: Array<[string, string]> = [
+      ["EMPLOYEE", "attendance.self.read"],
+      ["LINE_MANAGER", "attendance.team.read"],
+      ["MANAGER", "attendance.management.read"],
+    ];
+    for (const [role, legacyPermission] of lowerRoles) {
+      expect(canAccessRoute(session([role], [legacyPermission]), "Attendance")).toBe(false);
+    }
+
+    expect(canAccessRoute(session(["EMPLOYEE"], ["payroll.self.read_payslip"]), "Payroll")).toBe(true);
+    expect(canAccessRoute(session(["EMPLOYEE"], []), "Payroll")).toBe(false);
+    expect(canAccessRoute(session(["HR"], ["attendance.hr.read"]), "Attendance")).toBe(true);
+    expect(canAccessRoute(session(["CPO"], ["attendance.read_all"]), "Attendance")).toBe(true);
+    expect(canAccessRoute(session(["COO"], ["attendance.read_all"]), "Attendance")).toBe(true);
+  });
 });

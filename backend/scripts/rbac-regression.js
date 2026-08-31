@@ -65,6 +65,13 @@ test('role inheritance and business separation match the production matrix', () 
   assert.equal(lineManager.has('leave.management.approve_manager'), false);
   assert.equal(manager.has('leave.management.approve_manager'), true);
   assert.equal(manager.has('leave.team.approve_line_manager'), false);
+  for (const role of [employee, lineManager, manager]) {
+    for (const permission of [
+      'attendance.self.read', 'attendance.self.create', 'attendance.self.correct_request',
+      'attendance.team.read', 'attendance.team.review',
+      'attendance.management.read', 'attendance.management.review',
+    ]) assert.equal(role.has(permission), false, `attendance must remain private below HR: ${permission}`);
+  }
   assert.equal(hr.has('leave.hr.approve'), true);
   assert.equal(hr.has('leave.hr.override'), true);
   assert.equal(hr.has('leave.override'), false);
@@ -76,7 +83,7 @@ test('role inheritance and business separation match the production matrix', () 
     assert.equal(coo.has(permission), false, `COO must not mutate through ${permission}`);
     assert.equal(admin.has(permission), false, `ADMIN must not mutate through ${permission}`);
   }
-  assert.equal(employee.has('payroll.self.read_payslip'), false, 'EMPLOYEE must not access payroll');
+  assert.equal(employee.has('payroll.self.read_payslip'), true, 'EMPLOYEE requires access to own published payslips');
   for (const role of [cpo, coo]) assert.equal(role.has('payroll.read'), true, 'CPO and COO require payroll read access');
   for (const permission of [
     'system.read', 'user.read', 'user.manage', 'user.deactivate', 'user.delete_soft', 'role.read', 'role.manage', 'role.assign',
@@ -88,6 +95,17 @@ test('role inheritance and business separation match the production matrix', () 
   }
   assert.equal(admin.has('payroll.read'), false, 'ADMIN must not access payroll');
   for (const permission of catalog.permissions) assert.equal(superAdmin.has(permission), true, `SUPER_ADMIN lacks ${permission}`);
+});
+
+test('payroll role decorators honour exact role lists while preserving employee self-service', () => {
+  const guard = fs.readFileSync(path.join(backendSource, 'modules/authorization/permissions.guard.ts'), 'utf8');
+  assert.doesNotMatch(guard, /hasPayrollRole/u);
+  assert.match(guard, /payrollRoles\.some\(\(role\) => user\.roles\.includes\(role\)\)/u);
+
+  const controller = fs.readFileSync(path.join(backendSource, 'modules/payroll/payroll.controller.ts'), 'utf8');
+  const classHeader = controller.slice(0, controller.indexOf('export class PayrollController'));
+  assert.doesNotMatch(classHeader, /@PayrollRoles/u, 'class-level role gate must not block employee-owned payslips');
+  assert.match(controller, /@Permissions\('payroll\.self\.read_payslip'\)\s+@Get\('payslips\/me'\)/u);
 });
 
 test('every permission is assigned and protected permissions are explicit', () => {

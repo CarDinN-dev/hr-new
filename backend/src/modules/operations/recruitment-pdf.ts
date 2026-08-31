@@ -23,7 +23,7 @@ function logo() {
 }
 
 function text(value: unknown, maximum = 2_000) {
-  return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maximum);
+  return String(value ?? '').replace(/\p{Cc}/gu, ' ').trim().slice(0, maximum);
 }
 
 function date(value: unknown) {

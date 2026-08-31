@@ -201,7 +201,8 @@ export class OperationsService {
         if (hiredCount >= nextJob.openings) throw new BadRequestException('All openings for this job are filled');
         job = nextJob;
       }
-      const { interviewAssessment: _interviewAssessment, offerDetails, ...candidateDetails } = dto;
+      const { interviewAssessment, offerDetails, ...candidateDetails } = dto;
+      void interviewAssessment;
       const candidateName = dto.name ?? existing.name;
       const offerSnapshot = this.jsonObject(existing.offerDetails);
       const updated = await tx.recruitmentCandidate.update({
@@ -447,7 +448,8 @@ export class OperationsService {
     return this.transaction(async (tx) => {
       const previous = await tx.organizationSettings.findUnique({ where: { id: 'default' } });
       if (previous && dto.expectedVersion !== previous.version) throw new ConflictException('Organization settings changed; refresh and retry');
-      const { expectedVersion: _expectedVersion, ...input } = dto;
+      const { expectedVersion, ...input } = dto;
+      void expectedVersion;
       const data = {
         ...input,
         workdayHours: input.workdayHours === undefined ? undefined : nonNegativeMoney(input.workdayHours, 'workdayHours'),

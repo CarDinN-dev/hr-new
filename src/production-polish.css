@@ -1,0 +1,335 @@
+/*
+ * MedTech production polish
+ *
+ * Geometry-safe finishing layer over the canonical clinical design system.
+ * The rules below deliberately preserve route structure, breakpoints, control
+ * dimensions, business workflows and server-owned authorization.
+ */
+
+html {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body,
+.app {
+  letter-spacing: -0.004em;
+}
+
+/* Keep the application calm and work-focused. Decorative page glows are removed;
+   MedTech colour is reserved for identity, state and action. */
+body,
+.app,
+.app .workspace {
+  background-color: var(--canvas);
+  background-image: none !important;
+}
+
+/* The canonical theme already owns sidebar colour, logo contrast and active-state
+   treatment. This finishing layer only removes buoyant interaction effects. */
+.app .sidebar {
+  box-shadow: 1px 0 0 rgba(23, 33, 58, 0.04), 10px 0 28px rgba(7, 18, 37, 0.04);
+}
+
+.app .sidebar .nav-list a {
+  border-radius: 10px;
+  box-shadow: none;
+  transform: none;
+}
+
+.app .sidebar .nav-list a:hover,
+.app .sidebar .nav-list a.active {
+  box-shadow: none;
+  transform: none;
+}
+
+.app .account-trigger {
+  box-shadow: none;
+}
+
+.app .topbar,
+:root[data-theme="dark"] .app .topbar {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background-image: none !important;
+  box-shadow: 0 1px 0 rgba(23, 33, 58, 0.035);
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
+}
+
+.app .topbar-actions button,
+.app .account-menu--topbar .account-trigger,
+.app .search-shell,
+.app [role="search"] {
+  box-shadow: none;
+}
+
+.app .content {
+  position: relative;
+}
+
+/* One restrained surface language across every module. */
+.app :is(
+  .panel,
+  .metric,
+  .report-card,
+  .employee-card,
+  .template-card,
+  .pipeline-column,
+  .candidate-card,
+  .payroll-tile,
+  .workflow-card,
+  .table-wrap,
+  .workflow-disclosure,
+  .dashboard-snapshot,
+  .workspace-gate-card
+) {
+  border-color: color-mix(in srgb, var(--border) 92%, transparent);
+  background-color: var(--surface);
+  background-image: none;
+  box-shadow: 0 1px 2px rgba(23, 33, 58, 0.035), 0 7px 20px rgba(23, 33, 58, 0.045);
+}
+
+:root[data-theme="dark"] .app :is(
+  .panel,
+  .metric,
+  .report-card,
+  .employee-card,
+  .template-card,
+  .pipeline-column,
+  .candidate-card,
+  .payroll-tile,
+  .workflow-card,
+  .table-wrap,
+  .workflow-disclosure,
+  .dashboard-snapshot,
+  .workspace-gate-card
+) {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 9px 24px rgba(0, 0, 0, 0.14);
+}
+
+.app :is(.hero-panel, .dashboard-hero, .metric, .dashboard-snapshot) {
+  background-color: var(--surface);
+  background-image: none !important;
+}
+
+.app :is(.panel, .metric, .report-card, .employee-card, .candidate-card, .payroll-tile):hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 1px 2px rgba(23, 33, 58, 0.04), 0 9px 24px rgba(23, 33, 58, 0.06);
+  transform: none;
+}
+
+.app :is(.panel-head h2, .panel-head h3, .page-head h1, .page-header h1, .hero-panel h2) {
+  letter-spacing: -0.025em;
+  line-height: 1.16;
+  text-wrap: balance;
+}
+
+.app :is(.badge, .status-badge, .chip) {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.app :is(.metric strong, .dashboard-snapshot strong, td[data-type="number"], .money, .amount) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Buttons feel deliberate rather than buoyant. */
+.app button,
+.app [role="button"] {
+  box-shadow: none;
+}
+
+.app button:hover:not(.scrim),
+.app [role="button"]:hover {
+  transform: none;
+}
+
+.app button.primary:hover,
+.app .primary:hover {
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--brand-red) 18%, transparent);
+}
+
+.app :is(input, select, textarea) {
+  box-shadow: none;
+}
+
+.app :is(input, select, textarea):hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.app :is(input, select, textarea):focus {
+  box-shadow: 0 0 0 1px var(--surface), 0 0 0 4px var(--focus-ring);
+}
+
+/* Tables use strong alignment and quiet row affordances. */
+.app .table-wrap {
+  box-shadow: none;
+}
+
+.app table {
+  font-variant-numeric: tabular-nums;
+}
+
+.app th {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.app tbody tr td {
+  transition: background-color var(--motion-standard);
+}
+
+.app tbody tr:hover td {
+  background: color-mix(in srgb, var(--brand-navy) 2.6%, var(--surface));
+}
+
+:root[data-theme="dark"] .app tbody tr:hover td {
+  background: color-mix(in srgb, var(--brand-navy) 14%, var(--surface));
+}
+
+/* Dense attendance and payroll records remain compact on desktop, while tables
+   with disclosure actions keep their canonical responsive behaviour. */
+@media (min-width: 900px) {
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide {
+    overflow-x: auto;
+  }
+
+  .app [data-dashboard-widget="recent-joiners"] .table-wrap {
+    container-type: normal;
+    overflow-x: auto;
+  }
+}
+
+@container (min-width: 900px) {
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide table {
+    display: table;
+  }
+
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide thead {
+    display: table-header-group;
+  }
+
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide tbody {
+    display: table-row-group;
+    padding: 0;
+  }
+
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide tr,
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide tbody tr {
+    display: table-row;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide td,
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide td[colspan] {
+    min-height: 0;
+    display: table-cell;
+    grid-template-columns: none;
+    gap: 0;
+    padding: 10px 12px;
+  }
+
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide td::before,
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide td[colspan]::before {
+    display: none;
+    content: none;
+  }
+
+  .app :is(.attendance-workspace, .payroll-workspace) .table-wide td .row-actions {
+    justify-content: flex-end;
+  }
+}
+
+.app .workflow-disclosure > summary > span {
+  display: inline-grid;
+  gap: 3px;
+}
+
+.app .workflow-disclosure > summary small {
+  display: block;
+  color: var(--text-muted);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+/* Dialogs, menus and drawers are visually separated without theatrical shadows. */
+.app :is(.modal, .drawer, .account-popover, .popover, .menu-popover) {
+  border-color: var(--border);
+  box-shadow: 0 20px 54px rgba(17, 29, 44, 0.16);
+}
+
+:root[data-theme="dark"] .app :is(.modal, .drawer, .account-popover, .popover, .menu-popover) {
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.38);
+}
+
+/* The sign-in page keeps its premium dark identity, with the official lockup and
+   much quieter supporting artwork. */
+.login-shell {
+  background: #07101f !important;
+  background-image: none !important;
+}
+
+.login-stage {
+  filter: saturate(0.72) contrast(0.96);
+}
+
+.login-stage-art {
+  opacity: 0.09 !important;
+}
+
+.login-stage::before,
+.login-stage::after,
+.login-stage-art::before,
+.login-stage-art::after {
+  animation: none !important;
+}
+
+.login-card {
+  border-color: rgba(195, 211, 239, 0.16) !important;
+  background: rgba(16, 29, 51, 0.96) !important;
+  background-image: none !important;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34) !important;
+  backdrop-filter: blur(24px) saturate(112%);
+  -webkit-backdrop-filter: blur(24px) saturate(112%);
+}
+
+.login-eyebrow {
+  border-color: transparent !important;
+  background: transparent !important;
+  padding-inline: 0 !important;
+}
+
+.login-card :is(input, button) {
+  box-shadow: none;
+}
+
+.login-footer {
+  color: var(--login-muted);
+}
+
+/* Visible, consistent keyboard focus is non-negotiable. */
+.app :is(button, a, input, select, textarea, summary):focus-visible,
+.login-shell :is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

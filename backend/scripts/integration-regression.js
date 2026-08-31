@@ -227,6 +227,20 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   const blocked = await login('rbac.blocked@example.invalid', blockedPassword);
 
   assert.equal((await api('/employees/me', {}, sessions.EMPLOYEE)).status, 200);
+
+  for (const role of ['EMPLOYEE', 'LINE_MANAGER', 'MANAGER']) {
+    assert.equal((await api('/attendance?limit=10', {}, sessions[role])).status, 403, `${role} must not read attendance`);
+    assert.equal((await api('/attendance/reports/summary?limit=10', {}, sessions[role])).status, 403, `${role} must not read attendance reports`);
+    assert.equal((await api('/attendance/check-in', { method: 'POST', body: {} }, sessions[role])).status, 403, `${role} must not check in`);
+    assert.equal((await api('/attendance/check-out', { method: 'POST', body: {} }, sessions[role])).status, 403, `${role} must not check out`);
+    const identity = await api('/auth/me', {}, sessions[role]);
+    assert.equal(identity.data.user.permissions.some((permission) => permission.startsWith('attendance.')), false, `${role} received an attendance grant`);
+  }
+  assert.equal((await api('/attendance?limit=10', {}, sessions.HR)).status, 200);
+  const ownPayslips = await api('/payroll/payslips/me?limit=10', {}, sessions.EMPLOYEE);
+  assert.equal(ownPayslips.status, 200, JSON.stringify(ownPayslips.payload));
+  assert.deepEqual(ownPayslips.data, []);
+
   assert.equal((await api('/system/users', {}, sessions.EMPLOYEE)).status, 403);
   assert.equal((await api('/system/users', {}, sessions.HR)).status, 403);
   assert.equal((await api('/system/users?limit=100', {}, sessions.SUPER_ADMIN)).status, 200);
@@ -676,7 +690,8 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(String(payroll.data.payrolls[0].deductions), '600');
   assert.equal(String(payroll.data.payrolls[0].netPay), '9400');
   const unpublishedPayslips = await api('/payroll/payslips/me?year=2098&month=6', {}, sessions.EMPLOYEE);
-  assert.equal(unpublishedPayslips.status, 403, JSON.stringify(unpublishedPayslips.payload));
+  assert.equal(unpublishedPayslips.status, 200, JSON.stringify(unpublishedPayslips.payload));
+  assert.deepEqual(unpublishedPayslips.data, []);
   payroll = await mutate(`/payroll/runs/${payroll.data.id}/submit`, sessions.HR, { expectedVersion: payroll.data.version, reason: 'Submit payroll' });
   assert.equal(payroll.status, 201);
   assert.equal((await mutate(`/payroll/runs/${payroll.data.id}/approve`, sessions.HR, { expectedVersion: payroll.data.version })).status, 403);
@@ -687,7 +702,12 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(payroll.data.status, 'PUBLISHED');
   assert.doesNotMatch(JSON.stringify(payroll.data), /objectName|objectGeneration|sha256/);
   const myPayslips = await api('/payroll/payslips/me?year=2098&month=6', {}, sessions.EMPLOYEE);
-  assert.equal(myPayslips.status, 403);
+  assert.equal(myPayslips.status, 200, JSON.stringify(myPayslips.payload));
+  assert.equal(myPayslips.data.length, 1);
+  assert.equal(myPayslips.data[0].employeeId, sessions.EMPLOYEE.user.employeeId);
+  const employeePayslipDownload = await api(`/payroll/payslips/${myPayslips.data[0].id}/download`, {}, sessions.EMPLOYEE);
+  assert.equal(employeePayslipDownload.status, 200);
+  assert.equal(employeePayslipDownload.buffer.subarray(0, 4).toString(), '%PDF');
   const hrPayslips = await api('/payroll/payslips?year=2098&month=6', {}, sessions.HR);
   assert.equal(hrPayslips.status, 200);
   assert.equal(hrPayslips.data.length, 1);

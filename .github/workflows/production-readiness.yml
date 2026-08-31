@@ -1,0 +1,170 @@
+name: Production readiness
+
+on:
+  push:
+    branches:
+      - main
+      - agent/production-rbac-ui-hardening
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-readiness-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend build, tests, and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  backend:
+    name: Backend build, RBAC, security, and domain regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://ci_user@127.0.0.1:5432/hr_erp?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
+      - run: npm run prisma:generate
+      - run: npx prisma validate
+      - run: npm run build
+      - run: npx eslint "{src,prisma}/**/*.ts" --max-warnings=0
+      - run: npm run test:rbac
+      - run: npm run test:production-rbac
+      - run: npm run test:security
+      - run: npm run test:financial
+      - run: npm run test:leave
+      - run: npm run test:document-scanning
+      - run: npm run test:microsoft-provisioning
+      - run: npm run test:system-user-linking
+      - run: npm run test:hybrid-search
+
+  integration:
+    name: Real PostgreSQL API integration suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: medtech
+          POSTGRES_DB: medtech_integration
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U medtech -d medtech_integration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      INTEGRATION_DATABASE_URL: postgresql://medtech@127.0.0.1:5432/medtech_integration?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Create ephemeral test persona credential
+        shell: bash
+        run: echo "TEST_PERSONA_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run test:integration
+
+  browser:
+    name: Chromium end-to-end, responsive UI, and product evidence suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:system-ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-and-ui-evidence
+          path: |
+            playwright-report
+            test-results
+            ui-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+
+  containers:
+    name: Container and Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MICROSOFT_TENANT_ID: 11111111-1111-4111-8111-111111111111
+      MICROSOFT_CLIENT_ID: 22222222-2222-4222-8222-222222222222
+      MICROSOFT_REDIRECT_URI: https://example.invalid/api/v1/auth/microsoft/callback
+      DOCUMENT_SCAN_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create ephemeral Compose secrets
+        shell: bash
+        run: |
+          echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          echo "JWT_SECRET=$(openssl rand -hex 48)" >> "$GITHUB_ENV"
+          echo "AUDIT_HMAC_KEY=$(openssl rand -hex 48)" >> "$GITHUB_ENV"
+          echo "MICROSOFT_CLIENT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - run: docker compose config --quiet
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: medtech-hr-erp:web-ci
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: medtech-hr-erp:api-ci
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
