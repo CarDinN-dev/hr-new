@@ -10341,11 +10341,18 @@ body {
   box-shadow: none;
 }
 
-.page-search .page-search-command {
-  width: auto;
-  min-width: 62px;
+.app .page-search .page-search-command,
+.app .page-search .page-search-command:hover:not(:disabled) {
+  width: 48px;
+  min-width: 48px;
   height: 44px;
   min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
 }
 
 .app .brand-block { min-height: 70px; padding: 10px 20px; }
