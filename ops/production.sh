@@ -186,7 +186,6 @@ install_monitoring() {
   systemctl daemon-reload
   systemctl enable --now medtech-hr-erp-monitor.timer
   systemctl start medtech-hr-erp-monitor.service
-  GOOGLE_CLOUD_PROJECT=hr-erp-502412 python3 "$project_dir/ops/gcp/reconcile-monitoring.py" --apply >/dev/null
 }
 
 wait_healthy() {
