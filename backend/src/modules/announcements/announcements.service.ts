@@ -246,7 +246,7 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
     let stored: Awaited<ReturnType<DocumentStorageService['uploadPrivate']>> | undefined;
     try {
       return await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "id" FROM "Announcement" WHERE "id" = ${id}::uuid FOR UPDATE`;
+        await tx.$queryRaw`SELECT "id" FROM "Announcement" WHERE "id" = ${id} FOR UPDATE`;
         const [current, kindCount, duplicate, inlineBytes] = await Promise.all([
           tx.announcement.findUnique({ where: { id }, select: { emailQueuedAt: true, deletedAt: true } }),
           tx.announcementAttachment.count({ where: { announcementId: id, kind: dto.kind, deletedAt: null } }),
