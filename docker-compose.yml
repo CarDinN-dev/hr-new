@@ -120,6 +120,7 @@ services:
         VITE_API_URL: /api/v1
         BUILD_COMMIT: ${DEPLOYED_COMMIT:-unknown}
     image: ${WEB_IMAGE:-medtech-hr-erp:latest}
+    user: "101:101"
     init: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
