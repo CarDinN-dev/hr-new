@@ -1726,6 +1726,7 @@ model AuditEvent {
   metadataJson           Json?
   previousEventHash      String?
   eventHash              String           @unique
+  hmacKeyId              String           @default("legacy") @db.VarChar(64)
 
   actor   User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   changes AuditChange[]

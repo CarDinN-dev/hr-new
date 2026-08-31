@@ -1,7 +1,12 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     init: true
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 2g
+    mem_reservation: 512m
+    cpus: 2
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -16,14 +21,23 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks: [database]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
   clamav:
-    image: clamav/clamav:1.4_base
+    image: clamav/clamav:1.4_base@sha256:b6294770c55fcec0b082c45467b74945a532ec6a34aa8f0facdddd4c196734be
     init: true
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 2g
+    mem_reservation: 768m
+    cpus: 2
+    volumes:
+      - clamav_data:/var/lib/clamav
     restart: unless-stopped
+    networks: [scanner]
     healthcheck:
       test: ["CMD-SHELL", "clamdcheck.sh"]
       interval: 10s
@@ -38,16 +52,27 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: medtech-hr-erp-api:latest
+      args:
+        BUILD_COMMIT: ${DEPLOYED_COMMIT:-unknown}
+    image: ${API_IMAGE:-medtech-hr-erp-api:latest}
     init: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    pids_limit: 256
+    mem_limit: 1g
+    mem_reservation: 256m
+    cpus: 1.5
     environment:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/hr_erp?schema=public
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?set AUDIT_HMAC_KEY in .env}
+      AUDIT_HMAC_KEY_ID: ${AUDIT_HMAC_KEY_ID:-legacy}
+      AUDIT_HMAC_PREVIOUS_KEYS: ${AUDIT_HMAC_PREVIOUS_KEYS:-{}}
       JWT_EXPIRES_IN: 8h
       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:?set MICROSOFT_TENANT_ID in .env}
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:?set MICROSOFT_CLIENT_ID in .env}
@@ -81,6 +106,8 @@ services:
       retries: 5
       start_period: 20s
     restart: unless-stopped
+    stop_grace_period: 30s
+    networks: [edge, database, scanner]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -91,19 +118,38 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api/v1
-    image: medtech-hr-erp:latest
+        BUILD_COMMIT: ${DEPLOYED_COMMIT:-unknown}
+    image: ${WEB_IMAGE:-medtech-hr-erp:latest}
     init: true
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m,mode=1777
+      - /var/run:rw,noexec,nosuid,size=8m,mode=1777
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    pids_limit: 128
+    mem_limit: 256m
+    mem_reservation: 64m
+    cpus: 0.5
     ports:
-      - "127.0.0.1:8080:80"
-      - "127.0.0.1:8443:443"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8443:8443"
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+    networks: [edge]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
 volumes:
   postgres_data:
+  clamav_data:
+
+networks:
+  edge:
+  database:
+    internal: true
+  scanner:

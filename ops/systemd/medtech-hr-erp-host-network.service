@@ -1,0 +1,15 @@
+[Unit]
+Description=Harden MedTech HR ERP host discovery and agent listeners
+After=network-online.target systemd-resolved.service google-cloud-ops-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/medtech-hr-erp-host-network-hardening --apply
+RemainAfterExit=true
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

@@ -45,6 +45,9 @@ WHERE n.nspname = 'public' AND p.prokind IN ('f', 'p') \gexec
 
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM hr_erp_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO hr_erp_app;
+SELECT format('REVOKE ALL ON TABLE %I.%I FROM hr_erp_app', n.nspname, c.relname)
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relname = '_prisma_migrations' AND c.relkind IN ('r', 'p') \gexec
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM hr_erp_app;
 GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO hr_erp_app;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, hr_erp_app;

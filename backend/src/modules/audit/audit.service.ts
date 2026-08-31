@@ -5,6 +5,7 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { jsPDF } from 'jspdf';
 import { RequestUser } from '../../common/types/request-user.type';
 import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
+import { csvCell } from '../../common/utils/csv.util';
 import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DocumentStorageService } from '../documents/document-storage.service';
@@ -43,10 +44,34 @@ export type AuditEntry = {
 
 @Injectable()
 export class AuditService {
-  private readonly hashKey: string;
+  private readonly hashKeyId: string;
+  private readonly verificationKeys: ReadonlyMap<string, string>;
 
   constructor(private readonly prisma: PrismaService, config: ConfigService, private readonly storage: DocumentStorageService, private readonly authorization: AuthorizationService) {
-    this.hashKey = config.get<string>('AUDIT_HMAC_KEY') || config.getOrThrow<string>('JWT_SECRET');
+    const activeKey = config.get<string>('AUDIT_HMAC_KEY') || config.getOrThrow<string>('JWT_SECRET');
+    this.hashKeyId = config.get<string>('AUDIT_HMAC_KEY_ID', 'legacy').trim();
+    if (!/^[A-Za-z0-9._-]{1,64}$/u.test(this.hashKeyId)) throw new Error('AUDIT_HMAC_KEY_ID is invalid');
+    let previous: unknown;
+    try {
+      previous = JSON.parse(config.get<string>('AUDIT_HMAC_PREVIOUS_KEYS', '{}'));
+    } catch {
+      throw new Error('AUDIT_HMAC_PREVIOUS_KEYS must be a JSON object');
+    }
+    if (!previous || Array.isArray(previous) || typeof previous !== 'object') throw new Error('AUDIT_HMAC_PREVIOUS_KEYS must be a JSON object');
+    const keys = new Map<string, string>();
+    for (const [id, key] of Object.entries(previous)) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/u.test(id) || typeof key !== 'string' || key.length < 32) throw new Error('AUDIT_HMAC_PREVIOUS_KEYS contains an invalid entry');
+      keys.set(id, key);
+    }
+    keys.set(this.hashKeyId, activeKey);
+    this.verificationKeys = keys;
+  }
+
+  private digest(payload: Record<string, unknown>, keyId: string) {
+    const key = this.verificationKeys.get(keyId);
+    if (!key) return null;
+    const protectedPayload = keyId === 'legacy' ? payload : { ...payload, hmacKeyId: keyId };
+    return createHmac('sha256', key).update(this.canonical(protectedPayload)).digest('hex');
   }
 
   async record(client: AuditClient, user: RequestUser | null, entry: AuditEntry) {
@@ -101,7 +126,7 @@ export class AuditService {
       changedFields, before: before ?? null, after: after ?? null, metadata: metadata ?? null,
       previousEventHash: chain.lastHash,
     };
-    const eventHash = createHmac('sha256', this.hashKey).update(this.canonical(payload)).digest('hex');
+    const eventHash = this.digest(payload, this.hashKeyId)!;
     const event = await client.auditEvent.create({
       data: {
         sequence,
@@ -142,6 +167,7 @@ export class AuditService {
         metadataJson: metadata as Prisma.InputJsonValue | undefined,
         previousEventHash: chain.lastHash,
         eventHash,
+        hmacKeyId: this.hashKeyId,
         changes: entry.changes?.length ? { create: entry.changes.map((change) => ({
           field: change.field,
           previousValue: this.redactText(change.field, change.previousValue),
@@ -201,7 +227,8 @@ export class AuditService {
         changedFields: event.changedFields, before: event.beforeJson, after: event.afterJson,
         metadata: event.metadataJson, previousEventHash: event.previousEventHash,
       };
-      const expected: string = createHmac('sha256', this.hashKey).update(this.canonical(payload)).digest('hex');
+      const expected = this.digest(payload, event.hmacKeyId);
+      if (!expected) return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'unknown audit HMAC key' };
       if (expected !== event.eventHash) return { valid: false, brokenAtSequence: event.sequence.toString(), reason: 'event hash mismatch' };
       previous = event.eventHash;
       expectedSequence += 1n;
@@ -336,9 +363,8 @@ export class AuditService {
   }
 
   private auditCsv(events: Array<Prisma.AuditEventGetPayload<Record<string, never>>>) {
-    const q = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
     const rows = [['Sequence', 'Occurred At UTC', 'Actor', 'Action', 'Outcome', 'Module', 'Resource Type', 'Resource ID', 'Reason'], ...events.map((event) => [event.sequence.toString(), event.occurredAtUtc.toISOString(), event.actorEmailSnapshot ?? '', event.action, event.outcome, event.module, event.resourceType, event.resourceId ?? '', event.reason ?? ''])];
-    return { buffer: Buffer.from(`\uFEFF${rows.map((row) => row.map(q).join(',')).join('\r\n')}`, 'utf8'), contentType: 'text/csv; charset=utf-8', extension: 'csv' };
+    return { buffer: Buffer.from(`\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`, 'utf8'), contentType: 'text/csv; charset=utf-8', extension: 'csv' };
   }
 
   private auditPdf(events: Array<Prisma.AuditEventGetPayload<Record<string, never>>>) {

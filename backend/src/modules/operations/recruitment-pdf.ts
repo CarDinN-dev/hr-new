@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { stripControlCharacters } from '../../common/utils/text.util';
 
 type CandidateDocumentData = {
   name: string;
@@ -23,7 +24,7 @@ function logo() {
 }
 
 function text(value: unknown, maximum = 2_000) {
-  return String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maximum);
+  return stripControlCharacters(String(value ?? '')).trim().slice(0, maximum);
 }
 
 function date(value: unknown) {

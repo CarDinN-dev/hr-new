@@ -4,6 +4,7 @@ import { Storage } from '@google-cloud/storage';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
+import { assertValidDocumentUpload } from './document-upload';
 
 @Injectable()
 export class DocumentStorageService {
@@ -23,6 +24,7 @@ export class DocumentStorageService {
   }
 
   async upload(employeeId: string, file: Express.Multer.File) {
+    assertValidDocumentUpload(file);
     const safeName = file.originalname.replace(/[^A-Za-z0-9._-]+/g, '-').slice(-180) || 'document';
     return this.uploadPrivate(
       `employees/${employeeId}/${new Date().getUTCFullYear()}`,

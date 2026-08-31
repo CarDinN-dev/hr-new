@@ -1,0 +1,2 @@
+ALTER TABLE "AuditEvent"
+  ADD COLUMN "hmacKeyId" VARCHAR(64) NOT NULL DEFAULT 'legacy';

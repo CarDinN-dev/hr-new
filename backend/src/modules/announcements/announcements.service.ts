@@ -12,12 +12,13 @@ import { AccessScopeType, AnnouncementAttachmentKind, AuditAction, DocumentScanS
 import { randomUUID } from 'node:crypto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
+import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DocumentMalwareScannerService } from '../documents/document-malware-scanner.service';
 import { DocumentStorageService } from '../documents/document-storage.service';
-import { isAllowedDocumentMimeType } from '../documents/document-upload';
+import { assertValidDocumentUpload, isAllowedDocumentMimeType } from '../documents/document-upload';
 import { NotificationsService } from '../notifications/notifications.service';
 import { imageBlockSignature, parseAnnouncementBlocks, plainTextFromBlocks, type AnnouncementContentBlock } from './announcement-content';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
@@ -226,6 +227,7 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
     if (!file?.buffer?.length) throw new BadRequestException('An attachment file is required');
     if (!isAllowedDocumentMimeType(file.mimetype)) throw new BadRequestException('Attachments must be PDF, JPEG, PNG, WebP, DOCX or XLSX');
     if (file.buffer.length > 10 * 1024 * 1024) throw new BadRequestException('Attachments must be 10 MB or less');
+    assertValidDocumentUpload(file);
     const altText = dto.altText?.trim() || null;
     if (dto.kind === AnnouncementAttachmentKind.INLINE_IMAGE) {
       if (!inlineImageMimeTypes.has(file.mimetype)) throw new BadRequestException('Inline pictures must be JPEG, PNG or WebP');
@@ -240,7 +242,7 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
     if (scanResult.endsWith('FOUND')) throw new BadRequestException('The attachment was rejected by the malware scanner');
 
     const attachmentId = randomUUID();
-    const safeFileName = file.originalname.replace(/[\u0000-\u001f\u007f]+/g, '').slice(0, 180) || 'attachment';
+    const safeFileName = stripControlCharacters(file.originalname).trim().slice(0, 180) || 'attachment';
     let stored: Awaited<ReturnType<DocumentStorageService['uploadPrivate']>> | undefined;
     try {
       return await this.prisma.$transaction(async (tx) => {

@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS deps
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS deps
 
 WORKDIR /app
 RUN apt-get update \
@@ -8,7 +8,7 @@ RUN apt-get update \
 COPY package*.json ./
 RUN npm ci
 
-FROM node:22-bookworm-slim AS builder
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS builder
 
 WORKDIR /app
 RUN apt-get update \
@@ -20,8 +20,10 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runner
 
+ARG BUILD_COMMIT=unknown
+LABEL org.opencontainers.image.revision=$BUILD_COMMIT
 ENV NODE_ENV=production
 WORKDIR /app
 RUN apt-get update \

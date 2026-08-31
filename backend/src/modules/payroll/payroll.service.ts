@@ -11,6 +11,7 @@ import { money, nonNegativeMoney, percentageMoney, sumMoney, ZERO_MONEY } from '
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
+import { csvCell } from '../../common/utils/csv.util';
 import { stripControlCharacters } from '../../common/utils/text.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -653,9 +654,8 @@ export class PayrollService {
     const run = await this.prisma.payrollRun.findUnique({ where: { id }, include: { payrolls: { where: departmentId ? { employee: { departmentId } } : undefined, include: { employee: { select: { employeeCode: true, firstName: true, lastName: true, department: { select: { name: true } } } } } } } });
     if (!run) throw new NotFoundException('Payroll run not found');
     if (run.payrolls.length > 10_000) throw new BadRequestException('Export is limited to 10,000 rows');
-    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
     const rows = [['Employee Code', 'Employee', 'Department', 'Base Salary', 'Allowances', 'Bonuses', 'Deductions', 'Tax', 'Gross Pay', 'Net Pay'], ...run.payrolls.map((item) => [item.employee.employeeCode, `${item.employee.firstName} ${item.employee.lastName}`, item.employee.department?.name ?? '', item.baseSalary.toFixed(2), item.allowances.toFixed(2), item.bonuses.toFixed(2), item.deductions.toFixed(2), item.taxAmount.toFixed(2), item.grossPay.toFixed(2), item.netPay.toFixed(2)])];
-    const buffer = Buffer.from(`\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\r\n')}`, 'utf8');
+    const buffer = Buffer.from(`\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`, 'utf8');
     await this.audit.record(this.prisma, user, { action: AuditAction.EXPORT, resourceType: 'PayrollRun', resourceId: id, summary: departmentId ? 'Department payroll exported' : 'Payroll run exported', workflowStatus: run.status, payrollPeriod: this.payrollPeriod(run), metadata: { departmentId, recordCount: run.payrolls.length } });
     return { buffer, fileName: `payroll-${run.year}-${String(run.month).padStart(2, '0')}${departmentId ? '-department' : ''}.csv` };
   }
@@ -724,7 +724,6 @@ export class PayrollService {
       this.prisma.organizationSettings.findUnique({ where: { id: 'default' } }),
     ]);
     if (!run || !settings) throw new NotFoundException('Payroll run or organization settings not found');
-    const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`;
     const now = new Date();
     const rows: Array<Array<string | number>> = [
       ['Employer Establishment ID (Employer EID)', 'File Creation Date', 'File Creation Time', 'Payer Establishment ID (Payer EID)', 'Payer QID', 'Payer Bank Short Name', 'Payer IBAN', 'Salary Year and Month', 'Total Salaries', 'Number of Records'],
@@ -743,7 +742,7 @@ export class PayrollService {
         `Run ${run.id}`,
       ]),
     ];
-    const buffer = Buffer.from(`\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\r\n')}`, 'utf8');
+    const buffer = Buffer.from(`\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`, 'utf8');
     await this.audit.record(this.prisma, user, { action: AuditAction.EXPORT, resourceType: 'PayrollWpsFile', resourceId: id, summary: 'WPS payment file exported', payrollPeriod: this.payrollPeriod(run), metadata: { recordCount: run.payrolls.length, status: run.status } });
     return { buffer, fileName: `wps-payment-${run.year}-${String(run.month).padStart(2, '0')}-r${run.revision}.csv` };
   }

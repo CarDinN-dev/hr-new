@@ -12,6 +12,7 @@ const {
 } = require('@prisma/client');
 const { HttpExceptionFilter } = require('../dist/common/filters/http-exception.filter');
 const { listArgs } = require('../dist/common/utils/crud.util');
+const { csvCell } = require('../dist/common/utils/csv.util');
 const { PaginationQueryDto } = require('../dist/common/dto/pagination-query.dto');
 const { ReplaceRoleInheritanceDto } = require('../dist/modules/system/dto/system.dto');
 const { PermissionsGuard } = require('../dist/modules/authorization/permissions.guard');
@@ -29,6 +30,7 @@ const { PerformanceReviewsService } = require('../dist/modules/performance-revie
 const { SystemService } = require('../dist/modules/system/system.service');
 const { SystemController } = require('../dist/modules/system/system.controller');
 const { AuditController } = require('../dist/modules/audit/audit.controller');
+const { AuditService } = require('../dist/modules/audit/audit.service');
 const { ANY_PERMISSIONS_KEY, PAYROLL_ROLES_KEY, PERMISSIONS_KEY, SUPER_ADMIN_ONLY_KEY, SYSTEM_ADMINISTRATOR_ONLY_KEY } = require('../dist/common/decorators/permissions.decorator');
 const { IS_PUBLIC_KEY } = require('../dist/common/decorators/public.decorator');
 
@@ -52,6 +54,25 @@ function user(overrides = {}) {
     ...overrides,
   };
 }
+
+test('CSV cells neutralize spreadsheet formulas before quoting', () => {
+  for (const value of ['=1+1', '+cmd', '-2+3', '@SUM(A1)', '  =WEBSERVICE("https://example.invalid")']) {
+    assert.match(csvCell(value), /^"'/u);
+  }
+  assert.equal(csvCell('safe "value"'), '"safe ""value"""');
+});
+
+test('audit HMAC rotation keeps legacy verification keys without reusing them for new events', () => {
+  const oldKey = 'old-audit-key-'.padEnd(64, 'o');
+  const nextKey = 'next-audit-key-'.padEnd(64, 'n');
+  const make = (values) => new AuditService({}, { get: (key, fallback) => values[key] ?? fallback, getOrThrow: (key) => values[key] }, {}, {});
+  const payload = { sequence: '1', previousEventHash: null };
+  const legacy = make({ AUDIT_HMAC_KEY: oldKey });
+  const rotated = make({ AUDIT_HMAC_KEY: nextKey, AUDIT_HMAC_KEY_ID: '2026-08', AUDIT_HMAC_PREVIOUS_KEYS: JSON.stringify({ legacy: oldKey }) });
+  assert.equal(rotated.digest(payload, 'legacy'), legacy.digest(payload, 'legacy'));
+  assert.notEqual(rotated.digest(payload, '2026-08'), legacy.digest(payload, 'legacy'));
+  assert.equal(rotated.digest(payload, 'retired'), null);
+});
 
 function executionContext(requestUser) {
   const request = {

@@ -4,4 +4,10 @@ dist
 .env.*
 !.env.example
 *.log
+*.dump
+*.bak
+*.pem
+*.key
+*.p12
+*.pfx
 coverage
