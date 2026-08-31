@@ -11327,8 +11327,8 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
 }
 
 /* A collapsed desktop sidebar remains a compact navigation rail, not an empty gutter. */
-.app .sidebar-brand-mark {
-  display: none;
+.app .brand-block .sidebar-brand-mark {
+  display: none !important;
 }
 
 @media (min-width: 1281px) {
@@ -11356,7 +11356,7 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
   }
 
   .app.sidebar-collapsed .brand-block .sidebar-brand-mark {
-    display: grid;
+    display: grid !important;
     width: 44px;
     height: 44px;
     place-items: center;
