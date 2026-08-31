@@ -126,7 +126,7 @@ import {
   startMicrosoftLogin,
   type BackendSession
 } from "./api";
-import { AuthorizationProvider, canAccessRoute, useAuthorization } from "./authorization";
+import { AuthorizationProvider, canAccessRoute, canShowInNavigation, useAuthorization } from "./authorization";
 import { importWithReleaseRetry } from "./dynamic-import";
 import { persistNormalizedStateDelta } from "./normalizedSync";
 import { newId } from "./id";
@@ -671,7 +671,7 @@ function App() {
     );
   }
 
-  const visibleNavItems = navItems.filter(item => canAccessRoute(backendSession, item));
+  const visibleNavItems = navItems.filter(item => canShowInNavigation(backendSession, item));
   if (!nav) return <NotFoundPage />;
   if (!canAccessRoute(backendSession, nav)) return <AccessDenied onBack={() => setNav("Dashboard")} />;
   const canViewSalary = hasAnyPermission(backendSession, "employee.self.read_compensation", "payroll.read_compensation");

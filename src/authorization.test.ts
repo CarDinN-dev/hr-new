@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BackendSession } from "./api";
-import { canAccessRoute } from "./authorization";
+import { canAccessRoute, canShowInNavigation } from "./authorization";
 
 function session(roles: string[], permissions: string[]): BackendSession {
   return {
@@ -44,6 +44,13 @@ describe("System route authorization", () => {
     for (const route of ["Employees", "Business Trips", "Expenses", "Loans"] as const) expect(canAccessRoute(employee, route)).toBe(false);
     expect(canAccessRoute(session(["LINE_MANAGER"], ["employee.team.read"]), "Team")).toBe(true);
     expect(canAccessRoute(session(["HR"], ["employee.hr.read", "trip.hr.read", "expense.hr.read", "loan.hr.read"]), "Employees")).toBe(true);
+  });
+
+  it("keeps self-service attendance available without putting it in employee navigation", () => {
+    const employee = session(["EMPLOYEE"], ["attendance.self.read"]);
+    expect(canAccessRoute(employee, "Attendance")).toBe(true);
+    expect(canShowInNavigation(employee, "Attendance")).toBe(false);
+    expect(canShowInNavigation(session(["LINE_MANAGER"], ["attendance.team.read"]), "Attendance")).toBe(true);
   });
 
   it("allows Super Administrators to access Payroll", () => {

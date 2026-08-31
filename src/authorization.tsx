@@ -64,3 +64,7 @@ export function canAccessRoute(session: BackendSession, route: NavItem) {
   if (route === "Payroll") return hasActiveSuperAdminRole(session) || ["HR", "CPO", "COO"].some(role => session.roles.includes(role));
   return hasAnyPermission(session, ...routePermissions[route]);
 }
+
+export function canShowInNavigation(session: BackendSession, route: NavItem) {
+  return canAccessRoute(session, route) && (route !== "Attendance" || hasAnyPermission(session, "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.audit.read", "attendance.read_all"));
+}
