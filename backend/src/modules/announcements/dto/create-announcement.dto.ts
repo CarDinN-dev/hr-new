@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsObject, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf } from 'class-validator';
 
 export class CreateAnnouncementDto {
   @ApiProperty({ example: 'Company Holiday' })
@@ -13,6 +13,13 @@ export class CreateAnnouncementDto {
   @MaxLength(10_000)
   content: string;
 
+  @ApiPropertyOptional({ type: 'array', items: { type: 'object' } })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsObject({ each: true })
+  contentBlocks?: unknown[];
+
   @ApiPropertyOptional({ type: [String], example: ['EMPLOYEE', 'LINE_MANAGER'] })
   @IsOptional()
   @IsArray()
@@ -24,23 +31,31 @@ export class CreateAnnouncementDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
   @IsUUID()
-  departmentId?: string;
+  departmentId?: string | null;
 
   @ApiPropertyOptional({ example: '2026-07-09T08:00:00.000Z' })
   @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
   @Type(() => Date)
   @IsDate()
-  publishedAt?: Date;
+  publishedAt?: Date | null;
 
   @ApiPropertyOptional({ example: '2026-08-09T08:00:00.000Z' })
   @IsOptional()
+  @ValidateIf((_object, value) => value !== null)
   @Type(() => Date)
   @IsDate()
-  expiresAt?: Date;
+  expiresAt?: Date | null;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  emailEnabled?: boolean;
 }

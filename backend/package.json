@@ -12,6 +12,8 @@
     "test:hybrid-search": "npm run build && node --test scripts/hybrid-search-regression.js",
     "test:financial": "npm run build && node scripts/financial-regression.js",
     "test:leave": "npm run build && node --test scripts/leave-regression.js",
+    "test:announcements": "npm run build && node --test scripts/announcement-regression.js",
+    "email:test-announcement": "node scripts/send-announcement-email-test.js",
     "test:document-scanning": "npm run build && node --test scripts/document-malware-scanner-regression.js",
     "test:microsoft-provisioning": "npm run build && node --test scripts/microsoft-provisioning-regression.js",
     "test:system-user-linking": "npm run build && node --test scripts/system-user-linking-regression.js",

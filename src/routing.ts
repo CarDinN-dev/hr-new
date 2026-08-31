@@ -3,6 +3,8 @@ import type { NavItem } from "./data";
 export const navPaths = {
   Dashboard: "/",
   "My HR": "/me",
+  "Approval Inbox": "/approvals",
+  Notifications: "/notifications",
   Team: "/team",
   Employees: "/employees",
   Attendance: "/attendance",
@@ -12,6 +14,9 @@ export const navPaths = {
   Loans: "/loans",
   Payroll: "/payroll",
   Recruitment: "/recruitment",
+  Performance: "/performance",
+  Announcements: "/announcements",
+  Certificates: "/certificates",
   EOS: "/eos",
   Documents: "/documents",
   Reports: "/reports",
@@ -25,5 +30,6 @@ const navByPath = new Map<string, NavItem>(Object.entries(navPaths).map(([nav, p
 
 export function navItemForPath(pathname: string): NavItem | null {
   const normalized = pathname === "/" ? "/" : pathname.replace(/\/+$/, "");
+  if (normalized.startsWith("/announcements/")) return "Announcements";
   return navByPath.get(normalized) ?? null;
 }

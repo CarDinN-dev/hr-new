@@ -95,11 +95,11 @@ export function statusActionLabel(status: string, previousStatus?: string) {
   return ({ Approved: "Approve", Rejected: "Reject", Closed: "Close", Paid: "Mark paid", Paused: "Pause", Cancelled: "Cancel", Settled: "Settle" } as Record<string, string>)[status] ?? status;
 }
 
-export type NotificationDestination = { nav: Extract<NavItem, "Leave" | "Documents">; hashPrefix: "leave" | "service-request" | "payroll" };
+export type NotificationDestination = { nav: Extract<NavItem, "Leave" | "Certificates" | "Payroll">; hashPrefix: "leave" | "service-request" | "payroll" };
 
 export function notificationDestination(resourceType?: string | null): NotificationDestination | null {
   if (resourceType === "LeaveRequest") return { nav: "Leave", hashPrefix: "leave" };
-  if (resourceType === "ServiceRequest") return { nav: "Documents", hashPrefix: "service-request" };
-  if (resourceType === "Payroll") return { nav: "Documents", hashPrefix: "payroll" };
+  if (resourceType === "ServiceRequest") return { nav: "Certificates", hashPrefix: "service-request" };
+  if (resourceType === "Payroll") return { nav: "Payroll", hashPrefix: "payroll" };
   return null;
 }

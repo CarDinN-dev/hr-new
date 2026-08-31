@@ -1,9 +1,12 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AnnouncementAttachmentKind } from '@prisma/client';
 import { createPrivateKey, createSign, randomUUID, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AnnouncementContentBlock } from '../announcements/announcement-content';
+import { DocumentStorageService } from '../documents/document-storage.service';
 
 const graphOrigin = 'https://graph.microsoft.com';
 const requestTimeoutMs = 15_000;
@@ -28,6 +31,23 @@ export type LeaveEmailContext = {
   status?: string | null;
 };
 
+export type AnnouncementEmailContext = {
+  announcementId: string;
+  recipientName: string;
+  title: string;
+  blocks: AnnouncementContentBlock[];
+  attachments: Array<{ id: string; uploadKey: string; kind: AnnouncementAttachmentKind; fileName: string }>;
+};
+
+type GraphFileAttachment = {
+  '@odata.type': '#microsoft.graph.fileAttachment';
+  name: string;
+  contentType: string;
+  contentId?: string;
+  isInline?: boolean;
+  contentBytes: string;
+};
+
 class GraphMailError extends Error {
   constructor(message: string, readonly retryAfterSeconds?: number) {
     super(message);
@@ -38,19 +58,24 @@ class GraphMailError extends Error {
 export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailDeliveryService.name);
   private readonly emailEnabled: boolean;
+  private readonly leaveEmailEnabled: boolean;
+  private readonly announcementEmailEnabled: boolean;
   private readonly tenantId?: string;
   private readonly clientId?: string;
   private readonly senderEmail?: string;
   private readonly certificateThumbprint?: string;
   private readonly privateKey?: KeyObject;
   private readonly leaveUrl?: string;
+  private readonly baseUrl?: URL;
   private readonly logoBytes?: string;
   private token?: { value: string; expiresAt: number };
   private timer?: NodeJS.Timeout;
   private running = false;
 
-  constructor(config: ConfigService, private readonly prisma: PrismaService) {
-    this.emailEnabled = config.get<string>('LEAVE_EMAIL_ENABLED', 'false').toLowerCase() === 'true';
+  constructor(config: ConfigService, private readonly prisma: PrismaService, @Optional() private readonly storage?: DocumentStorageService) {
+    this.leaveEmailEnabled = config.get<string>('LEAVE_EMAIL_ENABLED', 'false').toLowerCase() === 'true';
+    this.announcementEmailEnabled = config.get<string>('ANNOUNCEMENT_EMAIL_ENABLED', 'false').toLowerCase() === 'true';
+    this.emailEnabled = this.leaveEmailEnabled || this.announcementEmailEnabled;
     if (!this.emailEnabled) return;
 
     this.tenantId = this.requiredGuid(config, 'MAIL_GRAPH_TENANT_ID');
@@ -60,13 +85,18 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     this.privateKey = this.loadPrivateKey(config.getOrThrow<string>('MAIL_GRAPH_CERT_PATH'));
     const erpUrl = new URL(config.getOrThrow<string>('HR_ERP_URL'));
     if (erpUrl.protocol !== 'https:') throw new Error('HR_ERP_URL must use HTTPS.');
+    this.baseUrl = new URL(erpUrl.href);
     erpUrl.pathname = '/leave'; erpUrl.search = ''; erpUrl.hash = '';
     this.leaveUrl = erpUrl.href;
     this.logoBytes = readFileSync(resolve(process.cwd(), 'assets/recruitment-templates/brand-mark.png')).toString('base64');
   }
 
   enabled() {
-    return this.emailEnabled;
+    return this.leaveEmailEnabled;
+  }
+
+  announcementEnabled() {
+    return this.announcementEmailEnabled;
   }
 
   onModuleInit() {
@@ -135,6 +165,52 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  renderAnnouncement(context: AnnouncementEmailContext) {
+    const byUploadKey = new Map(context.attachments.map((attachment) => [attachment.uploadKey, attachment]));
+    const announcementUrl = this.announcementUrl(context.announcementId);
+    const body = context.blocks.map((block) => {
+      if (block.type === 'paragraph') {
+        return `<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#344054;white-space:pre-wrap">${this.escape(block.text)}</p>`;
+      }
+      const attachment = byUploadKey.get(block.attachmentKey);
+      if (!attachment || attachment.kind !== AnnouncementAttachmentKind.INLINE_IMAGE) return '';
+      return `<figure style="margin:20px 0"><img src="cid:announcement-${attachment.id}" alt="${this.escape(block.altText)}" style="display:block;max-width:100%;height:auto;border-radius:10px"><figcaption style="margin-top:7px;color:#667085;font-size:12px;line-height:18px">${this.escape(block.altText)}</figcaption></figure>`;
+    }).join('');
+    const files = context.attachments.filter((attachment) => attachment.kind === AnnouncementAttachmentKind.FILE);
+    const fileList = files.length
+      ? `<div style="margin:22px 0 0;padding:14px 16px;border:1px solid #eaecf0;border-radius:9px;background:#f9fafb"><strong style="display:block;margin-bottom:8px;font-size:13px">Attachments</strong>${files.map((file) => `<div style="margin-top:5px;font-size:13px;color:#475467">${this.escape(file.fileName)}</div>`).join('')}<p style="margin:10px 0 0;font-size:12px;line-height:18px;color:#667085">Sign in to MedTech HR ERP to open protected attachments.</p></div>`
+      : '';
+    const safeUrl = this.escape(announcementUrl);
+    return {
+      subject: this.subjectText(context.title).slice(0, 300),
+      htmlBody: `<div style="margin:0;padding:24px;background:#f7f8fa;font-family:Arial,Helvetica,sans-serif;color:#101828"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #eaecf0;border-radius:12px"><tr><td style="padding:24px 28px;border-bottom:1px solid #eaecf0"><table role="presentation" cellspacing="0" cellpadding="0"><tr><td><img src="cid:medtech-logo" width="72" alt="MedTech logo" style="display:block;width:72px;height:auto"></td><td style="padding-left:14px;font-size:20px;font-weight:700;color:#24366f">MedTech HR ERP</td></tr></table></td></tr><tr><td style="padding:28px"><p style="margin:0 0 12px;font-size:16px;line-height:24px">Hi ${this.escape(context.recipientName || 'there')},</p><h1 style="margin:0 0 20px;font-size:24px;line-height:32px;color:#101828">${this.escape(context.title)}</h1>${body}${fileList}<a href="${safeUrl}" style="display:inline-block;margin-top:24px;padding:11px 18px;background:#9e1b50;color:#ffffff;text-decoration:none;border-radius:7px;font-size:14px;font-weight:700">View announcement</a><p style="margin:18px 0 0;font-size:12px;line-height:18px;color:#667085">Protected content requires your MedTech sign-in.</p></td></tr><tr><td style="padding:18px 28px;background:#f9fafb;border-top:1px solid #eaecf0;font-size:12px;line-height:18px;color:#667085">This is an automated message from MedTech HR ERP. Replies to ${this.escape(this.senderEmail)} are not monitored.</td></tr></table></div>`,
+    };
+  }
+
+  async sendAnnouncementTest(recipientEmail: string) {
+    if (!this.announcementEmailEnabled) throw new Error('Announcement email delivery is disabled.');
+    const pictureId = randomUUID();
+    const rendered = this.renderAnnouncement({
+      announcementId: 'test',
+      recipientName: 'there',
+      title: '[TEST] MedTech HR announcement email',
+      blocks: [
+        { id: randomUUID(), type: 'paragraph', text: 'This is a delivery test for the new HR announcement feature. No action is required.' },
+        { id: randomUUID(), type: 'image', attachmentKey: pictureId, altText: 'MedTech announcement email image delivery test' },
+      ],
+      attachments: [{ id: pictureId, uploadKey: pictureId, kind: AnnouncementAttachmentKind.INLINE_IMAGE, fileName: 'announcement-email-image-test.png' }],
+    });
+    await this.send(recipientEmail, rendered.subject, rendered.htmlBody, [{
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: 'announcement-email-image-test.png',
+      contentType: 'image/png',
+      contentId: `announcement-${pictureId}`,
+      isInline: true,
+      contentBytes: this.logoBytes!,
+    }]);
+    return { recipientEmail, status: 202, accepted: true };
+  }
+
   private async deliverPending() {
     if (!this.emailEnabled || this.running) return;
     this.running = true;
@@ -143,10 +219,12 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
         where: { sentAt: null, nextAttemptAt: { lte: new Date() } },
         orderBy: { createdAt: 'asc' },
         take: 20,
+        include: { notification: { select: { resourceType: true, resourceId: true } } },
       });
       for (const delivery of deliveries) {
         try {
-          await this.send(delivery.recipientEmail, delivery.subject, delivery.htmlBody);
+          const attachments = await this.inlineAnnouncementAttachments(delivery.notification?.resourceType ?? null, delivery.notification?.resourceId ?? null);
+          await this.send(delivery.recipientEmail, delivery.subject, delivery.htmlBody, attachments);
           await this.prisma.emailDelivery.update({ where: { id: delivery.id }, data: { sentAt: new Date(), lastError: null } });
         } catch (error) {
           const attempts = delivery.attempts + 1;
@@ -165,7 +243,7 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async send(recipientEmail: string, subject: string, htmlBody: string) {
+  private async send(recipientEmail: string, subject: string, htmlBody: string, attachments: GraphFileAttachment[] = []) {
     const token = await this.accessToken();
     let response: Response;
     try {
@@ -180,7 +258,7 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
             attachments: [{
               '@odata.type': '#microsoft.graph.fileAttachment',
               name: 'medtech-logo.png', contentType: 'image/png', contentId: 'medtech-logo', isInline: true, contentBytes: this.logoBytes,
-            }],
+            }, ...attachments],
           },
           saveToSentItems: false,
         }),
@@ -193,6 +271,33 @@ export class EmailDeliveryService implements OnModuleInit, OnModuleDestroy {
     if (response.status === 401) this.token = undefined;
     const retryAfter = Number(response.headers.get('retry-after'));
     throw new GraphMailError(`Microsoft Graph email delivery returned HTTP ${response.status}.`, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined);
+  }
+
+  private async inlineAnnouncementAttachments(resourceType: string | null, resourceId: string | null) {
+    if (resourceType !== 'Announcement' || !resourceId) return [];
+    if (!this.storage) throw new GraphMailError('Announcement attachment storage is unavailable.');
+    const attachments = await this.prisma.announcementAttachment.findMany({
+      where: { announcementId: resourceId, kind: AnnouncementAttachmentKind.INLINE_IMAGE, deletedAt: null },
+      orderBy: { sortOrder: 'asc' },
+      select: { id: true, fileName: true, contentType: true, objectName: true, objectGeneration: true },
+    });
+    return Promise.all(attachments.map(async (attachment): Promise<GraphFileAttachment> => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: attachment.fileName,
+      contentType: attachment.contentType,
+      contentId: `announcement-${attachment.id}`,
+      isInline: true,
+      contentBytes: (await this.storage!.download(attachment.objectName, attachment.objectGeneration)).toString('base64'),
+    })));
+  }
+
+  private announcementUrl(announcementId: string) {
+    if (!this.baseUrl) return '';
+    const url = new URL(this.baseUrl.href);
+    url.pathname = announcementId === 'test' ? '/announcements' : `/announcements/${encodeURIComponent(announcementId)}`;
+    url.search = '';
+    url.hash = '';
+    return url.href;
   }
 
   private async accessToken() {

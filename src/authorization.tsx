@@ -6,6 +6,8 @@ import type { NavItem } from "./data";
 const routePermissions: Record<NavItem, string[]> = {
   Dashboard: ["session.self.read"],
   "My HR": ["employee.self.read", "leave.self.read", "service_request.self.read", "payroll.self.read_payslip", "session.self.read"],
+  "Approval Inbox": ["leave.team.approve_line_manager", "leave.management.approve_manager", "leave.hr.approve", "leave.executive.approve_cpo", "leave.executive.approve_coo", "service_request.hr.approve", "payroll.approve"],
+  Notifications: ["notification.self.read"],
   Team: ["employee.self.read", "employee.team.read", "employee.management.read", "leave.team.read", "leave.management.read"],
   Employees: ["employee.hr.read", "employee.read_all"],
   Attendance: ["attendance.self.read", "attendance.team.read", "attendance.management.read", "attendance.hr.read", "attendance.read_all"],
@@ -15,6 +17,9 @@ const routePermissions: Record<NavItem, string[]> = {
   Loans: ["loan.hr.read", "loan.audit.read", "loan.read_all"],
   Payroll: ["payroll.self.read_payslip", "payroll.read", "payroll.audit.read"],
   Recruitment: ["recruitment.read"],
+  Performance: ["performance.self.read", "performance.team.read", "performance.management.read", "performance.hr.manage", "performance.read_all"],
+  Announcements: ["announcement.read", "announcement.manage"],
+  Certificates: ["service_request.self.read", "service_request.hr.read", "service_request.read_all"],
   EOS: ["eos.read"],
   Documents: ["document.self.read", "document.hr.read", "document.read_all"],
   Reports: ["report.read"],

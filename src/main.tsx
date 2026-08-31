@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,9 +14,13 @@ import {
 } from "@tanstack/react-router";
 import {
   BarChart3,
+  Award,
+  Bell,
   BriefcaseBusiness,
   CalendarCheck,
+  CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Download,
   Eye,
   FileText,
@@ -28,6 +32,7 @@ import {
   LockKeyhole,
   LogOut,
   Mail,
+  Megaphone,
   Menu,
   Moon,
   PanelLeftClose,
@@ -36,6 +41,7 @@ import {
   ShieldCheck,
   Settings,
   Sun,
+  Target,
   Trash2,
   Upload,
   UserRoundPlus,
@@ -130,7 +136,10 @@ import { dataUrlBlob, openDataUrl } from "./dataUrl";
 import { navItemForPath, navPaths } from "./routing";
 import { ApprovalInboxPanel, DocumentsLibraryPanel, LeaveWorkflowPage, MyLeaveStatusPanel, PayrollWorkflowPage, ServiceRequestsPanel } from "./features/workflows";
 import { workflowKey } from "./features/workflow-utils";
-import { NotificationsPanel } from "./features/notifications-panel";
+import { NotificationsPage, NotificationsPanel } from "./features/notifications-panel";
+import { CertificatesPage, PerformancePage } from "./features/people-experience";
+import { AnnouncementsPage } from "./features/announcements";
+import { CommandPalette, CommandTrigger, QuickCreateMenu, type CommandItem, type QuickAction } from "./features/shell-actions";
 import { Dialog, useDialogCloseGuard } from "./dialog";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
 import { Pagination } from "./pagination";
@@ -221,6 +230,8 @@ function backendSessionMarker(session: BackendSession) {
 const navIcon = {
   Dashboard: LayoutDashboard,
   "My HR": UserRoundPlus,
+  "Approval Inbox": CheckCircle2,
+  Notifications: Bell,
   Team: UsersRound,
   Employees: UsersRound,
   Attendance: CalendarCheck,
@@ -230,6 +241,9 @@ const navIcon = {
   Loans: HandCoins,
   Payroll: WalletCards,
   Recruitment: UserRoundPlus,
+  Performance: Target,
+  Announcements: Megaphone,
+  Certificates: Award,
   EOS: FileText,
   Documents: FileText,
   Reports: BarChart3,
@@ -238,6 +252,23 @@ const navIcon = {
   System: Settings,
   Settings
 };
+
+const navLabels: Record<NavItem, string> = {
+  Dashboard: "Overview", "My HR": "My HR", "Approval Inbox": "Approval Inbox", Notifications: "Notifications",
+  Team: "Team", Employees: "Employees", Hierarchy: "Org Chart", Recruitment: "Recruitment",
+  Leave: "Leave", Attendance: "Attendance", Payroll: "Payroll & Payslips", Loans: "Loans & Deductions", Expenses: "Expenses", "Business Trips": "Business Trips",
+  Performance: "Performance", Announcements: "Announcements", Certificates: "Certificates", Documents: "Documents",
+  Reports: "Reports", EOS: "End of Service", Audit: "Audit Trail", System: "System", Settings: "Settings",
+};
+
+const navGroups: Array<{ label: string; items: NavItem[] }> = [
+  { label: "Workspace", items: ["Dashboard", "My HR", "Approval Inbox", "Notifications"] },
+  { label: "People", items: ["Team", "Employees", "Hierarchy", "Recruitment"] },
+  { label: "Time & Pay", items: ["Leave", "Attendance", "Payroll", "Loans", "Expenses", "Business Trips"] },
+  { label: "Growth", items: ["Performance"] },
+  { label: "Communication", items: ["Announcements", "Certificates", "Documents"] },
+  { label: "Insights & Admin", items: ["Reports", "EOS", "Audit", "System", "Settings"] },
+];
 
 function PageLoadingSkeleton() {
   return <section className="module-loading" role="status" aria-live="polite" aria-busy="true">
@@ -326,6 +357,7 @@ function App() {
   const toastTimer = useRef<number | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const [compactNavigation, setCompactNavigation] = useState(() => window.matchMedia(compactNavigationQuery).matches);
   const [modal, setModal] = useState<React.ReactNode>(null);
   const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(() => loadBackendSession() ?? undefined);
@@ -358,6 +390,17 @@ function App() {
   }, []);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  useEffect(() => {
+    const openCommand = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen(true);
+      }
+    };
+    window.addEventListener("keydown", openCommand);
+    return () => window.removeEventListener("keydown", openCommand);
+  }, []);
 
   useEffect(() => {
     const expireAuthorization = () => {
@@ -634,11 +677,25 @@ function App() {
   const canViewSalary = hasAnyPermission(backendSession, "employee.self.read_compensation", "payroll.read_compensation");
   const canManageAttendance = hasPermission(backendSession, "attendance.hr.manage");
   const canManageLoans = hasPermission(backendSession, "loan.hr.manage");
+  const openEmployeeCreate = () => {
+    setNav("Employees");
+    setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
+  };
+  const openWithIntent = (destination: NavItem, hash: string) => void navigate({ to: navPaths[destination], hash });
+  const quickActions: QuickAction[] = [
+    ...(hasPermission(backendSession, "employee.hr.create") ? [{ id: "new-employee", label: "Employee", hint: "Create a direct employee record", kind: "employee" as const, onSelect: openEmployeeCreate }] : []),
+    ...(hasPermission(backendSession, "announcement.manage") ? [{ id: "new-announcement", label: "Announcement", hint: "Draft a company update", kind: "announcement" as const, onSelect: () => openWithIntent("Announcements", "new") }] : []),
+    ...(canAccessRoute(backendSession, "Approval Inbox") ? [{ id: "open-approvals", label: "Approval inbox", hint: "Review assigned decisions", kind: "approval" as const, onSelect: () => setNav("Approval Inbox") }] : []),
+  ];
+  const commandItems: CommandItem[] = [
+    ...visibleNavItems.map(item => ({ id: `nav-${item}`, label: navLabels[item], hint: pageDescription(item), keywords: `${item} ${navGroups.find(group => group.items.includes(item))?.label ?? ""}`, onSelect: () => setNav(item) })),
+    ...quickActions.map(action => ({ id: `create-${action.id}`, label: `Create ${action.label}`, hint: action.hint, keywords: "new quick create", onSelect: action.onSelect })),
+  ];
   const pageHint = pageDescription(nav);
   const navigationHidden = compactNavigation ? !sidebarOpen : sidebarCollapsed;
   const pageLayout = nav === "My HR" || nav === "Settings"
     ? "focused"
-    : ["Dashboard", "Employees", "Attendance", "Leave", "Payroll", "Recruitment", "Audit", "Hierarchy", "System"].includes(nav)
+    : ["Dashboard", "Approval Inbox", "Notifications", "Employees", "Attendance", "Leave", "Payroll", "Recruitment", "Performance", "Announcements", "Certificates", "Audit", "Hierarchy", "System"].includes(nav)
       ? "wide"
       : "standard";
 
@@ -653,20 +710,28 @@ function App() {
         inert={navigationHidden ? true : undefined}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src="/logos/medtech-logo-page-2.svg" alt="MedTech Corporation Trading W.L.L." /></span>
+          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
-          {visibleNavItems.map(item => {
-            const Icon = navIcon[item];
-            return (
-              <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}>
-                <Icon size={18} />
-                {item}
-              </Link>
-            );
+          {navGroups.map(group => {
+            const items = group.items.filter(item => visibleNavItems.includes(item));
+            if (!items.length) return null;
+            return <div className="nav-group" key={group.label}><span className="nav-group__label">{group.label}</span>{items.map(item => {
+              const Icon = navIcon[item];
+              return <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}><Icon size={18} /><span>{navLabels[item]}</span></Link>;
+            })}</div>;
           })}
         </nav>
+        <AccountMenu
+          variant="sidebar"
+          state={state}
+          backendSession={backendSession}
+          onLogout={() => void logout()}
+          setNav={setNav}
+          theme={theme}
+          toggleTheme={toggleTheme}
+        />
       </aside>
 
       <main id="main-content" className={`workspace page-layout-${pageLayout}`}>
@@ -679,7 +744,7 @@ function App() {
           <div className="topbar-inner">
             <button ref={mobileMenuRef} className="mobile-menu" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded={sidebarOpen} onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}><Menu size={20} /></button>
             <div className="topbar-heading">
-              <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-logo-page-2.svg" alt="" /></span>
+              <span className="topbar-brand-mark" aria-hidden="true"><img src="/logos/medtech-lockup.svg?v=4" alt="" /></span>
               <button
                 className="desktop-sidebar-toggle"
                 type="button"
@@ -691,17 +756,21 @@ function App() {
                 {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
               </button>
               <div className="page-title">
-                <h1>{nav}</h1>
+                <h1><span>MedTech People</span><b aria-hidden="true">/</b>{navLabels[nav]}</h1>
                 <p className="page-hint">{pageHint}</p>
               </div>
             </div>
-            {nav !== "Employees" && <PageSearchBar page={nav} />}
+            {nav === "Employees"
+              ? <CommandTrigger open={() => setCommandOpen(true)} />
+              : <PageSearchBar page={nav} openCommand={() => setCommandOpen(true)} />}
             <div className="topbar-actions">
+              <QuickCreateMenu actions={quickActions} />
               <NotificationsPanel session={backendSession} notify={notify} />
               <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
                 {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
               </button>
               <AccountMenu
+                variant="topbar"
                 state={state}
                 backendSession={backendSession}
                 onLogout={() => void logout()}
@@ -714,11 +783,13 @@ function App() {
         </header>
 
         <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<PageLoadingSkeleton />}>
-          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} notify={notify} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
+          {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} notify={notify} openCommand={() => setCommandOpen(true)} quickActions={quickActions} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
             setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={() => setNav("Leave")} />}
+          {nav === "Approval Inbox" && <div className="experience-page"><section className="feature-heading"><div><span className="eyebrow">Workspace · Approvals</span><h2>Approval inbox</h2><p>Review decisions assigned to you across leave, certificates and payroll.</p></div></section><div className="workflow-page-grid"><ApprovalInboxPanel session={backendSession} notify={notify} /></div></div>}
+          {nav === "Notifications" && <NotificationsPage session={backendSession} notify={notify} />}
           {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
           {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
@@ -728,6 +799,9 @@ function App() {
           {nav === "Loans" && <Loans state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} canOverrideLimit={canManageLoans} />}
           {nav === "Payroll" && <PayrollWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Recruitment" && <Recruitment state={state} setState={setState} notify={notify} setNav={setNav} />}
+          {nav === "Performance" && <PerformancePage session={backendSession} employees={state.employees} notify={notify} />}
+          {nav === "Announcements" && <AnnouncementsPage session={backendSession} notify={notify} />}
+          {nav === "Certificates" && <CertificatesPage session={backendSession} notify={notify} />}
           {nav === "EOS" && <EOS state={state} setState={setState} notify={notify} savePdf={savePdf} />}
           {nav === "Documents" && <Documents state={state} session={backendSession} notify={notify} savePdf={savePdf} />}
           {nav === "Reports" && <Reports state={state} notify={notify} savePdf={savePdf} />}
@@ -757,14 +831,17 @@ function App() {
         </React.Suspense></div>
       </main>
 
+      <nav className="mobile-bottom-nav" aria-label="Quick navigation">{(["Dashboard", "My HR", "Leave", "Notifications"] as NavItem[]).filter(item => visibleNavItems.includes(item)).map(item => { const Icon = navIcon[item]; return <Link key={item} to={navPaths[item]} className={nav === item ? "active" : ""} aria-current={nav === item ? "page" : undefined}><Icon size={19} /><span>{navLabels[item]}</span></Link>; })}</nav>
       {compactNavigation && sidebarOpen && <button type="button" aria-label="Close menu" className="scrim" onClick={() => setSidebarOpen(false)} />}
       {modal && <Dialog onClose={closeModal}>{modal}</Dialog>}
+      <CommandPalette open={commandOpen} items={commandItems} pageLabel={navLabels[nav]} close={() => setCommandOpen(false)} searchPage={setPageQuery} />
       <Toast toast={toast} dismiss={dismissToast} />
     </div></PageSearchProvider></AuthorizationProvider>
   );
 }
 
 function AccountMenu({
+  variant = "topbar",
   state,
   backendSession,
   onLogout,
@@ -772,6 +849,7 @@ function AccountMenu({
   theme,
   toggleTheme
 }: {
+  variant?: "sidebar" | "topbar";
   state: HrState;
   backendSession: BackendSession;
   onLogout: () => void;
@@ -780,6 +858,7 @@ function AccountMenu({
   toggleTheme: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const photo = state.employees.find(employee => employee.id === backendSession.employeeId)?.photo;
@@ -800,8 +879,8 @@ function AccountMenu({
     setNav(destination);
   }
 
-  return <div className="account-menu account-menu--topbar">
-    {open && <div id="account-popover" ref={popoverRef} className="account-popover" role="menu" aria-label="Account options" onKeyDown={event => {
+  return <div className={`account-menu account-menu--${variant}`}>
+    {open && <div id={menuId} ref={popoverRef} className="account-popover" role="menu" aria-label="Account options" onKeyDown={event => {
       if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); return; }
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       event.preventDefault();
@@ -821,8 +900,10 @@ function AccountMenu({
       {canAccessRoute(backendSession, "Settings") && <button role="menuitem" onClick={() => go("Settings")}><Settings size={16} /> Settings</button>}
       <button role="menuitem" onClick={onLogout}><LogOut size={16} /> Log out</button>
     </div>}
-    <button ref={triggerRef} className="account-trigger" aria-label="Open account menu" title={backendSession.displayName || backendSession.email} aria-haspopup="menu" aria-controls="account-popover" aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
+    <button ref={triggerRef} className="account-trigger" aria-label="Open account menu" title={backendSession.displayName || backendSession.email} aria-haspopup="menu" aria-controls={menuId} aria-expanded={open} onClick={() => setOpen(prev => !prev)}>
       <span className="account-avatar">{photo ? <img src={photo} alt="" /> : accountInitials(backendSession.email)}</span>
+      {variant === "sidebar" && <span className="account-label"><strong>{backendSession.displayName || backendSession.email}</strong><small>{backendSession.roles[0] || "User"}</small></span>}
+      {variant === "sidebar" && <ChevronRight size={17} aria-hidden="true" />}
     </button>
   </div>;
 }
@@ -919,7 +1000,7 @@ function dashboardPending(items: DashboardLeave[]) {
   return items.filter(item => item.status.startsWith("PENDING_") || item.status === "BLOCKED_APPROVER_MISSING" || item.status === "RETURNED_FOR_CORRECTION");
 }
 
-function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; notify: (message: string) => void; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
+function Dashboard({ state, session, setNav, notify, openCommand, quickActions, onAddEmployee, canAddEmployee, canRunPayroll, canOpenPayroll }: { state: HrState; session: BackendSession; setNav: (nav: NavItem) => void; notify: (message: string) => void; openCommand: () => void; quickActions: QuickAction[]; onAddEmployee: () => void; canAddEmployee: boolean; canRunPayroll: boolean; canOpenPayroll: boolean }) {
   const { search, active: searchActive } = usePageSearch();
   const persona = dashboardPersona(session);
   const [roleLabel, roleSubtitle] = dashboardRoleCopy(persona);
@@ -1014,12 +1095,17 @@ function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmploy
 
   return (
     <div className="dashboard-layout" data-dashboard-persona={persona}>
+      <section className="dashboard-page-heading">
+        <div><span className="eyebrow">Workspace</span><h2>{operationalDashboard ? "People operations, at a glance" : `${roleLabel} overview`}</h2><p>{operationalDashboard ? `Live information for Human Resources · ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}` : roleSubtitle}</p></div>
+        <div className="feature-actions"><button onClick={openCommand}><Search size={16} /> Search</button>{quickActions.length > 0 && <QuickCreateMenu actions={quickActions} />}</div>
+      </section>
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="section-label">{roleLabel} dashboard</p>
-          <h2>{dashboardGreeting()}, {session.displayName || session.email} <span aria-hidden="true">👋</span></h2>
-          <p>{roleSubtitle}</p>
+          <p className="section-label">MedTech People · {roleLabel}</p>
+          <h2>{operationalDashboard ? "Every people decision, in focus." : `${dashboardGreeting()}, ${session.displayName || session.email}`}</h2>
+          <p>{operationalDashboard ? "Headcount, attendance, payroll and talent signals are aligned so you can act with confidence." : roleSubtitle}</p>
         </div>
+        <div className="hero-signal" aria-hidden="true"><svg viewBox="0 0 420 160" preserveAspectRatio="none"><path d="M0 125 C70 100 85 70 145 84 S220 125 270 55 S340 58 420 30" /><circle cx="420" cy="30" r="5" /></svg></div>
         <div className="dashboard-snapshot">
           <span>Today’s brief</span>
           <strong><time dateTime={todayValue}>{formatDate(todayValue)}</time></strong>
@@ -1060,14 +1146,14 @@ function Dashboard({ state, session, setNav, notify, onAddEmployee, canAddEmploy
           {canOpenLeave && <button className="primary" onClick={() => setNav("Leave")}><CalendarCheck size={17} /> Apply leave</button>}
           {canOpenMyHr && <button onClick={() => setNav("My HR")}>My profile</button>}
           {personalDashboard && canOpenDocuments && <button onClick={() => setNav("Documents")}><FileText size={17} /> Documents</button>}
-          {managementDashboard && canOpenApprovalInbox && <button onClick={() => setNav("Leave")}>Review leave</button>}
+          {managementDashboard && canOpenApprovalInbox && <button onClick={() => setNav("Approval Inbox")}>Review approvals</button>}
           {canOpenTeam && <button onClick={() => setNav("Team")}><UsersRound size={17} /> View team</button>}
           {operationalDashboard && canAddEmployee && <button onClick={onAddEmployee}><UserRoundPlus size={17} /> Add employee</button>}
           {canOpenEmployees && <button onClick={() => setNav("Employees")}><UsersRound size={17} /> View employees</button>}
           {canOpenAttendance && <button onClick={() => setNav("Attendance")}><CalendarCheck size={17} /> View attendance</button>}
           {operationalDashboard && canOpenPayroll && <button onClick={() => setNav("Payroll")}><WalletCards size={17} /> {canRunPayroll ? "Run payroll" : "View payroll"}</button>}
           {canOpenRecruitment && <button onClick={() => setNav("Recruitment")}><BriefcaseBusiness size={17} /> Recruitment</button>}
-          {executiveDashboard && canOpenApprovalInbox && <button onClick={() => setNav("Leave")}>Review approvals</button>}
+          {executiveDashboard && canOpenApprovalInbox && <button onClick={() => setNav("Approval Inbox")}>Review approvals</button>}
         </div>
       </section>
 
@@ -1190,6 +1276,8 @@ function pageDescription(nav: NavItem) {
   const descriptions: Record<NavItem, string> = {
     Dashboard: "Attendance, leave, payroll and employee totals.",
     "My HR": "Your personal details, leave application, certificates and payslips.",
+    "Approval Inbox": "Decisions assigned to you across HR workflows.",
+    Notifications: "Assignments, status changes and important updates.",
     Team: "Direct reports and managed department work.",
     Employees: "Employee records.",
     Attendance: "Daily attendance and monthly totals.",
@@ -1199,6 +1287,9 @@ function pageDescription(nav: NavItem) {
     Loans: "Employee loans and payroll deductions.",
     Payroll: "Payslips and payroll exports.",
     Recruitment: "Job openings and candidates.",
+    Performance: "Goals, feedback and performance review lifecycle.",
+    Announcements: "Scheduled company news and targeted updates.",
+    Certificates: "Certificate requests, approvals, versions and downloads.",
     EOS: "End-of-service calculations and records.",
     Documents: "HR letters and PDFs.",
     Reports: "Employee, attendance, leave and payroll reports.",
@@ -3361,6 +3452,8 @@ const rootRoute = createRootRoute({
 const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: "hr-shell", component: App, validateSearch: shellSearch });
 const dashboardRoute = createRoute({ getParentRoute: () => shellRoute, path: "/" });
 const meRoute = createRoute({ getParentRoute: () => shellRoute, path: "me" });
+const approvalsRoute = createRoute({ getParentRoute: () => shellRoute, path: "approvals" });
+const notificationsRoute = createRoute({ getParentRoute: () => shellRoute, path: "notifications" });
 const teamRoute = createRoute({ getParentRoute: () => shellRoute, path: "team" });
 const employeesRoute = createRoute({ getParentRoute: () => shellRoute, path: "employees" });
 const attendanceRoute = createRoute({ getParentRoute: () => shellRoute, path: "attendance" });
@@ -3370,6 +3463,10 @@ const expensesRoute = createRoute({ getParentRoute: () => shellRoute, path: "exp
 const loansRoute = createRoute({ getParentRoute: () => shellRoute, path: "loans" });
 const payrollRoute = createRoute({ getParentRoute: () => shellRoute, path: "payroll" });
 const recruitmentRoute = createRoute({ getParentRoute: () => shellRoute, path: "recruitment" });
+const performanceRoute = createRoute({ getParentRoute: () => shellRoute, path: "performance" });
+const announcementsRoute = createRoute({ getParentRoute: () => shellRoute, path: "announcements" });
+const announcementDetailRoute = createRoute({ getParentRoute: () => shellRoute, path: "announcements/$announcementId" });
+const certificatesRoute = createRoute({ getParentRoute: () => shellRoute, path: "certificates" });
 const eosRoute = createRoute({ getParentRoute: () => shellRoute, path: "eos" });
 const documentsRoute = createRoute({ getParentRoute: () => shellRoute, path: "documents" });
 const reportsRoute = createRoute({ getParentRoute: () => shellRoute, path: "reports" });
@@ -3381,6 +3478,8 @@ const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([
     dashboardRoute,
     meRoute,
+    approvalsRoute,
+    notificationsRoute,
     teamRoute,
     employeesRoute,
     attendanceRoute,
@@ -3390,6 +3489,10 @@ const routeTree = rootRoute.addChildren([
     loansRoute,
     payrollRoute,
     recruitmentRoute,
+    performanceRoute,
+    announcementsRoute,
+    announcementDetailRoute,
+    certificatesRoute,
     eosRoute,
     documentsRoute,
     reportsRoute,

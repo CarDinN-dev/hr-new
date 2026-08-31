@@ -5,6 +5,8 @@ import type { NavItem } from "./data";
 const placeholders: Record<NavItem, string> = {
   Dashboard: "Search dashboard sections",
   "My HR": "Search my profile and leave",
+  "Approval Inbox": "Search assigned approvals",
+  Notifications: "Search notifications",
   Team: "Search team and approvals",
   Employees: "Search employees",
   Attendance: "Search attendance",
@@ -14,6 +16,9 @@ const placeholders: Record<NavItem, string> = {
   Loans: "Search loans",
   Payroll: "Search payroll",
   Recruitment: "Search jobs and candidates",
+  Performance: "Search performance reviews",
+  Announcements: "Search announcements",
+  Certificates: "Search certificate requests",
   EOS: "Search end-of-service records",
   Documents: "Search documents and requests",
   Reports: "Search reports",
@@ -119,7 +124,7 @@ export function rankedPageSearchItems<T, R>(
     .sort((left, right) => rank.get(itemId(left))! - rank.get(itemId(right))!);
 }
 
-export function PageSearchBar({ page }: { page: NavItem }) {
+export function PageSearchBar({ page, openCommand }: { page: NavItem; openCommand?: () => void }) {
   const { input, active, pending, resultCount, loading, error, setInput, clear } = usePageSearch();
   return <div className="page-search" role="search">
     <Search size={17} aria-hidden="true" />
@@ -137,6 +142,7 @@ export function PageSearchBar({ page }: { page: NavItem }) {
     />
     {(pending || loading) && <span className="page-search-spinner" aria-label="Searching" />}
     {input && <button type="button" onClick={clear} aria-label={`Clear ${placeholders[page].toLowerCase()}`}><X size={16} /></button>}
+    {openCommand && <button className="page-search-command" type="button" onClick={openCommand} aria-label="Open command palette"><kbd>Ctrl K</kbd></button>}
     {input.trim().length === 1 && <span id="page-search-hint" className="sr-only">Enter at least two characters to search.</span>}
     {active && !pending && <span className={`page-search-status${error ? " error" : ""}`} role={error ? "alert" : "status"} aria-live="polite">{error || (loading ? "Searching" : `${resultCount ?? 0} result${resultCount === 1 ? "" : "s"}`)}</span>}
   </div>;

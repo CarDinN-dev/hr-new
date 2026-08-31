@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AnnouncementAttachmentKind, Prisma } from '@prisma/client';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { RequestUser } from '../../common/types/request-user.type';
 import { paginationMeta } from '../../common/utils/crud.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailDeliveryService, LeaveEmailKind } from './email-delivery.service';
+import type { AnnouncementContentBlock } from '../announcements/announcement-content';
 
 export type LeaveNotificationInput = {
   userIds: Array<string | null | undefined>;
@@ -21,9 +22,47 @@ export type LeaveNotificationInput = {
   };
 };
 
+export type AnnouncementNotificationInput = {
+  announcementId: string;
+  title: string;
+  content: string;
+  blocks: AnnouncementContentBlock[];
+  attachments: Array<{ id: string; uploadKey: string; kind: AnnouncementAttachmentKind; fileName: string }>;
+  recipients: Array<{ id: string; email: string; firstName?: string | null }>;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService, private readonly email: EmailDeliveryService) {}
+
+  announcementEmailEnabled() {
+    return this.email.announcementEnabled();
+  }
+
+  async createAnnouncement(tx: Prisma.TransactionClient, input: AnnouncementNotificationInput) {
+    if (!this.email.announcementEnabled()) return;
+    const recipients = [...new Map(input.recipients.map((recipient) => [recipient.id, recipient])).values()];
+    for (const recipient of recipients) {
+      const rendered = this.email.renderAnnouncement({
+        announcementId: input.announcementId,
+        recipientName: recipient.firstName || recipient.email.split('@')[0],
+        title: input.title,
+        blocks: input.blocks,
+        attachments: input.attachments,
+      });
+      await tx.notification.create({
+        data: {
+          userId: recipient.id,
+          type: 'ANNOUNCEMENT_PUBLISHED',
+          title: input.title,
+          message: input.content.slice(0, 1000),
+          resourceType: 'Announcement',
+          resourceId: input.announcementId,
+          emailDelivery: { create: { recipientEmail: recipient.email, ...rendered } },
+        },
+      });
+    }
+  }
 
   async createLeave(tx: Prisma.TransactionClient, input: LeaveNotificationInput) {
     const userIds = [...new Set(input.userIds.filter((userId): userId is string => Boolean(userId)))];

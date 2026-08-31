@@ -355,6 +355,7 @@ model User {
   payrollRunsCancelled     PayrollRun[]                @relation("PayrollRunCanceller")
   payrollsRevoked          Payroll[]                   @relation("PayrollRevoker")
   notifications            Notification[]
+  announcementAttachments AnnouncementAttachment[]    @relation("AnnouncementAttachmentUploader")
   idempotencyRecords       IdempotencyRecord[]
   auditExports             AuditExport[]
   auditLegalHolds          AuditLegalHold[]
@@ -1171,12 +1172,15 @@ model Announcement {
   id                String    @id @default(uuid())
   title             String
   content           String
+  contentBlocks     Json?
   audienceRoleCodes String[]  @default([])
   departmentId      String?
   createdById       String
   publishedAt       DateTime?
   expiresAt         DateTime?
   isActive          Boolean   @default(true)
+  emailEnabled      Boolean   @default(false)
+  emailQueuedAt     DateTime?
   version           Int       @default(1)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -1184,10 +1188,47 @@ model Announcement {
 
   department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   createdBy  Employee    @relation("AnnouncementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  attachments AnnouncementAttachment[]
 
   @@index([departmentId])
   @@index([createdById])
   @@index([isActive])
+  @@index([emailEnabled, emailQueuedAt, publishedAt])
+  @@index([deletedAt])
+}
+
+enum AnnouncementAttachmentKind {
+  INLINE_IMAGE
+  FILE
+}
+
+model AnnouncementAttachment {
+  id               String                     @id @default(uuid())
+  announcementId   String
+  uploadKey        String                     @db.VarChar(64)
+  kind             AnnouncementAttachmentKind
+  fileName         String                     @db.VarChar(180)
+  objectName       String                     @unique
+  objectGeneration String?
+  contentType      String                     @db.VarChar(160)
+  sizeBytes        Int
+  sha256           String                     @db.VarChar(64)
+  altText          String?                    @db.VarChar(300)
+  sortOrder        Int                        @default(0)
+  uploadedByUserId String
+  scanStatus       DocumentScanStatus         @default(CLEAN)
+  scannedAt        DateTime
+  scanResultCode   String?                    @db.VarChar(200)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  deletedAt        DateTime?
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  uploadedBy   User         @relation("AnnouncementAttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([announcementId, uploadKey])
+  @@index([announcementId, kind, sortOrder])
+  @@index([uploadedByUserId])
   @@index([deletedAt])
 }
 
