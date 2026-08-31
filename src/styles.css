@@ -11326,11 +11326,6 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
   }
 }
 
-/* A collapsed desktop sidebar remains a compact navigation rail, not an empty gutter. */
-.app .brand-block .sidebar-brand-mark {
-  display: none !important;
-}
-
 @media (min-width: 1281px) {
   .app.sidebar-collapsed .sidebar {
     width: 76px;
@@ -11345,39 +11340,27 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
     transition: width var(--motion-standard), flex-basis var(--motion-standard), padding var(--motion-standard);
   }
 
-  .app.sidebar-collapsed .brand-block {
-    min-height: 70px;
-    justify-content: center;
-    padding: 12px 6px;
-  }
-
-  .app.sidebar-collapsed .brand-block .logo-crop.wordmark {
+  .app.sidebar-collapsed .brand-block,
+  .app.sidebar-collapsed .sidebar .account-menu {
     display: none;
   }
 
-  .app.sidebar-collapsed .brand-block .sidebar-brand-mark {
-    display: grid !important;
-    width: 44px;
-    height: 44px;
-    place-items: center;
-    padding: 7px;
-    border: 1px solid color-mix(in srgb, var(--brand-navy) 14%, var(--border));
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--surface) 92%, var(--brand-red));
-  }
-
-  .app.sidebar-collapsed .sidebar-brand-mark img {
+  .app.sidebar-collapsed .nav-list {
     display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
+    padding: 12px 0 24px;
   }
 
-  .app.sidebar-collapsed .nav-list,
-  .app.sidebar-collapsed .sidebar .account-menu {
-    visibility: hidden;
-    opacity: 0;
-    pointer-events: none;
+  .app.sidebar-collapsed .nav-group {
+    margin-bottom: 12px;
+  }
+
+  .app.sidebar-collapsed .nav-list a {
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    margin-inline: auto;
+    padding: 0;
   }
 
   .app.sidebar-collapsed .topbar-brand-mark {
@@ -11390,10 +11373,6 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
     transform: scale(0.96);
   }
 
-  :root[data-theme="dark"] .app.sidebar-collapsed .sidebar-brand-mark {
-    border-color: rgba(255, 255, 255, 0.2);
-    background: rgba(255, 255, 255, 0.1);
-  }
 }
 
 /* ponytail: the source SVG has its own viewBox; never let a legacy crop scale escape the sidebar lockup. */

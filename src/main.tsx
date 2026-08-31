@@ -711,7 +711,6 @@ function App() {
       >
         <div className="brand-block">
           <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
-          <span className="sidebar-brand-mark" aria-hidden="true"><img src="/logos/brand-mark.svg" alt="" /></span>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -720,7 +719,7 @@ function App() {
             if (!items.length) return null;
             return <div className="nav-group" key={group.label}><span className="nav-group__label">{group.label}</span>{items.map(item => {
               const Icon = navIcon[item];
-              return <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}><Icon size={18} /><span>{navLabels[item]}</span></Link>;
+              return <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-label={navLabels[item]} title={navLabels[item]} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}><Icon size={18} /><span>{navLabels[item]}</span></Link>;
             })}</div>;
           })}
         </nav>
