@@ -11059,6 +11059,11 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
   box-shadow: none;
 }
 
+/* ponytail: legacy deployments may include this decorative mark; the wordmark is the sidebar logo. */
+.app .sidebar-brand-mark {
+  display: none;
+}
+
 :root[data-theme="dark"] .app .logo-crop.wordmark {
   border-radius: 10px;
 }
