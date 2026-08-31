@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsObject, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDate, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf } from 'class-validator';
 
 export class CreateAnnouncementDto {
   @ApiProperty({ example: 'Company Holiday' })
@@ -17,7 +17,6 @@ export class CreateAnnouncementDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(100)
-  @IsObject({ each: true })
   contentBlocks?: unknown[];
 
   @ApiPropertyOptional({ type: [String], example: ['EMPLOYEE', 'LINE_MANAGER'] })
