@@ -55,7 +55,7 @@ configure_compose() {
 preflight() {
   [[ $EUID -eq 0 ]] || { echo 'Run as root.' >&2; exit 1; }
   cd "$project_dir"
-  for command in docker curl sha256sum awk stat openssl git nginx cmp find systemctl iptables ip6tables ss; do command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }; done
+  for command in docker curl sha256sum awk stat openssl nginx cmp find systemctl iptables ip6tables ss; do command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }; done
   [[ -f .env && $(stat -c '%a' .env) == 600 ]] || { echo '.env must exist with mode 600.' >&2; exit 1; }
   local free_kb available_kb
   free_kb=$(df -Pk "$project_dir" | awk 'NR==2 {print $4}')
@@ -205,7 +205,10 @@ deploy() {
   contain_local_artifacts
   cd "$project_dir"
   local stamp old_api old_web migrator_url api_id web_id
-  DEPLOYED_COMMIT=${DEPLOYED_COMMIT:-$(git rev-parse HEAD)}
+  if [[ -z ${DEPLOYED_COMMIT:-} ]]; then
+    command -v git >/dev/null || { echo 'Set DEPLOYED_COMMIT when deploying a source archive.' >&2; return 1; }
+    DEPLOYED_COMMIT=$(git rev-parse HEAD)
+  fi
   export DEPLOYED_COMMIT
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   old_api=$(docker image inspect medtech-hr-erp-api:latest --format '{{.Id}}')
