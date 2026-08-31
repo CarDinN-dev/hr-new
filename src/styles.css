@@ -6755,6 +6755,11 @@ summary:focus-visible,
   box-shadow: none;
 }
 
+/* ponytail: hide native empty action menus without duplicating permission logic. */
+.app .card-actions-menu:has(.card-actions-menu__items:empty) {
+  display: none;
+}
+
 .app .card-actions-menu > summary {
   min-height: 42px;
   display: inline-flex;
