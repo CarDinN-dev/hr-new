@@ -18,5 +18,5 @@ RUN apk add --no-cache openssl \
   && chown 101:101 /etc/nginx/certs/medtech.key /etc/nginx/certs/medtech.crt /var/cache/nginx /run
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1/healthz || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 EXPOSE 8080 8443
