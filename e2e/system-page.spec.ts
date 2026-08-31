@@ -164,7 +164,7 @@ test("Users and access paginates at 15 and supports 50 per page", async ({ page 
   await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
 });
 
-test("user actions expand inside their table rows without clipping", async ({ page }) => {
+test("user action menus float above their rows without clipping", async ({ page }) => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 375, height: 812 }]) {
     await page.setViewportSize(viewport);
     await installSystemApi(page, ["SUPER_ADMIN"], 4, true);
@@ -174,20 +174,24 @@ test("user actions expand inside their table rows without clipping", async ({ pa
     const rows = page.getByRole("region", { name: "Users and access" }).locator("tbody tr:has(.card-actions-menu)");
     for (const index of [0, 1, 2]) {
       const row = rows.nth(index);
-      const summary = row.locator("summary");
-      await summary.focus();
-      await summary.press("Enter");
-      const menu = row.locator(".card-actions-menu__items");
+      const trigger = row.getByRole("button", { name: "Actions" });
+      const rowHeight = (await row.boundingBox())!.height;
+      await trigger.focus();
+      await trigger.press("ArrowDown");
+      const menu = page.locator(".card-actions-menu__items");
       await expect(menu).toBeVisible();
-      expect(await menu.evaluate(element => getComputedStyle(element).position)).toBe("static");
+      expect(await menu.evaluate(element => getComputedStyle(element).position)).toBe("fixed");
       const [rowBox, menuBox] = await Promise.all([row.boundingBox(), menu.boundingBox()]);
       expect(rowBox).not.toBeNull();
       expect(menuBox).not.toBeNull();
-      expect(menuBox!.x).toBeGreaterThanOrEqual(rowBox!.x - 1);
-      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
-      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height + 1);
-      await summary.press("Enter");
+      expect(Math.abs(rowBox!.height - rowHeight)).toBeLessThanOrEqual(1);
+      expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width);
+      expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport.height);
+      await page.keyboard.press("Escape");
       await expect(menu).toBeHidden();
+      await expect(trigger).toBeFocused();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
@@ -540,14 +544,15 @@ test("Super Admin System controls submit mutations and protect invalid actions",
   await searched;
   const targetUser = page.getByRole("row", { name: /target@example\.invalid/ });
   await expect(targetUser).toBeVisible();
-  await targetUser.locator("summary").click();
-  await targetUser.getByRole("button", { name: "Disable" }).click();
+  await targetUser.getByRole("button", { name: "Actions" }).click();
+  await page.getByRole("button", { name: "Disable" }).click();
   const statusDialog = page.getByRole("dialog");
   await statusDialog.getByLabel("Reason").fill("System UI status regression");
   await statusDialog.getByRole("button", { name: "Confirm" }).click();
   await expect(page.getByText("Account status updated.")).toBeVisible();
 
-  await targetUser.getByRole("button", { name: "Access" }).click();
+  await targetUser.getByRole("button", { name: "Actions" }).click();
+  await page.getByRole("button", { name: "Access" }).click();
   const accessDialog = page.getByRole("dialog");
   await accessDialog.getByLabel("Permission").selectOption("permission-department-read");
   await accessDialog.getByLabel("Reason").fill("System UI access regression");

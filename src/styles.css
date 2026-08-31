@@ -6755,7 +6755,7 @@ summary:focus-visible,
   box-shadow: none;
 }
 
-.app .card-actions-menu > summary {
+.app .card-actions-menu__trigger {
   min-height: 42px;
   display: inline-flex;
   align-items: center;
@@ -6765,28 +6765,22 @@ summary:focus-visible,
   color: var(--text);
   font-size: 0.8rem;
   font-weight: 680;
-  list-style: none;
   cursor: pointer;
 }
 
-.app .card-actions-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
-.app .card-actions-menu > summary::after {
+.app .card-actions-menu__trigger::after {
   margin-left: 7px;
   color: var(--text-muted);
   content: "···";
   letter-spacing: 0.08em;
 }
 
-.app .card-actions-menu__items {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 20;
-  width: max-content;
+.card-actions-menu__items {
+  position: fixed;
+  z-index: 80;
+  width: min(220px, calc(100vw - 16px));
   min-width: 190px;
+  max-height: calc(100dvh - 16px);
   display: grid;
   gap: 4px;
   padding: 6px;
@@ -6794,28 +6788,13 @@ summary:focus-visible,
   border-radius: 10px;
   background: var(--surface);
   box-shadow: var(--clinical-shadow-raised);
+  overflow-y: auto;
 }
 
-.app .card-actions-menu__items button {
+.card-actions-menu__items button {
   width: 100%;
+  min-height: 44px;
   justify-content: flex-start;
-}
-
-/* Scrollable tables clip floating descendants, so their actions expand in-row. */
-.app .table-wrap .card-actions-menu {
-  width: 100%;
-}
-
-.app .table-wrap .card-actions-menu > summary {
-  width: 100%;
-  justify-content: space-between;
-}
-
-.app .table-wrap .card-actions-menu__items {
-  position: static;
-  width: 100%;
-  min-width: 0;
-  margin-top: 8px;
 }
 
 .app .attendance-control {
@@ -7994,14 +7973,6 @@ summary:focus-visible,
   .app .modal-actions > button,
   .app .employee-modal-actions > button {
     min-height: 44px;
-  }
-
-  .app .card-actions-menu__items {
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    left: 16px;
-    width: auto;
   }
 
   .app .organization-overview {
@@ -10865,7 +10836,7 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
 }
 
 .app .candidate-card .row-actions > :is(button, .card-actions-menu),
-.app .candidate-card .card-actions-menu > summary {
+.app .candidate-card .card-actions-menu__trigger {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -10875,7 +10846,7 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
   justify-self: stretch;
 }
 
-.app .candidate-card .card-actions-menu > summary {
+.app .candidate-card .card-actions-menu__trigger {
   display: flex;
   justify-content: space-between;
 }
@@ -10957,15 +10928,6 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
     width: 100%;
   }
 
-  .app .recruitment-workspace .card-actions-menu[open] {
-    width: 100%;
-  }
-
-  .app .recruitment-workspace .card-actions-menu__items {
-    position: static;
-    width: 100%;
-    margin-top: 8px;
-  }
 }
 
 @media (max-width: 460px) {

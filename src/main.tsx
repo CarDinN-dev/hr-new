@@ -141,6 +141,7 @@ import { CertificatesPage, PerformancePage } from "./features/people-experience"
 import { AnnouncementsPage } from "./features/announcements";
 import { CommandPalette, CommandTrigger, QuickCreateMenu, type CommandItem, type QuickAction } from "./features/shell-actions";
 import { Dialog, useDialogCloseGuard } from "./dialog";
+import { ActionMenu } from "./action-menu";
 import { EmployeePicker, type EmployeePickerOption } from "./employee-picker";
 import { Pagination } from "./pagination";
 import { PageSearchBar, PageSearchProvider, rankedPageSearchItems, usePageSearch, usePageSearchStatus } from "./page-search";
@@ -1450,14 +1451,11 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
                   </div>
                   <div className="row-actions">
                     <button className="primary" onClick={() => setModal(<EmployeeProfile employee={employee} state={state} close={close} edit={canUpdate ? () => edit(employee) : undefined} savePdf={savePdf} canExport={canExport} canViewSalary={canViewSalary} />)}>Open profile</button>
-                    {(canUpdate || canExport || canTerminate) && <details className="card-actions-menu">
-                      <summary>More actions</summary>
-                      <div className="card-actions-menu__items">
+                    {(canUpdate || canExport || canTerminate) && <ActionMenu>
                         {canUpdate && <button onClick={() => edit(employee)}>Edit employee</button>}
                         {canExport && <button onClick={() => void withPdf(pdf => savePdf(pdf.saveEmployeeProfilePdf(employee, state.settings), "employee_profile", employee.id))}>Download PDF</button>}
                         {canTerminate && <button className="danger-outline" onClick={() => void remove(employee)}><Trash2 size={15} /> Delete employee</button>}
-                      </div>
-                    </details>}
+                    </ActionMenu>}
                   </div>
                 </article>
               );
@@ -2758,7 +2756,7 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
             count,
             formatDate(job.postedOn),
             <Badge key="status" value={vacancy.isFilled ? "Filled" : job.status} />,
-            canManage ? <details className="card-actions-menu" key="actions"><summary>More actions</summary><div className="card-actions-menu__items"><button type="button" onClick={() => editJob(job)}>Edit opening</button><button type="button" className="danger-outline" onClick={() => deleteJob(job.id)}>Delete opening</button></div></details> : "-"
+            canManage ? <ActionMenu key="actions"><button type="button" onClick={() => editJob(job)}>Edit opening</button><button type="button" className="danger-outline" onClick={() => deleteJob(job.id)}>Delete opening</button></ActionMenu> : "-"
           ];
         })}
       />
@@ -2802,11 +2800,11 @@ function Recruitment({ state, setState, notify, setNav }: { state: HrState; setS
                   {candidate.stage === "Offer" && candidate.offerDetails && canManage && <button className="primary" type="button" onClick={() => openOffer(candidate)}>Offer documents</button>}
                   {candidate.stage === "Offer" && !candidate.offerDetails && <small>Preparing offer…</small>}
                   {candidate.stage === "Hired" && (candidate.employeeId ? <Badge value="Employee added" /> : canManage && canHire ? <button className="primary" type="button" onClick={() => addAsEmployee(candidate)}>Add as employee</button> : null)}
-                  {(canManage || (candidate.stage === "Interview" && candidate.interviewAssessment) || (candidate.stage === "Offer" && candidate.offerDetails)) && <details className="card-actions-menu"><summary>More actions</summary><div className="card-actions-menu__items">
+                  {(canManage || (candidate.stage === "Interview" && candidate.interviewAssessment) || (candidate.stage === "Offer" && candidate.offerDetails)) && <ActionMenu>
                     {!canManage && candidate.stage === "Interview" && candidate.interviewAssessment && <button type="button" onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button>}
                     {!canManage && candidate.stage === "Offer" && candidate.offerDetails && <><button type="button" onClick={() => void downloadRecruitment(candidate, "interview-assessment")}>Assessment PDF</button><button type="button" onClick={() => void downloadRecruitment(candidate, "offer-letter")}>Offer PDF</button><button type="button" onClick={() => void downloadRecruitment(candidate, "nda")}>NDA PDF</button></>}
                     {canManage && <><button type="button" onClick={() => editCandidate(candidate)}>Edit candidate</button><button type="button" className="danger-outline" onClick={() => confirmDelete(candidate.name) && setState(prev => ({ ...prev, candidates: prev.candidates.filter(item => item.id !== candidate.id) }))}>Delete candidate</button></>}
-                  </div></details>}
+                  </ActionMenu>}
                 </div>
               </article>;
             }) : <div className="empty compact">No {stage.toLowerCase()} candidates.</div>}

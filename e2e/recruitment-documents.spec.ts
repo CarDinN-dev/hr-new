@@ -146,18 +146,18 @@ test("recruitment keeps editors on demand and groups secondary actions", async (
   await expect(page.getByLabel("Job title *")).toHaveCount(0);
 
   const jobRow = page.getByRole("region", { name: "Job openings" }).getByRole("row").filter({ hasText: job.title });
-  await jobRow.locator("summary").click();
-  await expect(jobRow.getByRole("button", { name: "Edit opening" })).toBeVisible();
-  await expect(jobRow.getByRole("button", { name: "Delete opening" })).toBeVisible();
+  await jobRow.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("button", { name: "Edit opening" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete opening" })).toBeVisible();
 
   const candidateCard = page.locator(".candidate-card").filter({ hasText: "Amina Saleh" });
-  await candidateCard.locator("summary").click();
-  await expect(candidateCard.getByRole("button", { name: "Edit candidate" })).toBeVisible();
-  await expect(candidateCard.getByRole("button", { name: "Delete candidate" })).toBeVisible();
+  await candidateCard.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("button", { name: "Edit candidate" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete candidate" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
-test("job actions expand inside their table rows without clipping", async ({ page }) => {
+test("job action menus float above their rows without clipping", async ({ page }) => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 375, height: 812 }]) {
     await page.setViewportSize(viewport);
     await installApi(page, false, true);
@@ -166,20 +166,24 @@ test("job actions expand inside their table rows without clipping", async ({ pag
     const rows = page.getByRole("region", { name: "Job openings" }).locator("tbody tr");
     for (const index of [0, 1, 2]) {
       const row = rows.nth(index);
-      const summary = row.locator("summary");
-      await summary.focus();
-      await summary.press("Enter");
-      const menu = row.locator(".card-actions-menu__items");
+      const trigger = row.getByRole("button", { name: "More actions" });
+      const rowHeight = (await row.boundingBox())!.height;
+      await trigger.focus();
+      await trigger.press("ArrowDown");
+      const menu = page.locator(".card-actions-menu__items");
       await expect(menu).toBeVisible();
-      expect(await menu.evaluate(element => getComputedStyle(element).position)).toBe("static");
+      expect(await menu.evaluate(element => getComputedStyle(element).position)).toBe("fixed");
       const [rowBox, menuBox] = await Promise.all([row.boundingBox(), menu.boundingBox()]);
       expect(rowBox).not.toBeNull();
       expect(menuBox).not.toBeNull();
-      expect(menuBox!.x).toBeGreaterThanOrEqual(rowBox!.x - 1);
-      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
-      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height + 1);
-      await summary.press("Enter");
+      expect(Math.abs(rowBox!.height - rowHeight)).toBeLessThanOrEqual(1);
+      expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width);
+      expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport.height);
+      await page.keyboard.press("Escape");
       await expect(menu).toBeHidden();
+      await expect(trigger).toBeFocused();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }

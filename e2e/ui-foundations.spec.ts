@@ -875,10 +875,10 @@ test("employee add, edit, and profile dialogs use the wide layout without leavin
   await expect(employeeCard).toContainText("+974 5000 1234");
   expect(await employeeCard.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await expect(employeeCard.getByRole("button", { name: "Open profile" })).toBeVisible();
-  await employeeCard.locator("summary").click();
-  await expect(employeeCard.getByRole("button", { name: "Edit employee" })).toBeVisible();
-  await expect(employeeCard.getByRole("button", { name: "Download PDF" })).toBeVisible();
-  await employeeCard.locator("summary").click();
+  await employeeCard.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("button", { name: "Edit employee" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Add employee" }).click();
   const addPanel = page.locator(".modal:has(> .employee-editor)");
