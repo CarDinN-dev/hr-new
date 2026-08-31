@@ -10342,10 +10342,16 @@ body {
 }
 
 .page-search .page-search-command {
+  align-self: center;
+  flex: 0 0 auto;
   width: auto;
   min-width: 62px;
-  height: 44px;
-  min-height: 44px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .app .brand-block { min-height: 70px; padding: 10px 20px; }
