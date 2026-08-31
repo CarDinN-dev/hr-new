@@ -11325,3 +11325,73 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
     text-overflow: ellipsis;
   }
 }
+
+/* A collapsed desktop sidebar remains a compact navigation rail, not an empty gutter. */
+.app .sidebar-brand-mark {
+  display: none;
+}
+
+@media (min-width: 1281px) {
+  .app.sidebar-collapsed .sidebar {
+    width: 76px;
+    flex-basis: 76px;
+    padding-inline: 10px;
+    visibility: visible;
+    border-right-color: var(--border);
+    box-shadow: none;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    transition: width var(--motion-standard), flex-basis var(--motion-standard), padding var(--motion-standard);
+  }
+
+  .app.sidebar-collapsed .brand-block {
+    min-height: 70px;
+    justify-content: center;
+    padding: 12px 6px;
+  }
+
+  .app.sidebar-collapsed .brand-block .logo-crop.wordmark {
+    display: none;
+  }
+
+  .app.sidebar-collapsed .brand-block .sidebar-brand-mark {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    padding: 7px;
+    border: 1px solid color-mix(in srgb, var(--brand-navy) 14%, var(--border));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface) 92%, var(--brand-red));
+  }
+
+  .app.sidebar-collapsed .sidebar-brand-mark img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .app.sidebar-collapsed .nav-list,
+  .app.sidebar-collapsed .sidebar .account-menu {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .app.sidebar-collapsed .topbar-brand-mark {
+    width: 0;
+    height: 50px;
+    padding: 0;
+    visibility: hidden;
+    border-color: transparent;
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  :root[data-theme="dark"] .app.sidebar-collapsed .sidebar-brand-mark {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
