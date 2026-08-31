@@ -15,7 +15,7 @@ RUN apk add --no-cache openssl \
     -out /etc/nginx/certs/medtech.crt \
     -subj "/CN=medtech-local" \
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:192.168.1.10,IP:192.168.18.11" \
-  && chown 101:101 /etc/nginx/certs/medtech.key /etc/nginx/certs/medtech.crt
+  && chown 101:101 /etc/nginx/certs/medtech.key /etc/nginx/certs/medtech.crt /var/cache/nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD wget -qO- http://127.0.0.1/healthz || exit 1
