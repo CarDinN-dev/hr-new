@@ -124,9 +124,10 @@ export function AnnouncementsPage({ session, notify }: { session: BackendSession
   const client = useQueryClient();
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Announcement | "new" | null>(() => window.location.hash === "#new" ? "new" : null);
-  const canManage = hasPermission(session, "announcement.manage");
+  const canManageAll = hasPermission(session, "announcement.manage");
+  const canManage = canManageAll || hasPermission(session, "announcement.department.manage");
   const announcements = useQuery({ queryKey: [...workflowKey(session, "announcements"), page], queryFn: () => apiPage<Announcement, PageMeta>(`/announcements?page=${page}&limit=20`), enabled: !detailId });
-  const departments = useQuery({ queryKey: workflowKey(session, "announcement-departments"), queryFn: () => apiList<Department>("/departments"), enabled: canManage && !detailId });
+  const departments = useQuery({ queryKey: workflowKey(session, "announcement-departments"), queryFn: () => apiList<Department>("/departments"), enabled: canManageAll && !detailId });
   const archive = useMutation({
     mutationFn: (id: string) => apiRequest(`/announcements/${id}`, { method: "DELETE", csrfToken: session.csrfToken }),
     onSuccess: async () => { await client.invalidateQueries({ queryKey: workflowKey(session, "announcements") }); notify("Announcement archived."); },
@@ -137,7 +138,7 @@ export function AnnouncementsPage({ session, notify }: { session: BackendSession
     if (pathname === "/announcements" && window.location.hash === "#new" && canManage) setEditing("new");
   }, [canManage, pathname]);
 
-  if (detailId) return <AnnouncementDetail id={detailId} session={session} notify={notify} canManage={canManage} />;
+  if (detailId) return <AnnouncementDetail id={detailId} session={session} notify={notify} canManage={canManage} canManageAll={canManageAll} />;
 
   return <div className="experience-page">
     <section className="feature-heading"><div><span className="eyebrow">Communication · Announcements</span><h2>Company news</h2><p>Pictures, secure files and scheduled updates for the right audience.</p></div>{canManage && <button className="primary" type="button" onClick={() => setEditing("new")}><Megaphone size={16} aria-hidden="true" /> New announcement</button>}</section>
@@ -148,18 +149,18 @@ export function AnnouncementsPage({ session, notify }: { session: BackendSession
       <footer><button type="button" onClick={() => void navigate({ to: "/announcements/$announcementId", params: { announcementId: item.id } })}>Read announcement</button>{canManage && <div className="row-actions"><button type="button" onClick={() => setEditing(item)}><Pencil size={14} aria-hidden="true" /> Edit</button><button type="button" className="danger-outline" disabled={archive.isPending} onClick={() => window.confirm("Archive this announcement?") && archive.mutate(item.id)}><Archive size={14} aria-hidden="true" /> Archive</button></div>}</footer>
     </article>)}{!announcements.data?.data.length && <PageState label="No announcements are available." />}</div>}
     <Pagination total={announcements.data?.meta?.total ?? 0} page={page} limit={20} totalPages={announcements.data?.meta?.totalPages ?? 1} label="announcements" onPage={setPage} />
-    {editing && <AnnouncementDialog value={editing === "new" ? undefined : editing} departments={departments.data ?? []} session={session} close={() => setEditing(null)} done={async message => { setEditing(null); await client.invalidateQueries({ queryKey: workflowKey(session, "announcements") }); notify(message); }} />}
+    {editing && <AnnouncementDialog value={editing === "new" ? undefined : editing} departments={departments.data ?? []} departmentScoped={!canManageAll} session={session} close={() => setEditing(null)} done={async message => { setEditing(null); await client.invalidateQueries({ queryKey: workflowKey(session, "announcements") }); notify(message); }} />}
   </div>;
 }
 
-function AnnouncementDetail({ id, session, notify, canManage }: { id: string; session: BackendSession; notify: Notify; canManage: boolean }) {
+function AnnouncementDetail({ id, session, notify, canManage, canManageAll }: { id: string; session: BackendSession; notify: Notify; canManage: boolean; canManageAll: boolean }) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [downloading, setDownloading] = useState("");
   const [editing, setEditing] = useState(false);
   const announcement = useQuery({ queryKey: workflowKey(session, "announcement", id), queryFn: () => apiRequest<Announcement>(`/announcements/${id}`) });
   const delivery = useQuery({ queryKey: workflowKey(session, "announcement-delivery", id), queryFn: () => apiRequest<DeliveryStatus>(`/announcements/${id}/delivery-status`), enabled: canManage && Boolean(announcement.data) });
-  const departments = useQuery({ queryKey: workflowKey(session, "announcement-departments"), queryFn: () => apiList<Department>("/departments"), enabled: canManage && editing });
+  const departments = useQuery({ queryKey: workflowKey(session, "announcement-departments"), queryFn: () => apiList<Department>("/departments"), enabled: canManageAll && editing });
   async function download(attachment: Attachment) {
     setDownloading(attachment.id);
     try { const file = await apiDownload(`/announcements/${id}/attachments/${attachment.id}/download`); saveDownload(file.blob, file.fileName); }
@@ -177,7 +178,7 @@ function AnnouncementDetail({ id, session, notify, canManage }: { id: string; se
       {files.length > 0 && <section className="announcement-files" aria-labelledby="announcement-files-title"><h3 id="announcement-files-title">Attachments</h3>{files.map(file => <div className="announcement-file" key={file.id}><span><FileText size={18} aria-hidden="true" /><span><strong>{file.fileName}</strong><small>{formatBytes(file.sizeBytes)}</small></span></span><button type="button" disabled={downloading === file.id} onClick={() => void download(file)}><Download size={16} aria-hidden="true" /> {downloading === file.id ? "Downloading…" : "Download"}</button></div>)}</section>}
       {canManage && <footer className="announcement-delivery-status"><Mail size={17} aria-hidden="true" /><span>{delivery.isPending ? "Checking email delivery…" : delivery.isError ? "Email delivery status is unavailable." : delivery.data?.queuedAt ? `${delivery.data.sent} sent · ${delivery.data.pending} pending · ${delivery.data.failed} failed` : item.emailEnabled ? "Email will queue at publication time." : "Email disabled for this announcement."}</span></footer>}
     </article>
-    {editing && <AnnouncementDialog value={item} departments={departments.data ?? []} session={session} close={() => setEditing(false)} done={async message => { setEditing(false); await Promise.all([client.invalidateQueries({ queryKey: workflowKey(session, "announcement", id) }), client.invalidateQueries({ queryKey: workflowKey(session, "announcements") })]); notify(message); }} />}
+    {editing && <AnnouncementDialog value={item} departments={departments.data ?? []} departmentScoped={!canManageAll} session={session} close={() => setEditing(false)} done={async message => { setEditing(false); await Promise.all([client.invalidateQueries({ queryKey: workflowKey(session, "announcement", id) }), client.invalidateQueries({ queryKey: workflowKey(session, "announcements") })]); notify(message); }} />}
   </div>;
 }
 
@@ -189,7 +190,7 @@ function AnnouncementContent({ announcement }: { announcement: Announcement }) {
   })())}</div>;
 }
 
-function AnnouncementDialog({ value, departments, session, close, done }: { value?: Announcement; departments: Department[]; session: BackendSession; close: () => void; done: (message: string) => Promise<void> }) {
+function AnnouncementDialog({ value, departments, departmentScoped, session, close, done }: { value?: Announcement; departments: Department[]; departmentScoped: boolean; session: BackendSession; close: () => void; done: (message: string) => Promise<void> }) {
   const createdUrls = useRef(new Set<string>());
   const errorRef = useRef<HTMLParagraphElement>(null);
   const [blocks, setBlocks] = useState<EditorBlock[]>(() => normaliseBlocks(value));
@@ -350,7 +351,7 @@ function AnnouncementDialog({ value, departments, session, close, done }: { valu
         {files.length > 0 && <div className="announcement-file-list">{files.map((file, index) => <div className="announcement-file" key={file.uploadKey}><span><Paperclip size={17} aria-hidden="true" /><span><strong>{file.fileName}</strong><small>{formatBytes(file.sizeBytes)}{file.attachmentId ? " · Uploaded" : " · Ready to upload"}</small></span></span><button type="button" className="danger-outline" disabled={locked || busy} onClick={() => removeFile(index)} aria-label={`Remove ${file.fileName}`}><Trash2 size={15} aria-hidden="true" /> Remove</button></div>)}</div>}
         <label className="button-like announcement-upload-button"><Paperclip size={16} aria-hidden="true" /> Attach files<input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx,application/pdf,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={locked || busy || files.length >= 5} onChange={event => { addFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} /></label><small>{files.length}/5 attachments</small>
       </fieldset>
-      <div className="form-grid"><label>Department<select disabled={locked} value={form.departmentId} onChange={event => updateForm("departmentId", event.target.value)}><option value="">All departments</option>{departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label><label>Publish at<input type="datetime-local" disabled={locked} value={form.publishedAt} onChange={event => updateForm("publishedAt", event.target.value)} /></label><label>Expires at<input type="datetime-local" disabled={locked} value={form.expiresAt} onChange={event => updateForm("expiresAt", event.target.value)} /></label><label className="announcement-email-toggle"><span>Email delivery</span><span><input type="checkbox" disabled={locked} checked={form.emailEnabled} onChange={event => updateForm("emailEnabled", event.target.checked)} /> Send by email when published</span></label></div>
+      <div className="form-grid">{departmentScoped ? <label>Department<input readOnly value={value?.department?.name ?? "Your department"} /></label> : <label>Department<select disabled={locked} value={form.departmentId} onChange={event => updateForm("departmentId", event.target.value)}><option value="">All departments</option>{departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>}<label>Publish at<input type="datetime-local" disabled={locked} value={form.publishedAt} onChange={event => updateForm("publishedAt", event.target.value)} /></label><label>Expires at<input type="datetime-local" disabled={locked} value={form.expiresAt} onChange={event => updateForm("expiresAt", event.target.value)} /></label><label className="announcement-email-toggle"><span>Email delivery</span><span><input type="checkbox" disabled={locked} checked={form.emailEnabled} onChange={event => updateForm("emailEnabled", event.target.checked)} /> Send by email when published</span></label></div>
       <fieldset disabled={locked}><legend>Audience roles <small>(none means everyone with access)</small></legend><div className="checkbox-grid">{roles.map(role => <label key={role}><input type="checkbox" checked={form.audienceRoles.includes(role)} onChange={event => updateForm("audienceRoles", event.target.checked ? [...form.audienceRoles, role] : form.audienceRoles.filter(item => item !== role))} /> {displayTitle(role)}</label>)}</div></fieldset>
       {uploadProgress && <div className="announcement-upload-progress" aria-live="polite"><span>{uploadProgress.label}</span><progress max={uploadProgress.total || 1} value={uploadProgress.done} /></div>}
       {error && <p className="form-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}

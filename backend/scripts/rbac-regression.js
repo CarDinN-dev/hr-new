@@ -5,6 +5,7 @@ const test = require('node:test');
 const ts = require('typescript');
 const catalog = require('../prisma/rbac-catalog.json');
 const { expandedPermissions, validateCatalog } = require('../prisma/sync-rbac');
+const { AnnouncementsService } = require('../dist/modules/announcements/announcements.service');
 
 const backendSource = path.resolve(__dirname, '../src');
 const frontendSource = path.resolve(__dirname, '../../src');
@@ -70,6 +71,10 @@ test('role inheritance and business separation match the production matrix', () 
   assert.equal(hr.has('leave.override'), false);
   assert.equal(cpo.has('leave.executive.approve_cpo'), true);
   assert.equal(cpo.has('announcement.manage'), true, 'CPO must manage announcements');
+  for (const role of [lineManager, manager]) {
+    assert.equal(role.has('announcement.department.manage'), true, 'Managers must manage department announcements');
+    assert.equal(role.has('announcement.manage'), false, 'Managers must not manage company-wide announcements');
+  }
   assert.equal(coo.has('leave.executive.approve_coo'), true);
 
   for (const permission of ['payroll.generate', 'payroll.approve', 'payroll.publish', 'payroll.mark_paid', 'service_request.hr.generate', 'leave.hr.approve']) {
@@ -89,6 +94,23 @@ test('role inheritance and business separation match the production matrix', () 
   }
   assert.equal(admin.has('payroll.read'), false, 'ADMIN must not access payroll');
   for (const permission of catalog.permissions) assert.equal(superAdmin.has(permission), true, `SUPER_ADMIN lacks ${permission}`);
+});
+
+test('department announcement managers cannot target another department', async () => {
+  const service = new AnnouncementsService(
+    { employee: { findFirst: async () => ({ departmentId: 'department-a' }) } },
+    {},
+    { permissionAllowedForScope: (_user, permission) => permission === 'announcement.department.manage' },
+    {},
+    {},
+    {},
+  );
+  const manager = { employeeId: 'manager-a' };
+  assert.equal(await service.scopedDepartmentId(null, manager), 'department-a');
+  assert.equal(await service.scopedDepartmentId('department-a', manager), 'department-a');
+  await assert.rejects(() => service.scopedDepartmentId('department-b', manager), /Department not found/);
+  await service.assertManageScope(manager, 'department-a', 'announcement-a');
+  await assert.rejects(() => service.assertManageScope(manager, 'department-b', 'announcement-b'), /Announcement not found/);
 });
 
 test('every permission is assigned and protected permissions are explicit', () => {

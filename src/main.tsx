@@ -108,7 +108,6 @@ import {
   upsertEmployee
 } from "./domain";
 import {
-  backendSessionKey,
   authorizationExpiredEvent,
   ApiError,
   apiDownload,
@@ -118,7 +117,6 @@ import {
   hasAllPermissions,
   hasAnyPermission,
   hasPermission,
-  loadBackendSession,
   loadBackendState,
   loginBackend,
   logoutBackend,
@@ -360,7 +358,7 @@ function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [compactNavigation, setCompactNavigation] = useState(() => window.matchMedia(compactNavigationQuery).matches);
   const [modal, setModal] = useState<React.ReactNode>(null);
-  const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(() => loadBackendSession() ?? undefined);
+  const [backendSession, setBackendSession] = useState<BackendSession | null | undefined>(undefined);
   const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(themeKey) === "dark" ? "dark" : "light");
   const [syncError, setSyncError] = useState("");
   const [syncAlertDismissed, setSyncAlertDismissed] = useState(false);
@@ -435,10 +433,6 @@ function App() {
 
   useEffect(() => {
     backendSessionRef.current = backendSession;
-    if (backendSession === undefined) return;
-    if (backendSession) sessionStorage.setItem(backendSessionKey, JSON.stringify(backendSession));
-    else sessionStorage.removeItem(backendSessionKey);
-    localStorage.removeItem(backendSessionKey);
   }, [backendSession]);
 
   useEffect(() => {

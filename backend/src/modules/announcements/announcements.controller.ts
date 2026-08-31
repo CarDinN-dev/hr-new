@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { AnyPermission, Permissions } from '../../common/decorators/permissions.decorator';
+import { AnyPermission } from '../../common/decorators/permissions.decorator';
 import { RequestUser } from '../../common/types/request-user.type';
 import { announcementAttachmentUploadOptions } from '../documents/document-upload';
 import { AnnouncementsService } from './announcements.service';
@@ -18,33 +18,33 @@ import { UploadAnnouncementAttachmentDto } from './dto/upload-announcement-attac
 export class AnnouncementsController {
   constructor(private readonly announcementsService: AnnouncementsService) {}
 
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Post()
   create(@Body() dto: CreateAnnouncementDto, @CurrentUser() user: RequestUser) {
     return this.announcementsService.create(dto, user);
   }
 
-  @AnyPermission('announcement.read', 'announcement.manage')
+  @AnyPermission('announcement.read', 'announcement.manage', 'announcement.department.manage')
   @Get()
   list(@Query() query: QueryAnnouncementsDto, @CurrentUser() user: RequestUser) {
     return this.announcementsService.list(query, user);
   }
 
   @ApiConsumes('multipart/form-data')
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Post(':id/attachments')
   @UseInterceptors(FileInterceptor('file', announcementAttachmentUploadOptions))
   uploadAttachment(@Param('id') id: string, @Body() dto: UploadAnnouncementAttachmentDto, @UploadedFile() file: Express.Multer.File, @CurrentUser() user: RequestUser) {
     return this.announcementsService.uploadAttachment(id, dto, file, user);
   }
 
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Delete(':id/attachments/:attachmentId')
   removeAttachment(@Param('id') id: string, @Param('attachmentId') attachmentId: string, @CurrentUser() user: RequestUser) {
     return this.announcementsService.removeAttachment(id, attachmentId, user);
   }
 
-  @AnyPermission('announcement.read', 'announcement.manage')
+  @AnyPermission('announcement.read', 'announcement.manage', 'announcement.department.manage')
   @Get(':id/attachments/:attachmentId/download')
   async downloadAttachment(@Param('id') id: string, @Param('attachmentId') attachmentId: string, @CurrentUser() user: RequestUser, @Res() response: Response) {
     const file = await this.announcementsService.attachmentContent(id, attachmentId, user);
@@ -55,31 +55,31 @@ export class AnnouncementsController {
     response.send(file.buffer);
   }
 
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Post(':id/publish')
   publish(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.announcementsService.publish(id, user);
   }
 
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Get(':id/delivery-status')
   deliveryStatus(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.announcementsService.deliveryStatus(id, user);
   }
 
-  @AnyPermission('announcement.read', 'announcement.manage')
+  @AnyPermission('announcement.read', 'announcement.manage', 'announcement.department.manage')
   @Get(':id')
   findById(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.announcementsService.findById(id, user);
   }
 
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateAnnouncementDto, @CurrentUser() user: RequestUser) {
     return this.announcementsService.update(id, dto, user);
   }
 
-  @Permissions('announcement.manage')
+  @AnyPermission('announcement.manage', 'announcement.department.manage')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.announcementsService.remove(id, user);

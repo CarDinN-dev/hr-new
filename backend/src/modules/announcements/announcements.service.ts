@@ -75,7 +75,6 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async create(dto: CreateAnnouncementDto, user: RequestUser) {
-    this.assertSystemScope(user, 'announcement.manage');
     if (!user.employeeId) throw new NotFoundException('Creator employee profile is required');
     const departmentId = await this.scopedDepartmentId(dto.departmentId, user);
     await this.assertAudienceScope(dto.audienceRoles);
@@ -142,10 +141,9 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
 
   async update(id: string, dto: UpdateAnnouncementDto, user: RequestUser) {
     const current = await this.ensureExists(id);
-    this.assertSystemScope(user, 'announcement.manage', id);
+    await this.assertManageScope(user, current.departmentId, id);
     const departmentProvided = Object.prototype.hasOwnProperty.call(dto, 'departmentId');
-    const departmentId = departmentProvided ? dto.departmentId ?? null : undefined;
-    if (departmentId) await this.ensureDepartment(departmentId);
+    const departmentId = departmentProvided ? await this.scopedDepartmentId(dto.departmentId, user) : undefined;
     await this.assertAudienceScope(dto.audienceRoles ?? current.audienceRoleCodes);
     const publishedAt = Object.prototype.hasOwnProperty.call(dto, 'publishedAt') ? dto.publishedAt ?? undefined : current.publishedAt ?? undefined;
     const expiresAt = Object.prototype.hasOwnProperty.call(dto, 'expiresAt') ? dto.expiresAt ?? undefined : current.expiresAt ?? undefined;
@@ -204,7 +202,7 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
 
   async publish(id: string, user: RequestUser) {
     const current = await this.ensureExists(id);
-    this.assertSystemScope(user, 'announcement.manage', id);
+    await this.assertManageScope(user, current.departmentId, id);
     const blocks = this.blocksFor(current.contentBlocks, current.content);
     this.validateSchedule(current.publishedAt ?? undefined, current.expiresAt ?? undefined);
     await this.assertPublishable(id, blocks);
@@ -223,8 +221,8 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async uploadAttachment(id: string, dto: UploadAnnouncementAttachmentDto, file: Express.Multer.File | undefined, user: RequestUser) {
-    await this.ensureExists(id);
-    this.assertSystemScope(user, 'announcement.manage', id);
+    const announcement = await this.ensureExists(id);
+    await this.assertManageScope(user, announcement.departmentId, id);
     if (!file?.buffer?.length) throw new BadRequestException('An attachment file is required');
     if (!isAllowedDocumentMimeType(file.mimetype)) throw new BadRequestException('Attachments must be PDF, JPEG, PNG, WebP, DOCX or XLSX');
     if (file.buffer.length > 10 * 1024 * 1024) throw new BadRequestException('Attachments must be 10 MB or less');
@@ -295,7 +293,7 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
 
   async removeAttachment(id: string, attachmentId: string, user: RequestUser) {
     const announcement = await this.ensureExists(id);
-    this.assertSystemScope(user, 'announcement.manage', id);
+    await this.assertManageScope(user, announcement.departmentId, id);
     if (announcement.emailQueuedAt) throw new BadRequestException('Attachments are locked after email is queued');
     const attachment = await this.prisma.announcementAttachment.findFirst({ where: { id: attachmentId, announcementId: id, deletedAt: null }, select: { id: true, objectName: true, objectGeneration: true } });
     if (!attachment) throw new NotFoundException('Announcement attachment not found');
@@ -322,7 +320,7 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
 
   async deliveryStatus(id: string, user: RequestUser) {
     const announcement = await this.ensureExists(id);
-    this.assertSystemScope(user, 'announcement.manage', id);
+    await this.assertManageScope(user, announcement.departmentId, id);
     const where: Prisma.EmailDeliveryWhereInput = { notification: { resourceType: 'Announcement', resourceId: id } };
     const [total, sent, pending, failed] = await Promise.all([
       this.prisma.emailDelivery.count({ where }),
@@ -334,8 +332,8 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async remove(id: string, user: RequestUser) {
-    await this.ensureExists(id);
-    this.assertSystemScope(user, 'announcement.manage', id);
+    const announcement = await this.ensureExists(id);
+    await this.assertManageScope(user, announcement.departmentId, id);
     return this.prisma.$transaction(async (tx) => {
       const removed = await tx.announcement.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } }, include: announcementInclude });
       await this.audit.record(tx, user, { action: AuditAction.DELETE, entityType: 'Announcement', entityId: id, summary: 'Announcement archived' });
@@ -459,6 +457,9 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
       if (!manageRule.excludeIds.length) return {};
       scopes.push({ id: { notIn: manageRule.excludeIds } });
     } else if (manageRule.includeIds.length) scopes.push({ id: { in: manageRule.includeIds, notIn: manageRule.excludeIds } });
+    if (this.authorization.permissionAllowedForScope(user, 'announcement.department.manage', AccessScopeType.ALL_SYSTEM)) {
+      scopes.push({ departmentId: await this.departmentManagerDepartmentId(user) });
+    }
 
     const readRule = this.authorization.scopeRule(user, 'announcement.read', AccessScopeType.ALL_SYSTEM);
     if (!readRule.unrestricted && !readRule.includeIds.length) return scopes.length ? { OR: scopes } : { id: '__no_announcement_scope__' };
@@ -480,9 +481,14 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
     return { OR: scopes };
   }
 
-  private async scopedDepartmentId(requestedDepartmentId: string | null | undefined, _user: RequestUser) {
-    if (requestedDepartmentId) await this.ensureDepartment(requestedDepartmentId);
-    return requestedDepartmentId ?? null;
+  private async scopedDepartmentId(requestedDepartmentId: string | null | undefined, user: RequestUser) {
+    if (this.authorization.permissionAllowedForScope(user, 'announcement.manage', AccessScopeType.ALL_SYSTEM)) {
+      if (requestedDepartmentId) await this.ensureDepartment(requestedDepartmentId);
+      return requestedDepartmentId ?? null;
+    }
+    const departmentId = await this.departmentManagerDepartmentId(user);
+    if (requestedDepartmentId && requestedDepartmentId !== departmentId) throw new NotFoundException('Department not found');
+    return departmentId;
   }
 
   private validateSchedule(publishedAt?: Date, expiresAt?: Date) {
@@ -496,9 +502,21 @@ export class AnnouncementsService implements OnModuleInit, OnModuleDestroy {
     if (count !== new Set(audienceRoles).size) throw new BadRequestException('Announcement audience contains an unknown or inactive role');
   }
 
-  private assertSystemScope(user: RequestUser, permission: string, resourceId?: string) {
-    if (this.authorization.permissionAllowedForScope(user, permission, AccessScopeType.ALL_SYSTEM, resourceId)) return;
-    throw new NotFoundException(resourceId ? 'Announcement not found' : 'Resource not found');
+  private async assertManageScope(user: RequestUser, departmentId: string | null, resourceId: string) {
+    if (this.authorization.permissionAllowedForScope(user, 'announcement.manage', AccessScopeType.ALL_SYSTEM, resourceId)) return;
+    if (departmentId === await this.departmentManagerDepartmentId(user)) return;
+    throw new NotFoundException('Announcement not found');
+  }
+
+  private async departmentManagerDepartmentId(user: RequestUser) {
+    if (!this.authorization.permissionAllowedForScope(user, 'announcement.department.manage', AccessScopeType.ALL_SYSTEM)) {
+      throw new NotFoundException('Resource not found');
+    }
+    const employee = user.employeeId
+      ? await this.prisma.employee.findFirst({ where: { id: user.employeeId, deletedAt: null }, select: { departmentId: true } })
+      : null;
+    if (!employee?.departmentId) throw new NotFoundException('Department not found');
+    return employee.departmentId;
   }
 
   private async ensureDepartment(departmentId: string) {
