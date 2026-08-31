@@ -153,8 +153,8 @@ verify_database_transport() {
 }
 
 install_edge_config() {
-  local source="$project_dir/ops/hr-med-tech-http.conf" target=/etc/nginx/sites-available/hr-med-tech backup_dir
-  [[ -e "$target" && -e /etc/nginx/sites-enabled/hr-med-tech ]] || { echo 'Expected installed Nginx site is missing; refusing to guess its path.' >&2; return 1; }
+  local source="$project_dir/ops/hr-med-tech-http.conf" target=/etc/nginx/sites-available/hr.med-tech.com.conf backup_dir
+  [[ -e "$target" && -e /etc/nginx/sites-enabled/hr.med-tech.com.conf ]] || { echo 'Expected installed Nginx site is missing; refusing to guess its path.' >&2; return 1; }
   backup_dir=$(mktemp -d /run/medtech-nginx.XXXXXX)
   cp -a "$target" "$backup_dir/hr-med-tech"
   install -m 644 "$source" "$target"
