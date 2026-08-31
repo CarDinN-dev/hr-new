@@ -692,7 +692,7 @@ function App() {
     ...quickActions.map(action => ({ id: `create-${action.id}`, label: `Create ${action.label}`, hint: action.hint, keywords: "new quick create", onSelect: action.onSelect })),
   ];
   const pageHint = pageDescription(nav);
-  const navigationHidden = compactNavigation ? !sidebarOpen : sidebarCollapsed;
+  const navigationHidden = compactNavigation && !sidebarOpen;
   const pageLayout = nav === "My HR" || nav === "Settings"
     ? "focused"
     : ["Dashboard", "Approval Inbox", "Notifications", "Employees", "Attendance", "Leave", "Payroll", "Recruitment", "Performance", "Announcements", "Certificates", "Audit", "Hierarchy", "System"].includes(nav)
