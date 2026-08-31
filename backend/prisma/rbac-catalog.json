@@ -87,11 +87,11 @@
     {
       "code": "CPO",
       "displayName": "Chief People Officer",
-      "description": "Executive read access and CPO-stage approvals",
+      "description": "Executive access, announcements, and CPO-stage approvals",
       "protection": "STANDARD",
       "inherits": ["EMPLOYEE"],
       "permissions": [
-        "settings.read", "employee.self.update_basic", "employee.read_all", "attendance.read_all", "leave.executive.approve_cpo", "leave.read_all",
+        "settings.read", "announcement.manage", "employee.self.update_basic", "employee.read_all", "attendance.read_all", "leave.executive.approve_cpo", "leave.read_all",
         "payroll.read", "payroll.read_compensation", "payroll.export", "payroll.payslip.read_all", "payroll.pdf.download_all", "recruitment.read", "recruitment.manage"
       ]
     },

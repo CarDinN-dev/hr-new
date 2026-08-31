@@ -69,6 +69,7 @@ test('role inheritance and business separation match the production matrix', () 
   assert.equal(hr.has('leave.hr.override'), true);
   assert.equal(hr.has('leave.override'), false);
   assert.equal(cpo.has('leave.executive.approve_cpo'), true);
+  assert.equal(cpo.has('announcement.manage'), true, 'CPO must manage announcements');
   assert.equal(coo.has('leave.executive.approve_coo'), true);
 
   for (const permission of ['payroll.generate', 'payroll.approve', 'payroll.publish', 'payroll.mark_paid', 'service_request.hr.generate', 'leave.hr.approve']) {
