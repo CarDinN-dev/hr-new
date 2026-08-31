@@ -11395,3 +11395,13 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
     background: rgba(255, 255, 255, 0.1);
   }
 }
+
+/* ponytail: the source SVG has its own viewBox; never let a legacy crop scale escape the sidebar lockup. */
+.app .brand-block .logo-crop.wordmark > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  transform: none !important;
+}
