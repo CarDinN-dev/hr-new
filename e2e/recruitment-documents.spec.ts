@@ -11,6 +11,12 @@ const job = {
   openings: 1, status: "CLOSED", postedOn: "2026-08-01", description: "Clinical support"
 };
 
+const jobs = [
+  job,
+  { ...job, id: "job-2", title: "Biomedical Technician", status: "OPEN" },
+  { ...job, id: "job-3", title: "Sales Executive", status: "OPEN" },
+];
+
 const candidates = [
   {
     id: "candidate-interview", version: 1, jobId: job.id, name: "Amina Saleh", email: "amina@example.invalid", phone: "+974 5000 1000",
@@ -31,7 +37,7 @@ const candidates = [
 
 function envelope(data: unknown) { return { success: true, data }; }
 
-async function installApi(page: Page, expiredHired = false) {
+async function installApi(page: Page, expiredHired = false, includeActionRows = false) {
   let assessmentLeaseToken = "";
   const apiCandidates = structuredClone(candidates);
   if (expiredHired) apiCandidates[2].hiredAt = "2020-01-01T00:00:00.000Z";
@@ -39,7 +45,7 @@ async function installApi(page: Page, expiredHired = false) {
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
-    if (path === "/recruitment/jobs") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope([job])) });
+    if (path === "/recruitment/jobs") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(includeActionRows ? jobs : [job])) });
     if (path === "/recruitment/candidates" && request.method() === "GET") return route.fulfill({ contentType: "application/json", body: JSON.stringify(envelope(apiCandidates)) });
     if (/^\/recruitment\/candidates\/[^/]+\/(interview-assessment|offer-letter|nda)\.pdf$/.test(path)) {
       const name = path.split("/").at(-1) || "document.pdf";
@@ -149,6 +155,34 @@ test("recruitment keeps editors on demand and groups secondary actions", async (
   await expect(candidateCard.getByRole("button", { name: "Edit candidate" })).toBeVisible();
   await expect(candidateCard.getByRole("button", { name: "Delete candidate" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
+test("job actions expand inside their table rows without clipping", async ({ page }) => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 375, height: 812 }]) {
+    await page.setViewportSize(viewport);
+    await installApi(page, false, true);
+    await page.goto("/recruitment");
+
+    const rows = page.getByRole("region", { name: "Job openings" }).locator("tbody tr");
+    for (const index of [0, 1, 2]) {
+      const row = rows.nth(index);
+      const summary = row.locator("summary");
+      await summary.focus();
+      await summary.press("Enter");
+      const menu = row.locator(".card-actions-menu__items");
+      await expect(menu).toBeVisible();
+      expect(await menu.evaluate(element => getComputedStyle(element).position)).toBe("static");
+      const [rowBox, menuBox] = await Promise.all([row.boundingBox(), menu.boundingBox()]);
+      expect(rowBox).not.toBeNull();
+      expect(menuBox).not.toBeNull();
+      expect(menuBox!.x).toBeGreaterThanOrEqual(rowBox!.x - 1);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height + 1);
+      await summary.press("Enter");
+      await expect(menu).toBeHidden();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
 });
 
 test("candidate tiles support pointer drag, selector moves, and hired expiry", async ({ page }) => {

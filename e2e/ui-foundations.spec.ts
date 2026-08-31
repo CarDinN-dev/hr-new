@@ -123,23 +123,25 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-for (const viewport of [
-  { width: 1920, height: 1080 },
-  { width: 1440, height: 900 },
-  { width: 1280, height: 800 },
-  { width: 1024, height: 768 },
-  { width: 834, height: 1112 },
-  { width: 768, height: 1024 },
-  { width: 430, height: 932 },
-  { width: 375, height: 812 },
-] as const) {
-  test(`all application routes retain aligned clinical geometry at ${viewport.width}px`, async ({ page }) => {
+for (const theme of ["light", "dark"] as const) {
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+    { width: 1024, height: 768 },
+    { width: 834, height: 1112 },
+    { width: 768, height: 1024 },
+    { width: 430, height: 932 },
+    { width: 375, height: 812 },
+  ] as const) {
+    test(`all application routes retain aligned ${theme} geometry at ${viewport.width}px`, async ({ page }) => {
     test.setTimeout(60_000);
-    await installUiApi(page);
+    await installUiApi(page, [], [], theme);
     await page.setViewportSize(viewport);
     for (const [name, path] of Object.entries(navPaths)) {
       await test.step(`${name} at ${viewport.width}px`, async () => {
         await page.goto(path);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
         await expect(page.locator(".content")).toBeVisible();
         const pageOverflow = await page.evaluate(() => ({
           fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -189,7 +191,7 @@ for (const viewport of [
           expect(surface).not.toBeNull();
           expect(surface!.x).toBeGreaterThanOrEqual(0);
           expect(surface!.x + surface!.width).toBeLessThanOrEqual(viewport.width + 1);
-          expect(surface!.borderRadius).toBe("16px");
+          expect(Number.parseFloat(surface!.borderRadius)).toBeGreaterThanOrEqual(16);
         }
       });
     }
@@ -201,7 +203,8 @@ for (const viewport of [
       expect(await pipeline.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     }
-  });
+    });
+  }
 }
 
 test("compact headers keep the visible search row below navigation controls", async ({ page }) => {

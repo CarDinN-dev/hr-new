@@ -6801,6 +6801,23 @@ summary:focus-visible,
   justify-content: flex-start;
 }
 
+/* Scrollable tables clip floating descendants, so their actions expand in-row. */
+.app .table-wrap .card-actions-menu {
+  width: 100%;
+}
+
+.app .table-wrap .card-actions-menu > summary {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.app .table-wrap .card-actions-menu__items {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  margin-top: 8px;
+}
+
 .app .attendance-control {
   overflow: hidden;
 }

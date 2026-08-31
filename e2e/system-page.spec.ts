@@ -24,8 +24,9 @@ function envelope(data: unknown, meta?: unknown) {
   return { success: true, data, ...(meta === undefined ? {} : { meta }) };
 }
 
-async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], userCount = 2) {
+async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], userCount = 2, authenticated = false) {
   const admin = { id: "admin-user", email: "super.admin@example.invalid", displayName: "Super Admin", roles: sessionRoles, permissions: ["session.self.read", "employee.read_all", "user.read", "user.manage", "permission.assign", "role.assign", "user.deactivate", "user.delete_soft", "role.read", "role.manage", "permission.read", "session.manage", "workflow.policy.read", "workflow.policy.manage", "workflow.delegation.read", "workflow.delegation.manage"], departmentScopeIds: [], sessionId: "admin-session", authProvider: "local", authorizationVersion: 1, employeeId: "admin-employee" };
+  if (authenticated) await page.addInitScript(value => sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify(value)), { ...admin, csrfToken: "csrf-token" });
   const hrRole = roles.find(role => role.code === "HR")!;
   const employeeRole = roles.find(role => role.code === "EMPLOYEE")!;
   const adminRoles = sessionRoles.map(code => roles.find(role => role.code === code)).filter((role): role is Role => Boolean(role));
@@ -59,7 +60,7 @@ async function installSystemApi(page: Page, sessionRoles = ["SUPER_ADMIN"], user
     const path = url.pathname.replace("/api/v1", "");
     const body = request.postDataJSON?.() as Record<string, unknown> | undefined;
     const json = (data: unknown, status = 200, meta?: unknown) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(envelope(data, meta)) });
-    if (path === "/auth/me") return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false, message: "Not signed in" }) });
+    if (path === "/auth/me") return authenticated ? json({ csrfToken: "csrf-token", user: admin }) : route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ success: false, message: "Not signed in" }) });
     if (path === "/auth/login") return json({ csrfToken: "csrf-token", user: admin }, 201);
     if (path === "/auth/step-up/local") return json({ reauthenticatedAt: new Date().toISOString() }, 201);
     if (path === "/system/users" && request.method() === "GET") {
@@ -161,6 +162,35 @@ test("Users and access paginates at 15 and supports 50 per page", async ({ page 
   await usersPanel.getByLabel("Users per page").selectOption("50");
   await expect(usersPanel.getByText("Showing 1–16 of 16 users · Page 1 of 1")).toBeVisible();
   await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
+});
+
+test("user actions expand inside their table rows without clipping", async ({ page }) => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 375, height: 812 }]) {
+    await page.setViewportSize(viewport);
+    await installSystemApi(page, ["SUPER_ADMIN"], 4, true);
+    await page.goto("/system");
+    await expect(page.getByRole("heading", { name: "Create login user" })).toBeVisible();
+
+    const rows = page.getByRole("region", { name: "Users and access" }).locator("tbody tr:has(.card-actions-menu)");
+    for (const index of [0, 1, 2]) {
+      const row = rows.nth(index);
+      const summary = row.locator("summary");
+      await summary.focus();
+      await summary.press("Enter");
+      const menu = row.locator(".card-actions-menu__items");
+      await expect(menu).toBeVisible();
+      expect(await menu.evaluate(element => getComputedStyle(element).position)).toBe("static");
+      const [rowBox, menuBox] = await Promise.all([row.boundingBox(), menu.boundingBox()]);
+      expect(rowBox).not.toBeNull();
+      expect(menuBox).not.toBeNull();
+      expect(menuBox!.x).toBeGreaterThanOrEqual(rowBox!.x - 1);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(rowBox!.y + rowBox!.height + 1);
+      await summary.press("Enter");
+      await expect(menu).toBeHidden();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
 });
 
 test("System page-wide search intersects independent user and session searches", async ({ page }) => {
