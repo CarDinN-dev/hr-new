@@ -17,7 +17,7 @@ RUN apk add --no-cache openssl \
     -out /etc/nginx/certs/medtech.crt \
     -subj "/CN=medtech-local" \
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-  && chown -R nginx:nginx /etc/nginx/certs \
+  && chown -R nginx:nginx /etc/nginx/certs /var/cache/nginx /run \
   && chmod 600 /etc/nginx/certs/medtech.key
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
