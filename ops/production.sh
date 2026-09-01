@@ -15,7 +15,7 @@ load_runtime_env() {
   install -d -m 700 "$(dirname "$runtime_env")"
   local key secret value
   umask 077
-  awk -F= '!/^(POSTGRES_PASSWORD|DATABASE_APP_PASSWORD|DATABASE_MIGRATOR_PASSWORD|JWT_SECRET|AUDIT_HMAC_KEY|AUDIT_HMAC_PREVIOUS_KEYS|MICROSOFT_CLIENT_SECRET|MICROSOFT_PROVISIONING_CLIENT_SECRET)=/' "$project_dir/.env" >"$runtime_env"
+  awk -F= '!/^(POSTGRES_PASSWORD|DATABASE_APP_PASSWORD|DATABASE_MIGRATOR_PASSWORD|JWT_SECRET|AUDIT_HMAC_KEY|AUDIT_HMAC_PREVIOUS_KEYS|MICROSOFT_CLIENT_SECRET|MICROSOFT_PROVISIONING_CLIENT_SECRET|DEPLOYED_COMMIT)=/' "$project_dir/.env" >"$runtime_env"
   chmod 600 "$runtime_env"
   while IFS=':' read -r key secret; do
     [[ -n $key && -n $secret ]] || continue
