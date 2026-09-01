@@ -86,6 +86,32 @@ test("HR submits for an employee and immediately approves without a password", a
   expect(JSON.parse((await overridden).postData() || "{}")).toMatchObject({ targetStatus: "APPROVED", reason: "Immediate HR approval" });
 });
 
+test("date ranges submit as full-day leave after selecting half day", async ({ page }) => {
+  await installLeaveApi(page);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("hr@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Leave" }).click();
+
+  await page.getByLabel("Employee").fill("Amina");
+  await page.getByRole("option", { name: "EMP-002 — Amina Saleh" }).click();
+  await page.getByRole("textbox", { name: "From" }).fill("2099-04-20");
+  await page.getByRole("textbox", { name: "To" }).fill("2099-04-20");
+  await page.getByLabel("Duration").selectOption("half");
+  await expect(page.getByLabel("Duration")).toHaveValue("half");
+  await page.getByRole("textbox", { name: "To" }).fill("2099-04-21");
+  await expect(page.getByLabel("Duration")).toHaveValue("full");
+  expect(await page.getByLabel("Duration").locator("option[value='half']").evaluate(option => (option as HTMLOptionElement).disabled)).toBe(true);
+
+  const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
+  await page.getByRole("button", { name: "Submit request" }).click();
+  const payload = (await submitted).postData() || "";
+  expect(payload).toMatch(/name="startDate"\r?\n\r?\n2099-04-20/);
+  expect(payload).toMatch(/name="endDate"\r?\n\r?\n2099-04-21/);
+  expect(payload).toMatch(/name="isHalfDay"\r?\n\r?\nfalse/);
+});
+
 test("leave attachments stay on the existing persistence paths", async ({ page }) => {
   await installLeaveApi(page);
   await page.goto("/");
