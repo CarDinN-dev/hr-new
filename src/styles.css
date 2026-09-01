@@ -105,8 +105,8 @@
   --sidebar-deep: #0b182b;
   --overlay: rgba(3, 8, 18, 0.72);
   --action-red: #d91b37;
-  --clinical-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
-  --clinical-shadow-raised: 0 24px 58px rgba(0, 0, 0, 0.34);
+  --clinical-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), 0 12px 28px rgba(0, 0, 0, 0.24);
+  --clinical-shadow-raised: 0 18px 44px rgba(0, 0, 0, 0.34);
   --focus-ring: rgba(255, 77, 104, 0.3);
   --teal: #36d6c4;
   --violet: #b4a2ff;
@@ -6389,13 +6389,6 @@ summary:focus-visible,
   background: transparent;
 }
 
-:root[data-theme="dark"] .dashboard-layout .hero-logo-crop {
-  padding: 5px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 12px;
-  background: transparent;
-}
-
 .dashboard-layout .hero-panel h2 {
   margin: 0;
   color: var(--text);
@@ -9684,20 +9677,6 @@ body {
   color: var(--text-muted);
 }
 
-:root[data-theme="dark"] .app .leave-replace-attachment input {
-  position: absolute;
-  width: 1px;
-  min-width: 1px;
-  min-height: 1px;
-  height: 1px;
-  padding: 0;
-  border: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
 .app .module-loading,
 .app .panel-loading {
   display: grid;
@@ -10035,7 +10014,7 @@ body {
 :root[data-theme="dark"] .app .workflow-card,
 :root[data-theme="dark"] .app details,
 :root[data-theme="dark"] .app .modal {
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 28px rgba(0, 0, 0, 0.18);
 }
 
 .app .panel,
@@ -11344,10 +11323,6 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
   display: none;
 }
 
-:root[data-theme="dark"] .app .logo-crop.wordmark {
-  border-radius: 10px;
-}
-
 .app .nav-list {
   gap: 2px;
   padding: 12px 0;
@@ -11404,7 +11379,7 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
 :root[data-theme="dark"] .app .nav-list a.active {
   color: var(--text);
   background: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 3px 0 0 var(--brand-red);
+  box-shadow: var(--clinical-shadow), inset 3px 0 0 var(--brand-red);
 }
 
 .app .account-menu--sidebar {

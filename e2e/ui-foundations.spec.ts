@@ -663,6 +663,36 @@ test("compact header controls keep their geometry through dark-mode changes", as
   })).toEqual({ button: [44, 44], icon: [18, 18], padding: "0px" });
 });
 
+test("dark mode keeps the light-mode shell geometry and elevation", async ({ page }) => {
+  await installUiApi(page, [{
+    id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE"
+  }]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(page.getByRole("search")).toBeVisible();
+
+  const shell = async () => page.evaluate(() => {
+    const box = (selector: string) => {
+      const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+      return [rect.x, rect.y, rect.width, rect.height];
+    };
+    const shadow = (selector: string) => getComputedStyle(document.querySelector<HTMLElement>(selector)!).boxShadow.replace(/rgba?\([^)]*\)/g, "color");
+    return { search: box('[role="search"]'), wordmarkRadius: getComputedStyle(document.querySelector<HTMLElement>(".logo-crop.wordmark")!).borderRadius, navShadow: shadow(".nav-list a.active") };
+  });
+
+  const light = await shell();
+  await page.locator(".topbar-actions > .icon-button").click();
+  const dark = await shell();
+  expect(dark).toEqual(light);
+
+  await page.goto("/employees");
+  await expect(page.locator(".employee-card").first()).toBeVisible();
+  const cardShadow = async () => page.locator(".employee-card").first().evaluate(element => getComputedStyle(element).boxShadow.replace(/rgba?\([^)]*\)/g, "color"));
+  const darkCardShadow = await cardShadow();
+  await page.locator(".topbar-actions > .icon-button").click();
+  expect(await cardShadow()).toBe(darkCardShadow);
+});
+
 test("phone create menu and account photo controls stay aligned", async ({ page }) => {
   await installUiApi(page, [{
     id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",
