@@ -4,8 +4,10 @@ const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const test = require('node:test');
+const { plainToInstance } = require('class-transformer');
 const { ApproverMode, DocumentScanStatus, Gender, LeaveApprovalStage, LeaveRequestStatus, Prisma } = require('@prisma/client');
 const { ConfigService } = require('@nestjs/config');
+const { CreateLeaveRequestDto } = require('../dist/modules/leave/dto/create-leave-request.dto');
 const { LeaveService } = require('../dist/modules/leave/leave.service');
 const { EmailDeliveryService } = require('../dist/modules/notifications/email-delivery.service');
 const { NotificationsService } = require('../dist/modules/notifications/notifications.service');
@@ -21,6 +23,11 @@ const mailKeyDirectory = mkdtempSync(join(tmpdir(), 'medtech-mail-test-'));
 const mailKeyPath = join(mailKeyDirectory, 'private-key.pem');
 writeFileSync(mailKeyPath, generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
 test.after(() => rmSync(mailKeyDirectory, { recursive: true, force: true }));
+
+test('multipart false remains a false half-day value', () => {
+  const request = plainToInstance(CreateLeaveRequestDto, { isHalfDay: 'false' }, { enableImplicitConversion: true });
+  assert.equal(request.isHalfDay, false);
+});
 
 test('canonical leave policies calculate paid and unpaid days on the correct calendars', () => {
   const leave = service();

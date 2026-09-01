@@ -24,6 +24,7 @@ export class CreateLeaveRequestDto {
 
   @ApiPropertyOptional({ default: false, description: 'Allowed only when startDate and endDate are the same day' })
   @IsOptional()
+  @Type(() => String)
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   isHalfDay?: boolean;
