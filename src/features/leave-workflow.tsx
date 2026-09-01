@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Paperclip, ShieldCheck, Upload, X } from "lucide-react";
+import { CheckCircle2, FileText, Paperclip, ShieldCheck, Upload, X } from "lucide-react";
 import { apiList, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { EmployeePicker } from "../employee-picker";
@@ -98,6 +98,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   const employees = useQuery({ queryKey: workflowKey(session, "leave-employees"), queryFn: () => apiList<LeaveEmployee>("/employees?limit=1000"), enabled: canSubmitForEmployee });
   const [form, setForm] = useState({ employeeId: "", leaveTypeId: "", startDate: new Date().toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), isHalfDay: false });
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [submittedRequest, setSubmittedRequest] = useState<LeaveRecord | null>(null);
   const selectedType = leaveTypes.data?.find(type => type.id === form.leaveTypeId) ?? leaveTypes.data?.[0];
   const selectedLeaveTypeId = selectedType?.id ?? "";
   const targetEmployeeId = canSubmitForEmployee ? form.employeeId : session.employeeId ?? "";
@@ -119,6 +120,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   const correctionType = leaveTypes.data?.find(type => type.id === correction.leaveTypeId);
   const formHasDateRange = hasDateRange(form.startDate, form.endDate);
   const correctionHasDateRange = hasDateRange(correction.startDate, correction.endDate);
+  const previewNeedsMoreBalance = Boolean(preview.data && !preview.data.noBalanceRequired && preview.data.paidDays != null && preview.data.availableDays != null && Number(preview.data.paidDays) > Number(preview.data.availableDays));
   const [timelineId, setTimelineId] = useState<string | null>(null);
   const timeline = useQuery({ queryKey: workflowKey(session, "leave-timeline", timelineId), queryFn: () => apiRequest<LeaveRecord>(`/leave/${timelineId}/timeline`), enabled: Boolean(timelineId) });
   const eligible = useQuery({ queryKey: workflowKey(session, "leave-assignees", decision?.request.id), queryFn: () => apiRequest<EligibleAssignee[]>(`/leave/${decision!.request.id}/eligible-assignees`), enabled: decision?.action === "reassign" });
@@ -129,7 +131,13 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   ]);
   const submit = useMutation({
     mutationFn: () => apiRequest<LeaveRecord>("/leave/submit", { method: "POST", csrfToken: session.csrfToken, headers: idempotencyHeaders(), body: requestBody({ ...form, employeeId: canSubmitForEmployee ? targetEmployeeId : undefined, leaveTypeId: selectedLeaveTypeId }, attachment) }),
-    onSuccess: async () => { await invalidate(); setAttachment(null); notify("Leave request submitted."); },
+    onSuccess: async request => {
+      const today = new Date().toISOString().slice(0, 10);
+      setSubmittedRequest(request);
+      setAttachment(null);
+      setForm(previous => ({ ...previous, startDate: today, endDate: today, isHalfDay: false }));
+      await invalidate();
+    },
   });
   const replaceAttachment = useMutation({
     mutationFn: ({ request, file }: { request: LeaveRecord; file: File }) => { const body = new FormData(); body.set("file", file); return apiRequest<LeaveRecord>(`/leave/${request.id}/attachment`, { method: "POST", csrfToken: session.csrfToken, body }); },
@@ -166,9 +174,10 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
   return <section className="stack leave-workflow">
     {(Boolean(session.employeeId) || canSubmitForEmployee) && hasPermission(session, "leave.self.create") && <div className="leave-workspace-grid">
       <div className="panel leave-balance-panel"><div className="panel-head"><div><h3>Leave balance</h3><span>{targetEmployeeId ? `${balanceYear} balances for the selected employee` : "Choose an employee to see their balances"}</span></div></div>
-        {!targetEmployeeId ? <div className="leave-balance-empty"><strong>Balance ready when you are</strong><span>Select an employee in the request form to review their available leave before submitting.</span></div> : balances.isPending ? <div className="leave-balance-skeleton" aria-label="Loading leave balances"><span /><span /><span /></div> : balances.isError ? <p className="sync-alert">{balances.error.message}</p> : <div className="leave-balance-grid">{balances.data?.map(balance => <article className={`leave-balance-card${balance.noBalanceRequired ? " is-unlimited" : balance.eligible ? "" : " is-unavailable"}`} key={balance.leaveType.id}><header><div><span className="leave-balance-card__eyebrow">{balance.eligible ? "Current-year balance" : "Eligibility"}</span><strong>{balance.leaveType.name}</strong></div>{balance.eligible && !balance.noBalanceRequired && <span className="leave-balance-card__year">{balanceYear}</span>}</header>{balance.noBalanceRequired ? <div className="leave-balance-card__state"><strong>No balance required</strong><span>This leave type is not deducted from an annual allowance.</span></div> : balance.eligible ? <><div className="leave-balance-card__available"><span>Available to request</span><strong>{days(balance.availableDays)}<small> days</small></strong></div><dl><div><dt>Total allowance</dt><dd>{days(balance.totalDays)} days</dd></div><div><dt>Used</dt><dd>{days(balance.usedDays)} days</dd></div><div><dt>Pending</dt><dd>{days(balance.pendingDays)} days</dd></div></dl></> : <div className="leave-balance-card__state"><strong>Unavailable</strong><span>This leave type is not currently eligible.</span></div>}</article>)}{!balances.data?.length && <div className="empty compact">No active leave types.</div>}</div>}
+        {!targetEmployeeId ? <div className="leave-balance-empty"><strong>Balance ready when you are</strong><span>Select an employee in the request form to review their available leave before submitting.</span></div> : balances.isPending ? <div className="leave-balance-skeleton" aria-label="Loading leave balances"><span /><span /><span /></div> : balances.isError ? <p className="sync-alert">{balances.error.message}</p> : <div className="leave-balance-grid">{balances.data?.map(balance => <article className={`leave-balance-card${balance.noBalanceRequired ? " is-unlimited" : balance.eligible ? "" : " is-unavailable"}`} key={balance.leaveType.id}><header><div><span className="leave-balance-card__eyebrow">{balance.eligible ? "Current-year balance" : "Eligibility"}</span><strong>{balance.leaveType.name}</strong></div>{balance.eligible && !balance.noBalanceRequired && <span className="leave-balance-card__year">{balanceYear}</span>}</header>{balance.noBalanceRequired ? <div className="leave-balance-card__state"><strong>No balance required</strong><span>This leave type is not deducted from an annual allowance.</span></div> : balance.eligible ? <><div className="leave-balance-card__available"><span>Available to request</span><strong>{days(balance.availableDays)}<small> days</small></strong></div><dl><div><dt>Total</dt><dd><strong>{days(balance.totalDays)}</strong><span>days</span></dd></div><div><dt>Used</dt><dd><strong>{days(balance.usedDays)}</strong><span>days</span></dd></div><div><dt>Pending</dt><dd><strong>{days(balance.pendingDays)}</strong><span>days</span></dd></div></dl></> : <div className="leave-balance-card__state"><strong>Unavailable</strong><span>This leave type is not currently eligible.</span></div>}</article>)}{!balances.data?.length && <div className="empty compact">No active leave types.</div>}</div>}
       </div>
       <div className="panel leave-request-panel"><div className="panel-head"><div><h3>Request leave</h3><span>Dates, paid days, and balance eligibility are calculated by the server.</span></div></div>
+        {submittedRequest && <div className="leave-submit-success" role="status" aria-live="polite"><CheckCircle2 size={22} aria-hidden="true" /><div><strong>Leave request submitted</strong><span>{submittedRequest.leaveType.name} · {displayDate(submittedRequest.startDate)} – {displayDate(submittedRequest.endDate)} · {days(submittedRequest.totalDays)} day(s) · {displayTitle(submittedRequest.status)}</span></div><button type="button" aria-label="Dismiss submitted leave confirmation" onClick={() => setSubmittedRequest(null)}><X size={16} aria-hidden="true" /></button></div>}
         <div className="leave-request-sections">
           <section className="leave-form-section" aria-labelledby="leave-request-details"><div className="leave-form-section__heading"><h4 id="leave-request-details">Request details</h4><p>Choose who the leave is for and the applicable leave type.</p></div><div className="form-grid compact leave-request-grid">
             {canSubmitForEmployee && <label>Employee<EmployeePicker value={form.employeeId} onChange={employeeId => setForm(previous => ({ ...previous, employeeId }))} options={employees.data?.map(employee => ({ id: employee.id, label: `${employee.employeeCode} — ${employee.firstName} ${employee.lastName}` })) ?? []} clearable /></label>}
@@ -184,7 +193,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
           </section>}
         </div>
         {preview.data && <div className="leave-request-estimate"><div className="leave-request-estimate__heading"><strong>Request estimate</strong><span>Calculated from your current selection</span></div><div className="settlement-preview"><div><span>Total</span><strong>{days(preview.data.totalDays)}</strong></div><div><span>Paid</span><strong>{days(preview.data.paidDays)}</strong></div><div><span>Unpaid</span><strong>{days(preview.data.unpaidDays)}</strong></div><div><span>Available</span><strong>{preview.data.noBalanceRequired ? "No balance required" : days(preview.data.availableDays)}</strong></div></div></div>}
-        {preview.data && !preview.data.eligible && <p className="sync-alert" role="alert">{preview.data.message || "This leave request is not eligible."}</p>}
+        {preview.data && !preview.data.eligible && <p className="leave-balance-warning" role="alert"><strong>{previewNeedsMoreBalance ? "Not enough leave balance for this request." : "This leave request is not eligible."}</strong><span>{previewNeedsMoreBalance ? `This request needs ${days(preview.data.paidDays)} paid day(s), but only ${days(preview.data.availableDays)} day(s) are available. Choose a shorter range or another leave type.` : preview.data.message || "This leave request is not eligible."}</span></p>}
         <div className="leave-submit-row"><span>{attachment ? "Your attachment will be saved with this request." : "Review the request estimate before submitting."}</span><div className="form-actions"><button className="primary" disabled={submit.isPending || preview.isPending || !selectedLeaveTypeId || !targetEmployeeId || preview.data?.eligible === false || Boolean(preview.data?.requiresAttachment && !attachment)} onClick={() => submit.mutate()}>{submit.isPending ? "Submitting…" : "Submit request"}</button></div></div>
         {submit.isError && <p className="sync-alert" role="alert">{submit.error.message}</p>}
       </div>

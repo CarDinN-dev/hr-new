@@ -13,8 +13,8 @@ const leaveTypes = [
   { id: "compassionate", name: "Compassionate leave", code: "COMPASSIONATE", annualAllowanceDays: "3", isPaid: true, requiresAttachment: false },
 ];
 
-function balances(employeeId: string) {
-  return leaveTypes.map(type => ({ id: `balance-${type.id}`, employeeId, leaveTypeId: type.id, year: 2099, totalDays: type.annualAllowanceDays, usedDays: "2", pendingDays: "1", availableDays: String(Number(type.annualAllowanceDays) - 3), noBalanceRequired: false, eligible: true, leaveType: type }));
+function balances(employeeId: string, submitted = false) {
+  return leaveTypes.map(type => ({ id: `balance-${type.id}`, employeeId, leaveTypeId: type.id, year: 2099, totalDays: type.annualAllowanceDays, usedDays: "2", pendingDays: submitted && type.id === "annual" ? "20" : "1", availableDays: String(Number(type.annualAllowanceDays) - 2 - (submitted && type.id === "annual" ? 20 : 1)), noBalanceRequired: false, eligible: true, leaveType: type }));
 }
 
 function envelope(data: unknown) {
@@ -24,6 +24,7 @@ function envelope(data: unknown) {
 async function installLeaveApi(page: Page) {
   const hr = { id: "hr-user", email: "hr@example.invalid", displayName: "HR User", roles: ["HR"], permissions: ["session.self.read", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.manage", "leave.hr.override"], departmentScopeIds: [], sessionId: "hr-session", authProvider: "local", authorizationVersion: 1, employeeId: "hr-employee" };
   let storedAttachments: Array<{ id: string; fileName: string; fileUrl: string; contentType: string; sizeBytes: number; scanStatus: string; createdAt: string }> = [];
+  let submittedLeave = false;
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace("/api/v1", "");
@@ -36,9 +37,12 @@ async function installLeaveApi(page: Page) {
     if (path === "/leave/inbox") return json([]);
     if (path === "/leave/types") return json(leaveTypes);
     if (path === "/employees") return json([employee]);
-    if (path === "/leave/balances") return json(balances(String(new URL(request.url()).searchParams.get("employeeId"))));
-    if (path === "/leave/preview") return json({ totalDays: "1", paidDays: body?.leaveTypeId === "compassionate" ? "1" : "1", unpaidDays: "0", eligible: true, requiresAttachment: body?.leaveTypeId === "sick", availableDays: "27", noBalanceRequired: false });
-    if (path === "/leave/submit" && request.method() === "POST") return json({ ...leave, id: "submitted-leave", requesterUserId: hr.id }, 201);
+    if (path === "/leave/balances") return json(balances(String(new URL(request.url()).searchParams.get("employeeId")), submittedLeave));
+    if (path === "/leave/preview") {
+      const overBalanceDraft = submittedLeave && body?.startDate === "2099-04-20" && body?.endDate === "2099-05-09";
+      return json(overBalanceDraft ? { totalDays: "20", paidDays: "20", unpaidDays: "0", eligible: false, message: "Insufficient leave balance", requiresAttachment: false, availableDays: "8", noBalanceRequired: false } : { totalDays: "1", paidDays: body?.leaveTypeId === "compassionate" ? "1" : "1", unpaidDays: "0", eligible: true, requiresAttachment: body?.leaveTypeId === "sick", availableDays: submittedLeave ? "8" : "27", noBalanceRequired: false });
+    }
+    if (path === "/leave/submit" && request.method() === "POST") { submittedLeave = true; return json({ ...leave, id: "submitted-leave", requesterUserId: hr.id, startDate: "2099-04-20T00:00:00.000Z", endDate: "2099-05-09T00:00:00.000Z", totalDays: "20", paidDays: "20" }, 201); }
     if (path === "/leave/leave-1/attachment" && request.method() === "POST") {
       const fileName = request.postData()?.match(/filename="([^"]+)"/)?.[1] || "attachment.pdf";
       storedAttachments = [{ id: "attachment-1", fileName, fileUrl: `/attachments/${fileName}`, contentType: "application/pdf", sizeBytes: 1024, scanStatus: "CLEAN", createdAt: "2099-04-01T00:00:00.000Z" }];
@@ -56,11 +60,14 @@ test("HR submits for an employee and immediately approves without a password", a
   await page.getByLabel("Password").fill("IntegrationPass123!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("link", { name: "Leave" }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.getByLabel("Employee").fill("Amina");
   await expect(page.getByRole("option", { name: "EMP-002 — Amina Saleh" })).toBeVisible();
   await page.getByRole("option", { name: "EMP-002 — Amina Saleh" }).click();
   await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
+  await expect(page.locator(".leave-balance-card dd span")).toHaveCount(9);
+  expect(await page.locator(".leave-balance-card dl").evaluateAll(cards => cards.every(card => card.scrollWidth <= card.clientWidth))).toBe(true);
   await page.getByLabel("Leave type").selectOption("sick");
   await expect(page.getByLabel("Attachment (required)")).toBeVisible();
   await expect(page.getByLabel("Attachment (required)")).toHaveAttribute("accept", ".pdf,.jpg,.jpeg,.png,.webp");
@@ -72,9 +79,21 @@ test("HR submits for an employee and immediately approves without a password", a
   await page.getByLabel("Leave type").selectOption("compassionate");
   await expect(page.getByLabel("Duration")).toBeDisabled();
   await page.getByLabel("Leave type").selectOption("annual");
+  await page.getByRole("textbox", { name: "From" }).fill("2099-04-20");
+  await page.getByRole("textbox", { name: "To" }).fill("2099-05-09");
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
   await page.getByRole("button", { name: "Submit request" }).click();
   expect((await submitted).postData()).toContain(employee.id);
+  await expect(page.getByText("Leave request submitted", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not enough leave balance for this request.", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "From" })).not.toHaveValue("2099-04-20");
+  await page.getByRole("button", { name: "Dismiss submitted leave confirmation" }).click();
+  await page.getByRole("textbox", { name: "From" }).fill("2099-04-20");
+  await page.getByRole("textbox", { name: "To" }).fill("2099-05-09");
+  await expect(page.getByText("Not enough leave balance for this request.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submit request" })).toBeDisabled();
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await page.getByRole("button", { name: "Override & approve" }).click();
   const dialog = page.getByRole("dialog");

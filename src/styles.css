@@ -3102,10 +3102,25 @@ summary {
 .app .leave-balance-card dd {
   margin: 0.2rem 0 0;
   color: var(--ink);
-  font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 760;
-  white-space: nowrap;
+  line-height: 1.1;
+}
+
+.app .leave-balance-card dd strong,
+.app .leave-balance-card dd span {
+  display: block;
+}
+
+.app .leave-balance-card dd strong {
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.app .leave-balance-card dd span {
+  margin-top: 0.16rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
 }
 
 .app .leave-balance-card__state {
@@ -6856,11 +6871,21 @@ summary:focus-visible,
   border-radius: 16px;
 }
 
+.app .leave-balance-panel {
+  container-type: inline-size;
+}
+
 .app .leave-balance-panel .leave-balance-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 0;
   overflow: visible;
+}
+
+@container (max-width: 480px) {
+  .app .leave-balance-panel .leave-balance-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .app .leave-balance-panel .leave-balance-card {
@@ -7104,6 +7129,63 @@ summary:focus-visible,
   min-height: 74px;
   padding: 11px;
   border-radius: 10px;
+}
+
+.app .leave-submit-success,
+.app .leave-balance-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid;
+  border-radius: 12px;
+}
+
+.app .leave-submit-success {
+  border-color: color-mix(in srgb, var(--good) 38%, var(--border));
+  background: color-mix(in srgb, var(--good-bg) 76%, var(--surface));
+  color: var(--good);
+}
+
+.app .leave-submit-success > div,
+.app .leave-balance-warning {
+  min-width: 0;
+}
+
+.app .leave-submit-success strong,
+.app .leave-submit-success span,
+.app .leave-balance-warning strong,
+.app .leave-balance-warning span {
+  display: block;
+}
+
+.app .leave-submit-success span,
+.app .leave-balance-warning span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.app .leave-submit-success button {
+  display: grid;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  place-items: center;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--good) 32%, var(--border));
+  color: var(--good);
+}
+
+.app .leave-balance-warning {
+  grid-template-columns: 1fr;
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--border));
+  background: color-mix(in srgb, var(--warn-bg) 74%, var(--surface));
+  color: var(--ink);
 }
 
 .app .leave-submit-row {
