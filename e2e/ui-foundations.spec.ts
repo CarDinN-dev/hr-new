@@ -677,7 +677,13 @@ test("dark mode keeps the light-mode shell geometry and elevation", async ({ pag
       return [rect.x, rect.y, rect.width, rect.height];
     };
     const shadow = (selector: string) => getComputedStyle(document.querySelector<HTMLElement>(selector)!).boxShadow.replace(/rgba?\([^)]*\)/g, "color");
-    return { search: box('[role="search"]'), wordmarkRadius: getComputedStyle(document.querySelector<HTMLElement>(".logo-crop.wordmark")!).borderRadius, navShadow: shadow(".nav-list a.active") };
+    const command = document.querySelector<HTMLElement>(".page-search-command")!;
+    return {
+      search: box('[role="search"]'),
+      pageSearchCommand: { box: box(".page-search-command"), borderWidth: getComputedStyle(command).borderWidth, borderRadius: getComputedStyle(command).borderRadius, padding: getComputedStyle(command).padding },
+      wordmarkRadius: getComputedStyle(document.querySelector<HTMLElement>(".logo-crop.wordmark")!).borderRadius,
+      navShadow: shadow(".nav-list a.active")
+    };
   });
 
   const light = await shell();

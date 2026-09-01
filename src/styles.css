@@ -10598,7 +10598,8 @@ body {
   transform: none;
 }
 
-.app .page-search .page-search-command {
+.app .page-search .page-search-command,
+:root[data-theme="dark"] .app .page-search .page-search-command {
   align-self: center;
   flex: 0 0 auto;
   width: auto;
@@ -10606,6 +10607,9 @@ body {
   height: 42px;
   min-height: 42px;
   padding: 0 4px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .app .brand-block { min-height: 70px; padding: 10px 20px; }
