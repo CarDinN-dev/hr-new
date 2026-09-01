@@ -148,7 +148,7 @@ import "./styles.css";
 
 const storageKey = "medtech-hr-erp-v1";
 const themeKey = "medtech-hr-theme";
-const compactNavigationQuery = "(max-width: 1280px)";
+const compactNavigationQuery = "(max-width: 1023px)";
 const hiredCandidateVisibilityMs = 3 * 24 * 60 * 60 * 1000;
 type Theme = "light" | "dark";
 type NotifyAction = { label: string; onAction: () => void };

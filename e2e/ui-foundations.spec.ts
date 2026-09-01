@@ -21,13 +21,16 @@ const session = {
 };
 
 async function installUiApi(page: Page, employees: unknown[] = [], extraPermissions: string[] = [], initialTheme: "light" | "dark" = "light", sessionOverride: Partial<typeof session> = {}) {
-  await page.addInitScript(({ value, permissions, theme, override }) => {
-    sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify({ ...value, ...override, permissions: [...(override.permissions || value.permissions), ...permissions] }));
+  const testSession = { ...session, ...sessionOverride, permissions: [...(sessionOverride.permissions || session.permissions), ...extraPermissions] };
+  const { csrfToken, ...user } = testSession;
+  await page.addInitScript(({ value, theme }) => {
+    sessionStorage.setItem("medtech-hr-erp-backend-session-v2", JSON.stringify(value));
     localStorage.setItem("medtech-hr-theme", theme);
-  }, { value: session, permissions: extraPermissions, theme: initialTheme, override: sessionOverride });
+  }, { value: testSession, theme: initialTheme });
   await page.route("**/api/v1/**", route => {
     const pathname = new URL(route.request().url()).pathname;
-    const data = pathname === "/api/v1/employees/me" ? employees[0] ?? { id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE" }
+    const data = pathname === "/api/v1/auth/me" ? { csrfToken, user }
+      : pathname === "/api/v1/employees/me" ? employees[0] ?? { id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE" }
       : pathname === "/api/v1/employees" ? employees
       : pathname === "/api/v1/notifications" ? [{ id: "notification-1", type: "TEST", title: "Test notification", message: "Visible notification content", createdAt: "2026-08-11T08:00:00.000Z", readAt: null }]
       : pathname === "/api/v1/approvals/inbox" ? { leave: [], certificates: [], payroll: [] }
@@ -174,7 +177,7 @@ for (const viewport of [
         if (name !== "Employees") {
           const actions = await page.locator(".topbar-actions").boundingBox();
           expect(actions).not.toBeNull();
-          if (viewport.width <= 1280) expect(actions!.y + actions!.height).toBeLessThanOrEqual(searchBox!.y);
+          if (viewport.width <= 1023) expect(actions!.y + actions!.height).toBeLessThanOrEqual(searchBox!.y);
           else expect(Math.abs(actions!.y + actions!.height / 2 - searchBox!.y - searchBox!.height / 2)).toBeLessThanOrEqual(4);
         }
 
@@ -586,7 +589,6 @@ test("compact header controls keep their geometry through dark-mode changes", as
     ["sidebar", page.locator(".desktop-sidebar-toggle")],
     ["notifications", page.locator(".notification-trigger")],
     ["theme", page.locator(".topbar-actions > .icon-button")],
-    ["account", page.locator(".account-menu--topbar > .account-trigger")],
   ] as const;
   const headerMetrics = async () => Object.fromEntries(await Promise.all(controls.map(async ([name, control]) => [name, await control.evaluate(button => {
     const icon = button.querySelector<SVGElement>("svg");
@@ -603,7 +605,6 @@ test("compact header controls keep their geometry through dark-mode changes", as
     sidebar: { button: [44, 44], icon: [18, 18], padding: "0px" },
     notifications: { button: [44, 44], icon: [18, 18], padding: "0px" },
     theme: { button: [44, 44], icon: [18, 18], padding: "0px" },
-    account: { button: [44, 44], icon: null, padding: "0px" },
   };
   expect(await headerMetrics()).toEqual(expected);
 
@@ -622,7 +623,14 @@ test("compact header controls keep their geometry through dark-mode changes", as
   expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
 
-  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.setViewportSize({ width: 1024, height: 720 });
+  await page.reload();
+  await page.locator(".topbar-actions > .icon-button").click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator(".mobile-menu")).toBeHidden();
+  await expect(page.locator(".desktop-sidebar-toggle")).toBeVisible();
+
+  await page.setViewportSize({ width: 1023, height: 720 });
   await page.reload();
   await page.locator(".topbar-actions > .icon-button").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -645,6 +653,48 @@ test("compact header controls keep their geometry through dark-mode changes", as
     const iconBox = button.querySelector("svg")!.getBoundingClientRect();
     return { button: [buttonBox.width, buttonBox.height], icon: [iconBox.width, iconBox.height], padding: getComputedStyle(button).padding };
   })).toEqual({ button: [44, 44], icon: [18, 18], padding: "0px" });
+});
+
+test("phone create menu and account photo controls stay aligned", async ({ page }) => {
+  await installUiApi(page, [{
+    id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",
+    profilePhoto: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+  }], ["employee.self.update_basic"]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await page.locator(".topbar .quick-create__trigger").click();
+  const [header, createMenu] = await Promise.all([page.locator(".topbar").boundingBox(), page.locator(".topbar .quick-create__menu").boundingBox()]);
+  expect(header).not.toBeNull();
+  expect(createMenu).not.toBeNull();
+  expect(createMenu!.x).toBeGreaterThanOrEqual(12);
+  expect(createMenu!.x + createMenu!.width).toBeLessThanOrEqual(378);
+  expect(createMenu!.y).toBeGreaterThan(header!.y + header!.height);
+  await expect(page.locator(".page-search-command")).toBeHidden();
+  await page.keyboard.press("Control+K");
+  await expect(page.getByRole("dialog", { name: "Search modules and actions" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.goto(navPaths["My HR"]);
+  const [photo, replace, remove] = await Promise.all([
+    page.locator(".account-photo-preview").boundingBox(),
+    page.locator(".account-photo-actions .button-like").boundingBox(),
+    page.locator(".account-photo-actions button").boundingBox(),
+  ]);
+  expect(photo).not.toBeNull();
+  expect(replace).not.toBeNull();
+  expect(remove).not.toBeNull();
+  expect(Math.abs(replace!.y - photo!.y)).toBeLessThanOrEqual(1);
+  expect(replace!.x).toBeCloseTo(remove!.x, 1);
+  expect(replace!.width).toBeCloseTo(remove!.width, 1);
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/");
+  await expect(page.locator(".mobile-menu")).toBeHidden();
+  await expect(page.locator(".desktop-sidebar-toggle")).toBeVisible();
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(page.locator(".account-menu--sidebar .account-avatar")).toHaveCSS("border-radius", "999px");
+  await expect(page.locator(".account-menu--sidebar .account-avatar img")).toHaveCSS("border-radius", "999px");
 });
 
 test("login is dark-only, keeps the centered premium composition and stays responsive", async ({ page }) => {
@@ -813,7 +863,7 @@ test("notification actions stay right-aligned and the popover remains visible be
       expect(actions).not.toBeNull();
       expect(topbar!.x + topbar!.width - actions!.x - actions!.width).toBeLessThanOrEqual(48);
       expect(actions!.x + actions!.width).toBeLessThanOrEqual(topbar!.x + topbar!.width);
-      if (viewport.width <= 1280) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
+      if (viewport.width <= 1023) expect(actions!.y + actions!.height).toBeLessThanOrEqual(search!.y);
       else expect(Math.abs(actions!.y + actions!.height / 2 - search!.y - search!.height / 2)).toBeLessThanOrEqual(4);
 
       await trigger.click();
