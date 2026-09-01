@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { apiDownload, apiList, apiPage, apiRequest } from "./api";
+import { ApiError, apiDownload, apiList, apiPage, apiRequest, authorizationExpiredEvent, backendSessionUpdatedEvent, restoreBackendSession } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -49,4 +49,45 @@ it("uses UTF-8 download filenames returned by protected PDF endpoints", async ()
     blob: async () => new Blob(["pdf"])
   }));
   await expect(apiDownload("/recruitment/candidates/id/offer-letter.pdf")).resolves.toMatchObject({ fileName: "offer-letter-Alex Smith.pdf" });
+});
+
+function sessionResponse(id: string, csrfToken: string) {
+  return { success: true, data: { csrfToken, user: { id, email: `${id}@example.invalid`, displayName: id, roles: [], permissions: [], departmentScopeIds: [], sessionId: `${id}-session`, authProvider: "local", authorizationVersion: 1 } } };
+}
+
+it("refreshes and retries a write after the same user receives a newer session cookie", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => sessionResponse("user-1", "stale-token") })
+    .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ success: false, message: "Invalid CSRF token" }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => sessionResponse("user-1", "fresh-token") })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, data: { read: true } }) });
+  const updated = vi.fn();
+  window.addEventListener(backendSessionUpdatedEvent, updated);
+  vi.stubGlobal("fetch", fetchMock);
+
+  await restoreBackendSession();
+  await expect(apiRequest("/notifications/notification-1/read", { method: "POST", csrfToken: "stale-token" })).resolves.toEqual({ read: true });
+
+  expect((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).toHaveProperty("get");
+  expect(((fetchMock.mock.calls[1]?.[1] as RequestInit).headers as Headers).get("X-CSRF-Token")).toBe("stale-token");
+  expect(((fetchMock.mock.calls[3]?.[1] as RequestInit).headers as Headers).get("X-CSRF-Token")).toBe("fresh-token");
+  expect(updated).toHaveBeenCalledOnce();
+  window.removeEventListener(backendSessionUpdatedEvent, updated);
+});
+
+it("does not replay a write after the browser switches to another account", async () => {
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => sessionResponse("user-1", "stale-token") })
+    .mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ success: false, message: "Invalid CSRF token" }) })
+    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => sessionResponse("user-2", "fresh-token") });
+  const expired = vi.fn();
+  window.addEventListener(authorizationExpiredEvent, expired);
+  vi.stubGlobal("fetch", fetchMock);
+
+  await restoreBackendSession();
+  await expect(apiRequest("/notifications/notification-1/read", { method: "POST", csrfToken: "stale-token" })).rejects.toEqual(new ApiError("Your active account changed. Sign in again before retrying this action.", 401));
+
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(expired).toHaveBeenCalledOnce();
+  window.removeEventListener(authorizationExpiredEvent, expired);
 });

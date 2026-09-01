@@ -13,6 +13,10 @@ const env = import.meta as unknown as { env?: { VITE_API_URL?: string } };
 export const apiBaseUrl = (env.env?.VITE_API_URL || "/api/v1").replace(/\/$/, "");
 export const backendSessionKey = "medtech-hr-erp-backend-session-v2";
 export const authorizationExpiredEvent = "medtech-hr-authorization-expired";
+export const backendSessionUpdatedEvent = "medtech-hr-backend-session-updated";
+
+let activeBackendSession: BackendSession | null = null;
+let sessionRefresh: Promise<BackendSession | null> | undefined;
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -155,6 +159,15 @@ export async function restoreBackendSession(): Promise<BackendSession | null> {
   }
 }
 
+function refreshBackendSession() {
+  sessionRefresh ??= restoreBackendSession().finally(() => { sessionRefresh = undefined; });
+  return sessionRefresh;
+}
+
+function notifyBackendSessionUpdated(session: BackendSession) {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent<BackendSession>(backendSessionUpdatedEvent, { detail: session }));
+}
+
 export function startMicrosoftLogin() {
   window.location.assign(`${apiBaseUrl}/auth/microsoft/start`);
 }
@@ -164,7 +177,7 @@ export function startMicrosoftStepUp() {
 }
 
 function backendSession(result: BackendSessionResponse): BackendSession {
-  return {
+  const session = {
     id: result.user.id,
     email: result.user.email,
     displayName: result.user.displayName,
@@ -177,6 +190,8 @@ function backendSession(result: BackendSessionResponse): BackendSession {
     employeeId: result.user.employeeId,
     csrfToken: result.csrfToken
   };
+  activeBackendSession = session;
+  return session;
 }
 
 export function hasPermission(session: BackendSession, permission: string) {
@@ -377,10 +392,11 @@ export async function apiDownload(path: string, init: RequestInit & { csrfToken?
   return { blob: await response.blob(), fileName };
 }
 
-async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfToken?: string } = {}): Promise<ApiEnvelope<T>> {
+async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfToken?: string } = {}, retried = false): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  if (init.csrfToken) headers.set("X-CSRF-Token", init.csrfToken);
+  const csrfToken = activeBackendSession?.csrfToken || init.csrfToken;
+  if (csrfToken) headers.set("X-CSRF-Token", csrfToken);
 
   const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, credentials: "same-origin" });
   let payload: Partial<ApiEnvelope<T>> | undefined;
@@ -391,6 +407,17 @@ async function apiRequestEnvelope<T>(path: string, init: RequestInit & { csrfTok
   }
 
   if (!response.ok || payload?.success === false) {
+    if (response.status === 403 && payload?.message === "Invalid CSRF token" && !retried) {
+      const previousSession = activeBackendSession;
+      const currentSession = await refreshBackendSession();
+      if (currentSession && currentSession.id === previousSession?.id) {
+        notifyBackendSessionUpdated(currentSession);
+        return apiRequestEnvelope(path, init, true);
+      }
+      activeBackendSession = null;
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(authorizationExpiredEvent));
+      throw new ApiError("Your active account changed. Sign in again before retrying this action.", 401);
+    }
     if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(authorizationExpiredEvent));
     throw new ApiError(payload?.message || `API request failed (${response.status})`, response.status);
   }

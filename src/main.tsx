@@ -109,6 +109,7 @@ import {
 } from "./domain";
 import {
   authorizationExpiredEvent,
+  backendSessionUpdatedEvent,
   ApiError,
   apiDownload,
   apiList,
@@ -405,8 +406,20 @@ function App() {
       queryClient.clear();
       setBackendSession(null);
     };
+    const updateBackendSession = (event: Event) => {
+      const session = (event as CustomEvent<BackendSession>).detail;
+      if (!session) return;
+      backendReady.current = false;
+      hydratedWorkspaceSession.current = "";
+      queryClient.clear();
+      setBackendSession(session);
+    };
     window.addEventListener(authorizationExpiredEvent, expireAuthorization);
-    return () => window.removeEventListener(authorizationExpiredEvent, expireAuthorization);
+    window.addEventListener(backendSessionUpdatedEvent, updateBackendSession);
+    return () => {
+      window.removeEventListener(authorizationExpiredEvent, expireAuthorization);
+      window.removeEventListener(backendSessionUpdatedEvent, updateBackendSession);
+    };
   }, [queryClient]);
 
   useEffect(() => {
