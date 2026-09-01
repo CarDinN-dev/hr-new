@@ -2915,14 +2915,25 @@ summary {
 
 .employee-picker {
   position: relative;
+  --employee-picker-action-size: 36px;
 }
 
-.employee-picker input {
-  padding-right: 2.45rem;
+.app .employee-picker input {
+  padding-right: calc(var(--employee-picker-action-size) + 0.85rem);
+  padding-left: 2.7rem;
 }
 
-.employee-picker:has(.employee-picker__clear) input {
-  padding-right: 4.25rem;
+.app .employee-picker:has(.employee-picker__clear) input {
+  padding-right: calc(var(--employee-picker-action-size) * 2 + 0.85rem);
+}
+
+.employee-picker__search-icon {
+  position: absolute;
+  top: 50%;
+  left: 0.72rem;
+  pointer-events: none;
+  color: var(--text-muted);
+  transform: translateY(-50%);
 }
 
 .employee-picker .employee-picker__toggle,
@@ -2931,31 +2942,47 @@ summary {
 :root[data-theme="dark"] .app .employee-picker .employee-picker__clear {
   position: absolute;
   top: 50%;
-  min-height: 0;
-  padding: 0.2rem;
-  border: 0;
+  width: var(--employee-picker-action-size);
+  min-width: var(--employee-picker-action-size);
+  height: var(--employee-picker-action-size);
+  min-height: var(--employee-picker-action-size);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: transparent;
   box-shadow: none;
-  color: var(--muted);
+  color: var(--text-muted);
   line-height: 1;
+  touch-action: manipulation;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
   transform: translateY(-50%);
 }
 
 .employee-picker__toggle {
-  right: 0.55rem;
+  right: 4px;
 }
 
 .employee-picker__clear {
-  right: 1.85rem;
-  font-size: 1.2rem;
+  right: calc(4px + var(--employee-picker-action-size));
 }
 
 .employee-picker .employee-picker__toggle:hover:not(:disabled),
 .employee-picker .employee-picker__clear:hover:not(:disabled) {
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--brand-red) 20%, var(--border));
+  background: color-mix(in srgb, var(--brand-red) 7%, var(--surface));
   box-shadow: none;
-  color: var(--ink);
+  color: var(--brand-red);
   transform: translateY(-50%);
+}
+
+.employee-picker__toggle svg {
+  transition: transform 160ms ease;
+}
+
+.employee-picker__toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 
 .employee-picker__options {
@@ -2964,38 +2991,71 @@ summary {
   top: calc(100% + 0.25rem);
   right: 0;
   left: 0;
-  max-height: 15rem;
+  max-height: 18rem;
   overflow-y: auto;
-  padding: 0.25rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 12px 28px rgba(17, 29, 44, 0.2);
+  padding: 0.375rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-overlay);
+  box-shadow: var(--clinical-shadow-raised);
 }
 
-.employee-picker__options button {
+.app .employee-picker__options button {
   width: 100%;
-  min-height: 0;
+  min-height: var(--control-height);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
   justify-content: flex-start;
   padding: 0.55rem 0.65rem;
   border: 0;
+  border-radius: var(--control-radius);
   background: transparent;
   box-shadow: none;
   color: var(--ink);
   text-align: left;
 }
 
-.employee-picker__options button:hover,
-.employee-picker__options button.is-selected {
-  background: color-mix(in srgb, var(--red) 10%, var(--surface));
+.app .employee-picker__options button:hover,
+.app .employee-picker__options button.is-selected {
+  background: var(--accent-soft);
   box-shadow: none;
   transform: none;
 }
 
+.employee-picker__code {
+  display: inline-flex;
+  min-width: 3.6rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.24rem 0.38rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.employee-picker__separator {
+  display: none;
+}
+
+.employee-picker__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .employee-picker__empty {
   margin: 0;
-  padding: 0.55rem 0.65rem;
-  color: var(--muted);
+  padding: 0.7rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
 
 .document-employee-filter {

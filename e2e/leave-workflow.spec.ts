@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const employee = { id: "employee-2", employeeCode: "EMP-002", firstName: "Amina", lastName: "Saleh" };
+const additionalEmployee = { id: "employee-3", employeeCode: "EMP-003", firstName: "Khalid", lastName: "Hassan" };
 const leave = {
   id: "leave-1", version: 1, requesterUserId: "other-user", employeeId: employee.id, status: "PENDING_LINE_MANAGER", currentStage: "LINE_MANAGER", routeType: "STANDARD",
   startDate: "2099-04-20T00:00:00.000Z", endDate: "2099-04-20T00:00:00.000Z", totalDays: "1", paidDays: "1", unpaidDays: "0", isHalfDay: false,
@@ -36,7 +37,7 @@ async function installLeaveApi(page: Page) {
     if (path === "/leave/requests") return json([{ ...leave, attachments: storedAttachments }]);
     if (path === "/leave/inbox") return json([]);
     if (path === "/leave/types") return json(leaveTypes);
-    if (path === "/employees") return json([employee]);
+    if (path === "/employees") return json([employee, additionalEmployee]);
     if (path === "/leave/balances") return json(balances(String(new URL(request.url()).searchParams.get("employeeId")), submittedLeave));
     if (path === "/leave/preview") {
       const overBalanceDraft = submittedLeave && body?.startDate === "2099-04-20" && body?.endDate === "2099-05-09";
@@ -65,6 +66,9 @@ test("HR submits for an employee and immediately approves without a password", a
   await page.getByLabel("Employee").fill("Amina");
   await expect(page.getByRole("option", { name: "EMP-002 — Amina Saleh" })).toBeVisible();
   await page.getByRole("option", { name: "EMP-002 — Amina Saleh" }).click();
+  await page.getByRole("button", { name: "Show choices" }).click();
+  await expect(page.getByRole("option", { name: "EMP-003 — Khalid Hassan" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".leave-balance-card dd span")).toHaveCount(9);
   expect(await page.locator(".leave-balance-card dl").evaluateAll(cards => cards.every(card => card.scrollWidth <= card.clientWidth))).toBe(true);

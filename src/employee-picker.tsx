@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronDown, Search, X } from "lucide-react";
 
 export type EmployeePickerOption = { id: string; label: string; searchText?: string };
 
@@ -15,7 +16,7 @@ function employeePickerOptionLabel(label: string) {
   return <><span className="employee-picker__code">{label.slice(0, dividerIndex)}</span><span className="employee-picker__separator" aria-hidden="true">—</span><span className="employee-picker__name">{label.slice(dividerIndex + divider.length)}</span></>;
 }
 
-export function EmployeePicker({ id, name, value, options, onChange, placeholder = "Select employee", ariaLabel = "Employee", clearable = false, disabled = false }: {
+export function EmployeePicker({ id, name, value, options, onChange, placeholder = "Search employee…", ariaLabel = "Employee", clearable = false, disabled = false }: {
   id?: string;
   name?: string;
   value: string;
@@ -55,6 +56,12 @@ export function EmployeePicker({ id, name, value, options, onChange, placeholder
     setQuery(selected?.label ?? "");
   }
 
+  function openSearch() {
+    setQuery("");
+    setOpen(true);
+    setActiveIndex(0);
+  }
+
   function moveActive(amount: number) {
     setOpen(true);
     setActiveIndex(current => matches.length ? (current + amount + matches.length) % matches.length : 0);
@@ -74,10 +81,11 @@ export function EmployeePicker({ id, name, value, options, onChange, placeholder
       aria-expanded={open}
       aria-activedescendant={open && matches[activeIndex] ? `${listId}-${matches[activeIndex].id}` : undefined}
       autoComplete="off"
+      spellCheck={false}
       disabled={disabled}
-      placeholder={placeholder}
+      placeholder={open ? "Search employees…" : placeholder}
       value={query}
-      onFocus={() => { setOpen(true); setActiveIndex(0); }}
+      onFocus={openSearch}
       onChange={event => { setQuery(event.target.value); setOpen(true); setActiveIndex(0); }}
       onKeyDown={event => {
         if (event.key === "ArrowDown") { event.preventDefault(); moveActive(1); }
@@ -87,8 +95,9 @@ export function EmployeePicker({ id, name, value, options, onChange, placeholder
         else if (event.key === "Tab") close();
       }}
     />
-    {clearable && value && <button className="employee-picker__clear" type="button" aria-label="Clear selection" disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(""); setQuery(""); setOpen(false); }}>×</button>}
-    <button className="employee-picker__toggle" type="button" aria-label={`${open ? "Hide" : "Show"} choices`} disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => setOpen(current => !current)}>▾</button>
+    <Search className="employee-picker__search-icon" size={16} aria-hidden="true" />
+    {clearable && value && <button className="employee-picker__clear" type="button" aria-label="Clear selection" disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => { onChange(""); setQuery(""); setOpen(false); }}><X size={16} aria-hidden="true" /></button>}
+    <button className="employee-picker__toggle" type="button" aria-label={`${open ? "Hide" : "Show"} choices`} aria-controls={listId} aria-expanded={open} disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => open ? close() : openSearch()}><ChevronDown size={16} aria-hidden="true" /></button>
     {open && <div id={listId} className="employee-picker__options" role="listbox" aria-label={`${ariaLabel} choices`}>
       {matches.length ? matches.map((option, index) => <button id={`${listId}-${option.id}`} className={[option.id === value && "is-selected", index === activeIndex && "is-active"].filter(Boolean).join(" ")} type="button" role="option" aria-label={option.label} aria-selected={option.id === value} key={option.id} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(option)}>{employeePickerOptionLabel(option.label)}</button>) : <p className="employee-picker__empty">No employees match.</p>}
     </div>}
