@@ -699,6 +699,22 @@ test("dark mode keeps the light-mode shell geometry and elevation", async ({ pag
   expect(await cardShadow()).toBe(darkCardShadow);
 });
 
+test("dark mobile account avatar keeps the light-mode circular frame", async ({ page }) => {
+  await installUiApi(page, []);
+  await page.setViewportSize({ width: 1023, height: 720 });
+  await page.goto("/");
+
+  const accountFrame = () => page.locator(".account-menu--topbar .account-trigger").evaluate(element => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return { box: [rect.width, rect.height], borderRadius: style.borderRadius, borderWidth: style.borderWidth, padding: style.padding };
+  });
+
+  const light = await accountFrame();
+  await page.locator(".topbar-actions > .icon-button").click();
+  expect(await accountFrame()).toEqual(light);
+});
+
 test("phone create menu and account photo controls stay aligned", async ({ page }) => {
   await installUiApi(page, [{
     id: "employee-1", employeeCode: "MTC001", firstName: "UI", lastName: "Admin", email: "ui.admin@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",

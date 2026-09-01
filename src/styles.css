@@ -4885,7 +4885,8 @@ summary:focus-visible,
   flex: 0 0 auto;
 }
 
-.app .account-menu--topbar .account-trigger {
+.app .account-menu--topbar .account-trigger,
+:root[data-theme="dark"] .app .account-menu--topbar .account-trigger {
   display: inline-grid;
   place-items: center;
   border: 1px solid var(--border);
