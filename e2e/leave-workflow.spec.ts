@@ -68,6 +68,10 @@ test("HR submits for an employee and immediately approves without a password", a
   await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".leave-balance-card dd span")).toHaveCount(9);
   expect(await page.locator(".leave-balance-card dl").evaluateAll(cards => cards.every(card => card.scrollWidth <= card.clientWidth))).toBe(true);
+  await expect(page.locator(".leave-request-estimate")).toHaveAttribute("aria-busy", "false");
+  expect(await page.locator(".leave-request-estimate .settlement-preview").evaluate(grid => new Set(Array.from(grid.children, card => card.getBoundingClientRect().top)).size)).toBe(1);
+  await expect(page.getByRole("columnheader", { name: "Employee" })).toBeVisible();
+  await expect(page.locator(".leave-request-status .badge.warn")).toHaveText("Pending Line Manager");
   await page.getByLabel("Leave type").selectOption("sick");
   await expect(page.getByLabel("Attachment (required)")).toBeVisible();
   await expect(page.getByLabel("Attachment (required)")).toHaveAttribute("accept", ".pdf,.jpg,.jpeg,.png,.webp");
@@ -93,6 +97,10 @@ test("HR submits for an employee and immediately approves without a password", a
   await expect(page.getByText("Not enough leave balance for this request.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Submit request" })).toBeDisabled();
   await page.setViewportSize({ width: 375, height: 812 });
+  const requestPanel = await page.locator(".leave-request-panel").boundingBox();
+  const balancePanel = await page.locator(".leave-balance-panel").boundingBox();
+  expect(requestPanel?.y).toBeLessThan(balancePanel?.y ?? Number.POSITIVE_INFINITY);
+  expect(await page.locator(".leave-request-row").evaluate(row => getComputedStyle(row).gridTemplateColumns.split(" ").length)).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await page.getByRole("button", { name: "Override & approve" }).click();
@@ -189,6 +197,10 @@ test("employee submits their own leave and uses My HR and Settings safely", asyn
 
   await expect(page.getByLabel("Employee")).toHaveCount(0);
   await expect(page.getByLabel("Reason")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "My leave requests" })).toBeVisible();
+  await expect(page.getByText(/Your \d{4} leave balances/)).toBeVisible();
+  await expect(page.getByText("awaiting your decision", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "Employee" })).toHaveCount(0);
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
   await page.getByRole("button", { name: "Submit request" }).click();
   expect((await submitted).postData()).not.toContain('name="employeeId"');

@@ -3033,7 +3033,6 @@ summary {
   gap: 0.75rem;
 }
 
-.app .leave-balance-card__eyebrow,
 .app .leave-balance-card__available > span,
 .app .leave-balance-card dt {
   display: block;
@@ -3046,22 +3045,9 @@ summary {
 
 .app .leave-balance-card header strong {
   display: block;
-  margin-top: 0.26rem;
   color: var(--ink);
   font-size: 1rem;
   line-height: 1.25;
-}
-
-.app .leave-balance-card__year {
-  display: inline-grid;
-  min-width: 40px;
-  min-height: 28px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
 }
 
 .app .leave-balance-card__available {
@@ -6890,20 +6876,35 @@ summary:focus-visible,
 
 .app .leave-balance-panel .leave-balance-card {
   min-height: 0;
-  gap: 0.8rem;
-  padding: 16px;
+  gap: 0.65rem;
+  padding: 14px;
   border-radius: 14px;
   box-shadow: none;
 }
 
 .app .leave-balance-card__available strong {
-  font-size: clamp(2.1rem, 3vw, 2.75rem);
+  font-size: clamp(1.9rem, 3vw, 2.45rem);
+}
+
+.app .leave-balance-panel .leave-balance-card dl {
+  padding-top: 0.65rem;
 }
 
 .app .leave-balance-card__state {
-  min-height: 104px;
+  min-height: 88px;
   padding: 0.82rem;
   border-radius: 11px;
+}
+
+.app .leave-balance-card.is-empty {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--border));
+  background: color-mix(in srgb, var(--warn-bg) 38%, var(--surface));
+}
+
+.app .leave-balance-card__notice {
+  color: var(--warn);
+  font-size: 0.72rem;
+  font-weight: 760;
 }
 
 .app .leave-balance-empty,
@@ -7122,6 +7123,7 @@ summary:focus-visible,
 }
 
 .app .leave-request-estimate .settlement-preview {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -7129,6 +7131,10 @@ summary:focus-visible,
   min-height: 74px;
   padding: 11px;
   border-radius: 10px;
+}
+
+.app .leave-request-estimate[aria-busy="true"] {
+  border-color: color-mix(in srgb, var(--brand-red) 46%, var(--border));
 }
 
 .app .leave-submit-success,
@@ -7400,6 +7406,87 @@ summary:focus-visible,
   }
 }
 
+@container (min-width: 960px) {
+  .app .leave-requests-panel .table-wide table {
+    display: table;
+    table-layout: fixed;
+  }
+
+  .app .leave-requests-panel .table-wide thead {
+    display: table-header-group;
+  }
+
+  .app .leave-requests-panel .table-wide tbody {
+    display: table-row-group;
+    padding: 0;
+  }
+
+  .app .leave-requests-panel .table-wide tr {
+    display: table-row;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .app .leave-requests-panel .table-wide td {
+    min-height: 44px;
+    display: table-cell;
+    padding: 13px 12px;
+  }
+
+  .app .leave-requests-panel .table-wide td::before {
+    display: none;
+  }
+}
+
+@container (max-width: 959px) {
+  .app .leave-requests-panel .table-wide tbody {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .app .leave-requests-panel .table-wide tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+  }
+
+  .app .leave-requests-panel .table-wide td {
+    min-height: 52px;
+    grid-template-columns: 1fr;
+    align-content: start;
+    gap: 4px;
+    padding: 10px;
+  }
+
+  .app .leave-requests-panel .table-wide td::before {
+    display: block;
+  }
+
+  .app .leave-requests-panel .table-wide td[data-label="Attachment"],
+  .app .leave-requests-panel .table-wide td[data-label="Status"],
+  .app .leave-requests-panel .table-wide td[data-label="Actions"] {
+    grid-column: 1 / -1;
+  }
+
+  .app .leave-request-actions > button,
+  .app .leave-request-more-actions > summary,
+  .app .leave-request-more-actions > div button,
+  .app .leave-replace-attachment {
+    min-height: 44px;
+  }
+}
+
+@container (max-width: 560px) {
+  .app .leave-requests-panel .table-wide tbody tr {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 620px) {
   .app .leave-form-section,
   .app .leave-request-estimate {
@@ -7431,14 +7518,22 @@ summary:focus-visible,
   .app .leave-request-more-actions > div {
     position: fixed;
     right: 16px;
-    bottom: 16px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
     left: 16px;
     top: auto;
     min-width: 0;
   }
 
   .app .leave-request-more-actions > div button {
-    min-height: 42px;
+    min-height: 44px;
+  }
+
+  .app .leave-request-estimate .settlement-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app .leave-workflow :is(button, summary, input, select, textarea, a) {
+    scroll-margin-bottom: calc(96px + env(safe-area-inset-bottom));
   }
 }
 
@@ -7733,6 +7828,10 @@ summary:focus-visible,
   .app .leave-workspace-grid {
     grid-template-columns: 1fr;
     height: auto;
+  }
+
+  .app .leave-request-panel {
+    order: -1;
   }
 
   .app .leave-workspace-grid > .panel,
