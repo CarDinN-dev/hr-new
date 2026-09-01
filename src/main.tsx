@@ -699,7 +699,7 @@ function App() {
     ...quickActions.map(action => ({ id: `create-${action.id}`, label: `Create ${action.label}`, hint: action.hint, keywords: "new quick create", onSelect: action.onSelect })),
   ];
   const pageHint = pageDescription(nav);
-  const navigationHidden = compactNavigation ? !sidebarOpen : sidebarCollapsed;
+  const navigationHidden = compactNavigation && !sidebarOpen;
   const pageLayout = nav === "My HR" || nav === "Settings"
     ? "focused"
     : ["Dashboard", "Approval Inbox", "Notifications", "Employees", "Attendance", "Leave", "Payroll", "Recruitment", "Performance", "Announcements", "Certificates", "Audit", "Hierarchy", "System"].includes(nav)
@@ -717,7 +717,7 @@ function App() {
         inert={navigationHidden ? true : undefined}
       >
         <div className="brand-block">
-          <span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="MedTech Corporation Trading W.L.L." /></span>
+          <Link className="sidebar-brand-link" to={navPaths.Dashboard} aria-label="Open Overview" title="Open Overview" onClick={() => setSidebarOpen(false)}><span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="" /></span></Link>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">
@@ -726,7 +726,7 @@ function App() {
             if (!items.length) return null;
             return <div className="nav-group" key={group.label}><span className="nav-group__label">{group.label}</span>{items.map(item => {
               const Icon = navIcon[item];
-              return <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}><Icon size={18} /><span>{navLabels[item]}</span></Link>;
+              return <Link key={item} to={navPaths[item]} className={item === nav ? "active" : ""} aria-label={navLabels[item]} title={navLabels[item]} aria-current={item === nav ? "page" : undefined} onClick={() => setSidebarOpen(false)}><Icon size={18} /><span>{navLabels[item]}</span></Link>;
             })}</div>;
           })}
         </nav>

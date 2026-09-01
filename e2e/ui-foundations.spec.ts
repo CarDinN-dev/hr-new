@@ -457,7 +457,7 @@ test("employee dashboard certificate action retains the documents destination", 
   await expect(page).toHaveURL(navPaths.Documents);
 });
 
-test("navigation drawer cannot block header controls across the 1280px breakpoint", async ({ page }) => {
+test("navigation rail and drawer keep their controls reachable across the 1023px breakpoint", async ({ page }) => {
   await installUiApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
@@ -467,12 +467,19 @@ test("navigation drawer cannot block header controls across the 1280px breakpoin
   await expect(sidebar).toBeVisible();
   await expect(desktopToggle).toHaveCSS("width", "44px");
   await desktopToggle.click();
-  await expect(sidebar).toBeHidden();
+  await expect(sidebar).toHaveCSS("width", "76px");
+  await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
+  await expect(sidebar).not.toHaveAttribute("inert", "");
+  await expect(sidebar.getByRole("link", { name: "My HR" })).toBeVisible();
   expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
+  await sidebar.getByRole("link", { name: "My HR" }).click();
+  await expect(page).toHaveURL(navPaths["My HR"]);
+  await page.getByRole("link", { name: "Open Overview" }).click();
+  await expect(page).toHaveURL(navPaths.Dashboard);
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
 
-  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.setViewportSize({ width: 1023, height: 720 });
   const menu = page.getByRole("button", { name: "Open menu" });
   await expect(menu).toBeVisible();
   await expect(menu).toHaveCSS("width", "44px");
@@ -495,7 +502,7 @@ test("navigation drawer cannot block header controls across the 1280px breakpoin
   await expect(sidebar).toBeHidden();
   await menu.click();
   await expect(page.locator(".scrim")).toBeVisible();
-  await page.setViewportSize({ width: 1281, height: 720 });
+  await page.setViewportSize({ width: 1024, height: 720 });
   await expect(page.locator(".scrim")).toHaveCount(0);
   await expect(sidebar).toBeVisible();
   expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
@@ -517,7 +524,7 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await installUiApi(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
 
-  for (const [path, maximum] of [[navPaths.Dashboard, 1600], [navPaths.Reports, 1440], [navPaths.Settings, 1280]] as const) {
+  for (const path of [navPaths.Dashboard, navPaths.Reports, navPaths.Settings]) {
     await page.goto(path);
     await expect(page.locator(".content")).toBeVisible();
     await expect(page.locator(".topbar-inner")).toBeVisible();
@@ -531,8 +538,7 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
         headerOffset: Math.abs((header.left + header.width / 2) - (workspace.left + workspace.width / 2)),
       };
     });
-    expect(geometry.contentWidth).toBeLessThanOrEqual(maximum);
-    expect(geometry.contentWidth).toBeGreaterThan(maximum - 1);
+    expect(geometry.contentWidth).toBeCloseTo(1460, 0);
     expect(geometry.contentOffset).toBeLessThanOrEqual(1);
     expect(geometry.headerOffset).toBeLessThanOrEqual(1);
   }
@@ -545,10 +551,11 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   const expandedWorkspace = await page.locator(".workspace").boundingBox();
   expect(await sidebar.evaluate(element => getComputedStyle(element).transitionDuration)).toContain("0.18s");
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
-  await expect(sidebar).toHaveAttribute("aria-hidden", "true");
-  await expect(sidebar).toHaveAttribute("inert", "");
-  await expect(sidebar).toBeHidden();
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  await expect(sidebar).toHaveCSS("width", "76px");
+  await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
+  await expect(sidebar).not.toHaveAttribute("inert", "");
+  await expect(sidebar.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
 
   const collapsedGeometry = await page.evaluate(() => {
     const workspace = document.querySelector<HTMLElement>(".workspace")!.getBoundingClientRect();
@@ -560,19 +567,22 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
       workspaceLeft: workspace.left,
       workspaceWidth: workspace.width,
       contentWidth: content.width,
+      contentOffset: Math.abs((content.left + content.width / 2) - (workspace.left + workspace.width / 2)),
       headerWidth: header.width,
       headerLeft: header.left,
       logoLeft: logo.left,
       dashboardWidth: dashboard.width,
     };
   });
-  expect(collapsedGeometry.workspaceLeft).toBeLessThanOrEqual(1);
-  expect(collapsedGeometry.workspaceWidth).toBeGreaterThan(expandedWorkspace!.width + 250);
-  expect(collapsedGeometry.contentWidth).toBeCloseTo(collapsedGeometry.workspaceWidth, 1);
-  expect(collapsedGeometry.headerWidth).toBeCloseTo(collapsedGeometry.workspaceWidth, 1);
-  expect(collapsedGeometry.headerLeft).toBeCloseTo(collapsedGeometry.workspaceLeft, 1);
-  expect(collapsedGeometry.logoLeft - collapsedGeometry.workspaceLeft).toBeCloseTo(24, 1);
-  expect(collapsedGeometry.dashboardWidth).toBeGreaterThanOrEqual(collapsedGeometry.workspaceWidth - 48);
+  expect(collapsedGeometry.workspaceLeft).toBeCloseTo(76, 0);
+  expect(collapsedGeometry.workspaceWidth).toBeGreaterThan(expandedWorkspace!.width + 190);
+  expect(collapsedGeometry.workspaceWidth).toBeLessThan(expandedWorkspace!.width + 210);
+  expect(collapsedGeometry.contentWidth).toBeCloseTo(1460, 0);
+  expect(collapsedGeometry.contentOffset).toBeLessThanOrEqual(1);
+  expect(collapsedGeometry.headerWidth).toBeCloseTo(collapsedGeometry.workspaceWidth - 96, 0);
+  expect(collapsedGeometry.headerLeft - collapsedGeometry.workspaceLeft).toBeCloseTo(48, 0);
+  expect(collapsedGeometry.logoLeft).toBeCloseTo(collapsedGeometry.headerLeft, 0);
+  expect(collapsedGeometry.dashboardWidth).toBeLessThanOrEqual(collapsedGeometry.contentWidth);
 
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
@@ -615,13 +625,13 @@ test("compact header controls keep their geometry through dark-mode changes", as
   expect(await headerMetrics()).toEqual(expected);
 
   await expect(page.locator(".logo-crop.wordmark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  expect(await page.locator(".sidebar").evaluate(sidebar => getComputedStyle(sidebar).backgroundImage)).toContain("rgb(23, 29, 107)");
+  await expect(page.locator(".sidebar")).toHaveCSS("background-color", "rgb(11, 24, 43)");
   await expect(page.locator(".dashboard-layout")).toBeVisible();
   await page.locator(".desktop-sidebar-toggle").click();
   await expect(page.locator(".topbar-brand-mark")).toBeVisible();
   await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
+  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
 
   await page.setViewportSize({ width: 1024, height: 720 });
   await page.reload();
@@ -641,9 +651,7 @@ test("compact header controls keep their geometry through dark-mode changes", as
     const iconBox = button.querySelector("svg")!.getBoundingClientRect();
     return { button: [buttonBox.width, buttonBox.height], icon: [iconBox.width, iconBox.height], padding: getComputedStyle(button).padding };
   })).toEqual({ button: [44, 44], icon: [20, 20], padding: "0px" });
-  await expect(page.locator(".topbar-brand-mark")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-logo-page-2.svg");
-  expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
+  await expect(page.locator(".topbar-brand-mark")).toBeHidden();
 
   await menu.click();
   const close = page.locator(".sidebar-close");
