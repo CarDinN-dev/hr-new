@@ -684,9 +684,10 @@ function App() {
   const canViewSalary = hasAnyPermission(backendSession, "employee.self.read_compensation", "payroll.read_compensation");
   const canManageAttendance = hasPermission(backendSession, "attendance.hr.manage");
   const canManageLoans = hasPermission(backendSession, "loan.hr.manage");
+  const canCreateEmployeeAccessRole = (backendSession.roles.includes("ADMIN") || backendSession.roles.includes("SUPER_ADMIN")) && hasPermission(backendSession, "user.manage");
   const openEmployeeCreate = () => {
     setNav("Employees");
-    setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
+    setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} canCreateAccessRole={canCreateEmployeeAccessRole} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
   };
   const openWithIntent = (destination: NavItem, hash: string) => void navigate({ to: navPaths[destination], hash });
   const quickActions: QuickAction[] = [
@@ -792,13 +793,13 @@ function App() {
         <div className={`content${nav === "Hierarchy" ? " hierarchy-content" : ""}`}><React.Suspense fallback={<PageLoadingSkeleton />}>
           {nav === "Dashboard" && <Dashboard state={state} session={backendSession} setNav={setNav} notify={notify} openCommand={() => setCommandOpen(true)} quickActions={quickActions} canAddEmployee={hasPermission(backendSession, "employee.hr.create")} canRunPayroll={hasPermission(backendSession, "payroll.generate")} canOpenPayroll={canAccessRoute(backendSession, "Payroll")} onAddEmployee={() => {
             setNav("Employees");
-            setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
+            setModal(<EmployeeEditor state={state} close={closeModal} notify={notify} canCreateAccessRole={canCreateEmployeeAccessRole} save={employee => setState(prev => upsertEmployee(prev, employee))} />);
           }} />}
           {nav === "My HR" && <MyHrPage state={state} session={backendSession} notify={notify} refreshWorkspace={refreshWorkspace} onOpenLeave={() => setNav("Leave")} />}
           {nav === "Approval Inbox" && <div className="experience-page"><section className="feature-heading"><div><span className="eyebrow">Workspace · Approvals</span><h2>Approval inbox</h2><p>Review decisions assigned to you across leave, certificates and payroll.</p></div></section><div className="workflow-page-grid"><ApprovalInboxPanel session={backendSession} notify={notify} /></div></div>}
           {nav === "Notifications" && <NotificationsPage session={backendSession} notify={notify} />}
           {nav === "Team" && <TeamPage state={state} session={backendSession} notify={notify} />}
-          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
+          {nav === "Employees" && <Employees state={state} setState={setState} setModal={setModal} notify={notify} close={closeModal} savePdf={savePdf} canCreate={hasPermission(backendSession, "employee.hr.create")} canCreateAccessRole={canCreateEmployeeAccessRole} canUpdate={hasPermission(backendSession, "employee.hr.update")} canTerminate={hasPermission(backendSession, "employee.hr.terminate")} canImport={hasAllPermissions(backendSession, "import.run", "employee.hr.create", "employee.hr.update", "employee.hr.read_sensitive", "department.manage", "position.manage", "payroll.configure")} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} canViewSalary={canViewSalary} session={backendSession} refreshWorkspace={refreshWorkspace} />}
           {nav === "Attendance" && <Attendance state={state} setState={setState} savePdf={savePdf} notify={notify} canManage={canManageAttendance} canExport={hasAnyPermission(backendSession, "report.export", "audit.export")} />}
           {nav === "Leave" && <LeaveWorkflowPage session={backendSession} notify={notify} />}
           {nav === "Business Trips" && <BusinessTrips state={state} setState={setState} notify={notify} />}
@@ -824,7 +825,7 @@ function App() {
               "Manager Employee Code/Name": role === "LINE_MANAGER" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : role === "EMPLOYEE" ? parent?.fields["Manager Employee Code/Name"] || "" : "",
               "Reporting Manager Employee Code/Name": role === "EMPLOYEE" && parent ? `${parent.fields["Employee Code"]} - ${employeeName(parent)}` : "",
             };
-            setModal(<EmployeeEditor state={state} template={draft} close={closeModal} notify={notify} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
+            setModal(<EmployeeEditor state={state} template={draft} close={closeModal} notify={notify} canCreateAccessRole={canCreateEmployeeAccessRole} save={employee => setState(previous => upsertEmployee(previous, employee))} />);
           }} onUpdateReporting={async (employeeId, reporting) => {
             await apiRequest(`/employees/${employeeId}`, { method: "PATCH", csrfToken: backendSession.csrfToken, body: JSON.stringify(reporting) });
             await refreshWorkspace();
@@ -1366,7 +1367,7 @@ function DepartmentFilter({ value, departments, onChange }: { value: string; dep
   </div>;
 }
 
-function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
+function Employees({ state, setState, setModal, notify, close, savePdf, canCreate, canCreateAccessRole, canUpdate, canTerminate, canImport, canExport, canViewSalary, session, refreshWorkspace }: CommonProps & { canCreate: boolean; canCreateAccessRole: boolean; canUpdate: boolean; canTerminate: boolean; canImport: boolean; canExport: boolean; canViewSalary: boolean; session: BackendSession | null | undefined; refreshWorkspace: () => Promise<void> }) {
   const { active: searchActive, search } = usePageSearch();
   const [department, setDepartment] = useState("");
   const [status, setStatus] = useState("");
@@ -1387,7 +1388,7 @@ function Employees({ state, setState, setModal, notify, close, savePdf, canCreat
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   function edit(employee?: EmployeeRecord) {
-    setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} save={next => setState(prev => upsertEmployee(prev, next))} />);
+    setModal(<EmployeeEditor state={state} employee={employee} close={close} notify={notify} canCreateAccessRole={canCreateAccessRole} save={next => setState(prev => upsertEmployee(prev, next))} />);
   }
 
   async function remove(employee: EmployeeRecord) {
@@ -1613,13 +1614,14 @@ function masterDataImportRow(row: Record<string, string>) {
   };
 }
 
-function EmployeeEditor({ state, employee, template, save, close, notify }: {
+function EmployeeEditor({ state, employee, template, save, close, notify, canCreateAccessRole = false }: {
   state: HrState;
   employee?: EmployeeRecord;
   template?: EmployeeRecord;
   save: (employee: EmployeeRecord) => void;
   close: () => void;
   notify: Notify;
+  canCreateAccessRole?: boolean;
 }) {
   const [draft, setDraft] = useState<EmployeeRecord>(() => structuredClone(employee ?? template ?? createEmptyEmployee(nextEmployeeCode(state.employees))));
   const initialDraft = useRef<EmployeeRecord | null>(null);
@@ -1712,6 +1714,7 @@ function EmployeeEditor({ state, employee, template, save, close, notify }: {
         </div>
         <div className="employee-status">
           <label>Status<select value={draft.status} onChange={event => setDraft(prev => ({ ...prev, status: event.target.value as EmployeeRecord["status"] }))}>{statusOptions.map(item => <option key={item}>{item}</option>)}</select></label>
+          {!employee && canCreateAccessRole && <label>Access role<input aria-label="Access role" value={draft.accessRoleName ?? ""} placeholder="Tender Manager" onChange={event => setDraft(prev => ({ ...prev, accessRoleName: event.target.value }))} /><small>Creates or assigns this standard role to the employee's corporate account.</small></label>}
         </div>
         <div className="employee-form">
           {employeeProfileSections.map((section, index) => (

@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccessScopeType, AuditAction, EmploymentStatus, Gender, Prisma } from '@prisma/client';
+import { AccessScopeType, AuditAction, EmploymentStatus, Gender, Prisma, RoleProtection } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { hasActiveSystemAdministratorRole } from '../../common/authorization';
 import { RequestUser } from '../../common/types/request-user.type';
 import { listArgs, paginationMeta } from '../../common/utils/crud.util';
 import { hybridListRecords, searchText } from '../../common/utils/hybrid-search.util';
@@ -47,8 +49,11 @@ export class EmployeesService {
 
   async create(dto: CreateEmployeeDto, user: RequestUser) {
     this.assertUnrestrictedEmployeeWrite(user, 'employee.hr.create');
-    await this.validateRelations(dto);
-    const email = dto.email.trim().toLowerCase();
+    const { accessRoleName, ...employeeDto } = dto;
+    const roleName = accessRoleName?.trim();
+    if (roleName) this.assertEmployeeAccessRoleCreation(user);
+    await this.validateRelations(employeeDto);
+    const email = employeeDto.email.trim().toLowerCase();
     return this.prisma.$transaction(async (tx) => {
       const matchingUser = await tx.user.findFirst({
         where: { email: { equals: email, mode: 'insensitive' }, isActive: true, deletedAt: null },
@@ -56,10 +61,20 @@ export class EmployeesService {
       });
       if (matchingUser?.employee) throw new ConflictException('User is already linked to an employee');
       const autoUser = matchingUser ?? await this.createCorporateUser(tx, email, user);
+      if (roleName && !autoUser) throw new BadRequestException('An access role requires a linked corporate login account');
+      const accessRole = roleName ? await this.resolveEmployeeAccessRole(tx, roleName, user) : undefined;
       const employee = await tx.employee.create({
-        data: { ...dto, email, userId: autoUser?.id, salary: ZERO_MONEY },
+        data: { ...employeeDto, email, userId: autoUser?.id, salary: ZERO_MONEY },
         select: this.projection(user, false),
       });
+      if (accessRole && autoUser) {
+        await tx.userRole.upsert({
+          where: { userId_roleId: { userId: autoUser.id, roleId: accessRole.id } },
+          create: { userId: autoUser.id, roleId: accessRole.id, assignedById: user.id, reason: 'Employee access role selected during creation' },
+          update: { revokedAt: null, expiresAt: null, assignedById: user.id, reason: 'Employee access role selected during creation' },
+        });
+        await this.audit.record(tx, user, { action: AuditAction.UPDATE, resourceType: 'UserRole', resourceId: autoUser.id, targetUserId: autoUser.id, summary: 'Employee access role assigned', after: { roleCode: accessRole.code, employeeId: employee.id } });
+      }
       await this.audit.record(tx, user, { action: AuditAction.CREATE, entityType: 'Employee', entityId: employee.id, summary: 'Employee created' });
       return employee;
     }).catch((error: unknown) => this.rethrowEmailConflict(error));
@@ -266,13 +281,15 @@ export class EmployeesService {
   async update(id: string, dto: UpdateEmployeeDto, user: RequestUser) {
     await this.authorization.assertEmployeeScope(user, id, { all: 'employee.hr.update' });
     const employee = await this.ensureExists(id);
-    await this.validateRelations(dto, id, employee);
-    const email = dto.email?.trim().toLowerCase();
+    const employeeDto = { ...dto };
+    delete employeeDto.accessRoleName;
+    await this.validateRelations(employeeDto, id, employee);
+    const email = employeeDto.email?.trim().toLowerCase();
     return this.prisma.$transaction(async (tx) => {
       if (email) await this.syncCorporateUser(tx, id, employee.userId, email, user);
       const updated = await tx.employee.update({
         where: { id },
-        data: { ...dto, ...(email ? { email } : {}), version: { increment: 1 } },
+        data: { ...employeeDto, ...(email ? { email } : {}), version: { increment: 1 } },
         select: this.projection(user, id === user.employeeId, id),
       });
       await this.audit.record(tx, user, { action: AuditAction.UPDATE, entityType: 'Employee', entityId: id, summary: 'Employee updated' });
@@ -415,6 +432,30 @@ export class EmployeesService {
     await this.audit.record(tx, actor, { action: AuditAction.CREATE, resourceType: 'User', resourceId: account.id, targetUserId: account.id, summary: 'Employee login created from corporate email', after: { email, localLoginEnabled: false, microsoftLoginEnabled: true, roleCode: 'EMPLOYEE' } });
     await tx.notification.create({ data: { userId: account.id, type: 'ACCOUNT_CREATED', title: 'Account created', message: 'Your HR account and Employee access were created.', resourceType: 'User', resourceId: account.id } });
     return account;
+  }
+
+  private assertEmployeeAccessRoleCreation(actor: RequestUser) {
+    if (!hasActiveSystemAdministratorRole(actor) || !this.authorization.has(actor, 'user.manage')) {
+      throw new ForbiddenException('Creating an access role while adding an employee requires an active system administrator with user management access');
+    }
+  }
+
+  private async resolveEmployeeAccessRole(tx: Prisma.TransactionClient, displayName: string, actor: RequestUser) {
+    const existing = await tx.role.findFirst({
+      where: { displayName: { equals: displayName, mode: 'insensitive' } },
+      select: { id: true, code: true, isActive: true, protection: true },
+    });
+    if (existing) {
+      if (!existing.isActive) throw new BadRequestException('The selected access role is inactive');
+      if (existing.protection !== RoleProtection.STANDARD) throw new BadRequestException('Protected access roles must be assigned from System access');
+      return existing;
+    }
+    const base = `CUSTOM_${displayName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 93) || 'ROLE'}`;
+    let code = base;
+    for (let suffix = 2; await tx.role.findUnique({ where: { code }, select: { id: true } }); suffix += 1) code = `${base.slice(0, 99 - String(suffix).length)}_${suffix}`;
+    const role = await tx.role.create({ data: { id: randomUUID(), code, displayName, createdById: actor.id } });
+    await this.audit.record(tx, actor, { action: AuditAction.CREATE, resourceType: 'Role', resourceId: role.id, summary: 'Custom role created while adding employee', after: { code: role.code, displayName: role.displayName } });
+    return role;
   }
 
   private rethrowEmailConflict(error: unknown): never {

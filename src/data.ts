@@ -31,7 +31,7 @@ export const employeeProfileSections = [
 export type AttendanceCode = "P" | "H" | "L" | "A";
 export type AttendanceApproval = "Approved" | "Not approved";
 export type EmployeeStatus = "Active" | "On Leave" | "Resigned" | "Terminated";
-export type EmployeeRecord = { id: string; status: EmployeeStatus; fields: Record<string, string>; photo?: string; roleCodes?: string[] };
+export type EmployeeRecord = { id: string; status: EmployeeStatus; fields: Record<string, string>; photo?: string; roleCodes?: string[]; accessRoleName?: string };
 export type LeaveStatus = "Pending" | "Approved" | "Rejected";
 
 export type LeaveRequest = {
@@ -339,6 +339,7 @@ export function createEmptyEmployee(code: string): EmployeeRecord {
       ...fields,
       "Employee Code": code,
       "Employee Category": "Staff",
+      "Joining Date": new Date().toISOString().slice(0, 10),
       "Company": "MedTech Corporation Trading W.L.L.",
       "Working Company Name": "MedTech Corporation Trading W.L.L.",
       "Work Shift": "Standard day",

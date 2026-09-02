@@ -132,7 +132,8 @@ function employeePayload(employee: EmployeeRecord, departmentIds: Map<string, st
   return compact({
     employeeCode: f["Employee Code"], firstName: f["First Name"], lastName: f["Last Name"],
     email: f["E-Mail ID (Work)"].trim() || `${f["Employee Code"]}@legacy.invalid`, phone: f["Personal Mobile No."] || f["Office Mobile No."],
-    hireDate: f["Joining Date"], employmentStatus: status, departmentId, positionId, lineManagerId, managerId
+    hireDate: f["Joining Date"], employmentStatus: status, departmentId, positionId, lineManagerId, managerId,
+    accessRoleName: employee.accessRoleName?.trim() || undefined
   });
 }
 

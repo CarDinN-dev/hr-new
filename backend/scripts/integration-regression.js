@@ -271,6 +271,26 @@ test('real Nest application enforces production RBAC and workflow invariants', {
   assert.equal(corporateUser.microsoftLoginEnabled, true);
   assert.equal(corporateUser.employee.id, corporateEmployee.data.id);
   assert.ok(corporateUser.roles.some((assignment) => assignment.role.code === 'EMPLOYEE'));
+  const automaticRoleToken = Date.now();
+  const automaticRoleName = `Tender Manager ${automaticRoleToken}`;
+  const automaticRoleEmail = `role-assignment-${automaticRoleToken}@med-tech.com`;
+  const employeeWithAutomaticRole = await api('/employees', {
+    method: 'POST', body: {
+      employeeCode: `ROLE-AUTO-${automaticRoleToken}`, firstName: 'Role', lastName: 'Assignment', email: automaticRoleEmail,
+      hireDate: '2026-01-01', accessRoleName: automaticRoleName,
+    },
+  }, sessions.SUPER_ADMIN);
+  assert.equal(employeeWithAutomaticRole.status, 201, JSON.stringify(employeeWithAutomaticRole.payload));
+  const automaticRole = await prisma.role.findFirstOrThrow({ where: { displayName: automaticRoleName } });
+  assert.match(automaticRole.code, /^CUSTOM_TENDER_MANAGER_/u);
+  const automaticRoleUser = await prisma.user.findUniqueOrThrow({ where: { email: automaticRoleEmail }, include: { roles: { include: { role: true } } } });
+  assert.ok(automaticRoleUser.roles.some((assignment) => assignment.roleId === automaticRole.id && assignment.revokedAt === null));
+  assert.equal((await api('/employees', {
+    method: 'POST', body: {
+      employeeCode: `ROLE-DENIED-${automaticRoleToken}`, firstName: 'Denied', lastName: 'Role', email: `role-denied-${automaticRoleToken}@med-tech.com`,
+      hireDate: '2026-01-01', accessRoleName: `Denied Role ${automaticRoleToken}`,
+    },
+  }, sessions.HR)).status, 403);
   await prisma.user.update({ where: { id: corporateUser.id }, data: { microsoftObjectId: 'temporary-directory-object' } });
   const activeSession = await prisma.authSession.create({ data: {
     userId: corporateUser.id, tokenHash: createHash('sha256').update(`corporate-email:${corporateUser.id}`).digest('hex'), provider: 'microsoft',

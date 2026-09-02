@@ -223,6 +223,7 @@ test("mobile dashboard, wide tables and shared dialog retain usable geometry", a
   await expect(dialog).toHaveJSProperty("tagName", "DIALOG");
   await expect(dialog).toHaveAttribute("aria-labelledby", /.+/);
   await expect(page.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC001");
+  await expect(page.getByLabel("Access role", { exact: true })).toBeVisible();
   const employeeEditor = await page.locator(".modal:has(> .employee-editor)").boundingBox();
   expect(employeeEditor).not.toBeNull();
   expect(employeeEditor!.x + employeeEditor!.width).toBeLessThanOrEqual(390);
@@ -988,6 +989,7 @@ test("employee add, edit, and profile dialogs use the wide layout without leavin
   expect(addDesktop!.width).toBeGreaterThanOrEqual(900);
   expect(addDesktop!.width).toBeLessThanOrEqual(920);
   await expect(addPanel.getByLabel("Employee Code", { exact: true })).toHaveValue("MTC006");
+  await expect(addPanel.getByLabel("Access role", { exact: true })).toBeVisible();
   await addPanel.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("button", { name: /Dima Osama Ahmad Alhawi Hassan Al Hajri/ }).click();

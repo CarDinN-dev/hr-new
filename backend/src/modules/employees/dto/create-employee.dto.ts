@@ -8,7 +8,9 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 
 export class CreateEmployeeDto {
@@ -68,5 +70,13 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsUUID()
   lineManagerId?: string;
+
+  @ApiPropertyOptional({ example: 'Tender Manager' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  @Matches(/^[A-Za-z][A-Za-z0-9 &'-]*$/u)
+  accessRoleName?: string;
 
 }
