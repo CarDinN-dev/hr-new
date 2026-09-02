@@ -66,7 +66,7 @@ export class EmployeesService {
         select: { id: true, employee: { select: { id: true } } },
       });
       if (matchingUser?.employee) throw new ConflictException('User is already linked to an employee');
-      const autoUser = matchingUser ?? await this.createCorporateUser(tx, email, user);
+      const autoUser = matchingUser ?? (roleName ? await this.createCorporateUser(tx, email, user) : undefined);
       if (roleName && !autoUser) throw new BadRequestException('An access role requires a linked corporate login account');
       const accessRole = roleName ? await this.resolveEmployeeAccessRole(tx, roleName, user) : undefined;
       const employee = await tx.employee.create({
@@ -425,7 +425,7 @@ export class EmployeesService {
     if (!email.endsWith(corporateEmailSuffix)) return;
     const existing = await tx.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, isActive: true, deletedAt: null }, select: { id: true, employee: { select: { id: true } } } });
     if (existing?.employee) throw new ConflictException('User is already linked to an employee');
-    const account = existing ?? await this.createCorporateUser(tx, email, actor);
+    const account = existing;
     if (account) await tx.employee.update({ where: { id: employeeId }, data: { userId: account.id } });
   }
 
