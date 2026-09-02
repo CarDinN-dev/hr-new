@@ -475,7 +475,8 @@ test("navigation rail and drawer keep their controls reachable across the 1023px
   expect(await page.locator(".topbar-brand-mark").boundingBox()).toMatchObject({ width: 168, height: 46 });
   await sidebar.getByRole("link", { name: "My HR" }).click();
   await expect(page).toHaveURL(navPaths["My HR"]);
-  await page.getByRole("link", { name: "Open Overview" }).click();
+  await expect(sidebar.getByRole("link", { name: "Open Overview" })).toHaveCount(0);
+  await sidebar.getByRole("link", { name: "Overview", exact: true }).click();
   await expect(page).toHaveURL(navPaths.Dashboard);
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(sidebar).toBeVisible();
@@ -547,7 +548,14 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await page.goto(navPaths.Dashboard);
   await expect(page.locator(".content")).toBeVisible();
   const sidebar = page.locator("#main-navigation");
+  const sidebarBrand = sidebar.locator(".sidebar-brand");
   const collapsedBrandMark = sidebar.locator(".logo-crop.wordmark");
+  await expect(sidebarBrand).toHaveAttribute("aria-hidden", "true");
+  await expect(sidebar.getByRole("link", { name: "Open Overview" })).toHaveCount(0);
+  expect(await sidebarBrand.evaluate(element => (element as HTMLElement).tabIndex)).toBe(-1);
+  await sidebarBrand.hover();
+  await expect(sidebarBrand).toHaveCSS("transform", "none");
+  await expect(sidebarBrand).toHaveCSS("transition-duration", "0s");
   const expectExpandedBrandLockup = async () => {
     await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
     await expect(collapsedBrandMark).toHaveCSS("width", "184px");
