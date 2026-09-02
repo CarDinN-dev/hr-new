@@ -554,6 +554,7 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await expect(sidebar.getByRole("link", { name: "Open Overview" })).toHaveCount(0);
   expect(await sidebarBrand.evaluate(element => (element as HTMLElement).tabIndex)).toBe(-1);
   await sidebarBrand.hover();
+  await expect(sidebarBrand).toHaveCSS("justify-content", "center");
   await expect(sidebarBrand).toHaveCSS("transform", "none");
   await expect(sidebarBrand).toHaveCSS("transition-duration", "0s");
   const expectExpandedBrandLockup = async () => {
