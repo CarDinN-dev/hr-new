@@ -10372,25 +10372,6 @@ body {
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .app .nav-list a:hover {
-    transform: translateX(3px);
-  }
-
-  .app .nav-list a:active {
-    transform: translateX(1px) scale(0.985);
-    transition-duration: 80ms;
-  }
-
-  .app .nav-list a svg {
-    transition: transform 140ms cubic-bezier(.2, .8, .2, 1);
-  }
-
-  .app .nav-list a:hover svg {
-    transform: translateX(1px);
-  }
-}
-
 /* Shared operational controls: clear state without adding a component library. */
 .app .table-wrap tbody tr:focus-within {
   background: var(--accent-soft);
