@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
 import { EmployeesController } from './employees.controller';
 import { EmployeesService } from './employees.service';
-import { SystemModule } from '../system/system.module';
+import { MicrosoftDirectoryProvisioningService } from '../system/microsoft-directory-provisioning.service';
 
 @Module({
-  imports: [SystemModule],
   controllers: [EmployeesController],
-  providers: [EmployeesService],
+  providers: [MicrosoftDirectoryProvisioningService, EmployeesService],
   exports: [EmployeesService],
 })
 export class EmployeesModule {}
