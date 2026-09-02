@@ -14,6 +14,7 @@ import { AuditService } from '../audit/audit.service';
 import { money, nonNegativeMoney, sumMoney, ZERO_MONEY } from '../../common/money';
 import { UpdateHrSensitiveDetailsDto, UpdatePayrollBankDto, UpdateSelfBasicProfileDto } from './dto/self-employee.dto';
 import { AuthorizationService } from '../authorization/authorization.service';
+import { MicrosoftDirectoryProvisioningService } from '../system/microsoft-directory-provisioning.service';
 
 const managerSummarySelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, email: true,
@@ -45,7 +46,12 @@ const corporateEmailSuffix = '@med-tech.com';
 
 @Injectable()
 export class EmployeesService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly authorization: AuthorizationService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly authorization: AuthorizationService,
+    private readonly microsoftDirectory: MicrosoftDirectoryProvisioningService,
+  ) {}
 
   async create(dto: CreateEmployeeDto, user: RequestUser) {
     this.assertUnrestrictedEmployeeWrite(user, 'employee.hr.create');
@@ -427,9 +433,12 @@ export class EmployeesService {
     if (!email.endsWith(corporateEmailSuffix) || !this.authorization.has(actor, 'user.manage')) return undefined;
     const role = await tx.role.findFirst({ where: { code: 'EMPLOYEE', isActive: true }, select: { id: true } });
     if (!role) throw new NotFoundException('Default Employee role is unavailable');
-    const account = await tx.user.create({ data: { email, localLoginEnabled: false, microsoftLoginEnabled: true } });
+    const microsoftProvisioning = await this.microsoftDirectory.provisionUser(email);
+    const account = await tx.user.create({
+      data: { email, localLoginEnabled: false, microsoftLoginEnabled: true, microsoftObjectId: microsoftProvisioning.objectId },
+    });
     await tx.userRole.create({ data: { userId: account.id, roleId: role.id, assignedById: actor.id, reason: 'Corporate employee email' } });
-    await this.audit.record(tx, actor, { action: AuditAction.CREATE, resourceType: 'User', resourceId: account.id, targetUserId: account.id, summary: 'Employee login created from corporate email', after: { email, localLoginEnabled: false, microsoftLoginEnabled: true, roleCode: 'EMPLOYEE' } });
+    await this.audit.record(tx, actor, { action: AuditAction.CREATE, resourceType: 'User', resourceId: account.id, targetUserId: account.id, summary: 'Employee login created from corporate email', after: { email, localLoginEnabled: false, microsoftLoginEnabled: true, microsoftAccessProvisioned: true, microsoftAssignmentCreated: microsoftProvisioning.assignmentCreated, roleCode: 'EMPLOYEE' } });
     await tx.notification.create({ data: { userId: account.id, type: 'ACCOUNT_CREATED', title: 'Account created', message: 'Your HR account and Employee access were created.', resourceType: 'User', resourceId: account.id } });
     return account;
   }
