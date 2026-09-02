@@ -10626,8 +10626,8 @@ body {
 .app .nav-list a.active { background: rgba(255,255,255,.13); color: #fff; box-shadow: none; }
 .app .nav-list a.active::before { background: var(--brand-red); }
 .app.sidebar-collapsed .sidebar { width: 76px; flex-basis: 76px; }
-.app.sidebar-collapsed .brand-block { padding-inline: 10px; }
-.app.sidebar-collapsed .brand-block .logo-crop.wordmark { width: 48px; padding: 6px; }
+.app.sidebar-collapsed .brand-block { grid-template-columns: minmax(0, 1fr); justify-items: center; padding-inline: 10px; }
+.app.sidebar-collapsed .brand-block .logo-crop.wordmark { width: 48px; height: 48px; padding: 0; }
 .app.sidebar-collapsed .nav-group__label,
 .app.sidebar-collapsed .nav-list a span { display: none; }
 .app.sidebar-collapsed .nav-list a { min-height: 44px; justify-content: center; padding: 0; }

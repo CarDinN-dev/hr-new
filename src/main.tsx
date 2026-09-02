@@ -717,7 +717,7 @@ function App() {
         inert={navigationHidden ? true : undefined}
       >
         <div className="brand-block">
-          <Link className="sidebar-brand-link" to={navPaths.Dashboard} aria-label="Open Overview" title="Open Overview" onClick={() => setSidebarOpen(false)}><span className="logo-crop wordmark"><img src="/logos/medtech-lockup.svg?v=4" alt="" /></span></Link>
+          <Link className="sidebar-brand-link" to={navPaths.Dashboard} aria-label="Open Overview" title="Open Overview" onClick={() => setSidebarOpen(false)}><span className="logo-crop wordmark"><img src={sidebarCollapsed ? "/logos/brand-mark.svg" : "/logos/medtech-lockup.svg?v=4"} alt="" /></span></Link>
           <button ref={sidebarCloseRef} className="sidebar-close" type="button" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="HR modules">

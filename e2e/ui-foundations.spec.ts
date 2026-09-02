@@ -546,6 +546,24 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await page.goto(navPaths.Dashboard);
   await expect(page.locator(".content")).toBeVisible();
   const sidebar = page.locator("#main-navigation");
+  const collapsedBrandMark = sidebar.locator(".logo-crop.wordmark");
+  const expectCollapsedBrandMark = async () => {
+    await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/brand-mark.svg");
+    await expect(collapsedBrandMark).toHaveCSS("width", "48px");
+    await expect(collapsedBrandMark).toHaveCSS("height", "48px");
+    await expect(collapsedBrandMark).toHaveCSS("padding", "0px");
+    expect(await page.evaluate(() => {
+      const rail = document.querySelector<HTMLElement>("#main-navigation")!.getBoundingClientRect();
+      const mark = document.querySelector<HTMLElement>("#main-navigation .logo-crop.wordmark")!.getBoundingClientRect();
+      return Math.abs((mark.left + mark.width / 2) - (rail.left + rail.width / 2));
+    })).toBeLessThanOrEqual(1);
+  };
+
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expectCollapsedBrandMark();
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const expandedWorkspace = await page.locator(".workspace").boundingBox();
@@ -555,6 +573,7 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
   await expect(sidebar).not.toHaveAttribute("inert", "");
   await expect(sidebar.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
+  await expectCollapsedBrandMark();
   await expect(page.locator(".topbar-brand-mark img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
 
   const collapsedGeometry = await page.evaluate(() => {
