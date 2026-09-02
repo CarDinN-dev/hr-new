@@ -42,7 +42,7 @@
         "attendance.self.read", "attendance.self.create", "attendance.self.correct_request",
         "leave.self.read", "leave.self.create", "leave.self.cancel",
         "service_request.self.read", "service_request.self.create", "service_request.self.cancel", "service_request.self.download",
-        "document.self.read", "document.self.manage", "contract.self.read", "performance.self.read",
+        "document.self.read", "document.self.manage", "contract.self.read",
         "notification.self.read", "notification.self.manage"
       ]
     },

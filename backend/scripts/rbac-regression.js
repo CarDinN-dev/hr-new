@@ -53,6 +53,7 @@ test('role inheritance and business separation match the production matrix', () 
   for (const permission of ['employee.self.read', 'leave.self.create', 'announcement.read', 'notification.self.read']) {
     assert.equal(employee.has(permission), true, `EMPLOYEE requires ${permission}`);
   }
+  assert.equal(employee.has('performance.self.read'), false, 'EMPLOYEE must not access performance reviews');
   for (const permission of ['employee.self.read_bank', 'employee.self.update_bank']) {
     assert.equal(employee.has(permission), false, `EMPLOYEE must not access self-service bank details`);
   }
