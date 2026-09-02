@@ -548,10 +548,21 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await expect(page.locator(".content")).toBeVisible();
   const sidebar = page.locator("#main-navigation");
   const collapsedBrandMark = sidebar.locator(".logo-crop.wordmark");
+  const expectExpandedBrandLockup = async () => {
+    await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+    await expect(collapsedBrandMark).toHaveCSS("width", "184px");
+    await expect(collapsedBrandMark).toHaveCSS("height", "50px");
+    await expect(collapsedBrandMark).toHaveCSS("padding", "0px");
+    expect(await page.evaluate(() => {
+      const sidebar = document.querySelector<HTMLElement>("#main-navigation")!.getBoundingClientRect();
+      const lockup = document.querySelector<HTMLElement>("#main-navigation .logo-crop.wordmark")!.getBoundingClientRect();
+      return Math.abs((lockup.left + lockup.width / 2) - (sidebar.left + sidebar.width / 2));
+    })).toBeLessThanOrEqual(1);
+  };
   const expectCollapsedBrandMark = async () => {
     await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/brand-mark.svg");
-    await expect(collapsedBrandMark).toHaveCSS("width", "48px");
-    await expect(collapsedBrandMark).toHaveCSS("height", "48px");
+    await expect(collapsedBrandMark).toHaveCSS("width", "40px");
+    await expect(collapsedBrandMark).toHaveCSS("height", "40px");
     await expect(collapsedBrandMark).toHaveCSS("padding", "0px");
     expect(await page.evaluate(() => {
       const rail = document.querySelector<HTMLElement>("#main-navigation")!.getBoundingClientRect();
@@ -560,10 +571,11 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
     })).toBeLessThanOrEqual(1);
   };
 
+  await expectExpandedBrandLockup();
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expectCollapsedBrandMark();
   await page.getByRole("button", { name: "Expand sidebar" }).click();
-  await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+  await expectExpandedBrandLockup();
 
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -608,6 +620,14 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await expect(sidebar).not.toHaveAttribute("aria-hidden", "true");
   await expect(sidebar).not.toHaveAttribute("inert", "");
   await expect(sidebar).toBeVisible();
+  await expectExpandedBrandLockup();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.locator(".topbar-brand-mark")).toBeHidden();
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(sidebar.locator(".logo-crop.wordmark img")).toHaveAttribute("src", "/logos/medtech-lockup.svg?v=4");
+  expect(await sidebar.locator(".logo-crop.wordmark").boundingBox()).toMatchObject({ width: 165, height: 50 });
 });
 
 test("compact header controls keep their geometry through dark-mode changes", async ({ page }) => {

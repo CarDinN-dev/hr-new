@@ -11571,3 +11571,37 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
     border-radius: 14px;
   }
 }
+
+@media (min-width: 1024px) {
+  .app .brand-block {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 10px;
+  }
+
+  .app .sidebar-brand-link {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .app .brand-block .logo-crop.wordmark {
+    width: 184px;
+    height: 50px;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .app.sidebar-collapsed .brand-block {
+    padding-inline: 0;
+  }
+
+  .app.sidebar-collapsed .brand-block .logo-crop.wordmark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .app.sidebar-collapsed .sidebar-brand-link:hover,
+  .app.sidebar-collapsed .sidebar-brand-link:active {
+    transform: none;
+  }
+}
