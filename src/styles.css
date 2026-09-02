@@ -11542,15 +11542,15 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
 @media (min-width: 1024px) {
   .app .brand-block {
     grid-template-columns: minmax(0, 1fr);
-    justify-items: center;
-    padding-inline: 10px;
+    justify-items: start;
+    padding-inline: 12px;
   }
 
   .app .brand-block .sidebar-brand {
     display: flex;
     width: 100%;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     transform: none;
     transition: none;
   }
@@ -11565,6 +11565,10 @@ kbd { display: inline-flex; min-width: 23px; min-height: 21px; align-items: cent
 
   .app.sidebar-collapsed .brand-block {
     padding-inline: 0;
+  }
+
+  .app.sidebar-collapsed .brand-block .sidebar-brand {
+    justify-content: center;
   }
 
   .app.sidebar-collapsed .brand-block .logo-crop.wordmark {

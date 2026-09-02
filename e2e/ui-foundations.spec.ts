@@ -554,7 +554,7 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   await expect(sidebar.getByRole("link", { name: "Open Overview" })).toHaveCount(0);
   expect(await sidebarBrand.evaluate(element => (element as HTMLElement).tabIndex)).toBe(-1);
   await sidebarBrand.hover();
-  await expect(sidebarBrand).toHaveCSS("justify-content", "center");
+  await expect(sidebarBrand).toHaveCSS("justify-content", "flex-start");
   await expect(sidebarBrand).toHaveCSS("transform", "none");
   await expect(sidebarBrand).toHaveCSS("transition-duration", "0s");
   const expectExpandedBrandLockup = async () => {
@@ -565,8 +565,8 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
     expect(await page.evaluate(() => {
       const sidebar = document.querySelector<HTMLElement>("#main-navigation")!.getBoundingClientRect();
       const lockup = document.querySelector<HTMLElement>("#main-navigation .logo-crop.wordmark")!.getBoundingClientRect();
-      return Math.abs((lockup.left + lockup.width / 2) - (sidebar.left + sidebar.width / 2));
-    })).toBeLessThanOrEqual(1);
+      return lockup.left - sidebar.left;
+    })).toBeCloseTo(24, 0);
   };
   const expectCollapsedBrandMark = async () => {
     await expect(collapsedBrandMark.locator("img")).toHaveAttribute("src", "/logos/brand-mark.svg");
