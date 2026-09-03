@@ -650,8 +650,18 @@ test("dashboard donut reveals the hovered segment", async ({ page }) => {
     department: { id: "department-2", name: "Information Technology", code: "IT" }, position: { title: "IT Specialist", code: "IT-SPEC" },
   }]);
   await page.goto("/");
+  await expect(page.locator(".headcount-chart__context")).toHaveText("Total");
+  await expect(page.locator(".headcount-chart__context")).toHaveAttribute("y", "74");
+  await expect(page.locator(".headcount-chart__value")).toHaveAttribute("y", "108");
+  await expect(page.locator(".headcount-chart__label")).toHaveAttribute("y", "130");
+  expect(await page.locator(".headcount-chart__segment").evaluateAll(segments => segments.map(segment => ({ dasharray: segment.getAttribute("stroke-dasharray"), linecap: segment.getAttribute("stroke-linecap") })))).toEqual([
+    { dasharray: "48.5 51.5", linecap: "butt" },
+    { dasharray: "48.5 51.5", linecap: "butt" },
+  ]);
   await page.getByRole("button", { name: "Human Resources 1 50%" }).hover();
   await expect(page.locator(".headcount-chart svg")).toHaveAttribute("aria-label", "1 Human Resources, 50% of 2 active employees");
+  await expect(page.locator(".headcount-chart__context")).toHaveText("Human Resources");
+  await expect(page.locator(".headcount-chart__label")).toHaveText("50%");
 });
 
 test("compact header controls keep their geometry through dark-mode changes", async ({ page }) => {

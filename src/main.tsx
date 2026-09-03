@@ -3323,15 +3323,22 @@ function DashboardDonut({ items, label = "assigned", noun = "employees" }: { ite
   const displayValue = activeSegment?.count ?? total;
   const displayLabel = activeSegment?.department ?? label;
   const displayPercentage = activeSegment ? Math.round(activeSegment.share) : 100;
+  const smallestShare = Math.min(...segments.map(segment => segment.share).filter(share => share > 0));
+  const segmentGap = segments.length > 1 && Number.isFinite(smallestShare) ? Math.min(1.5, smallestShare / 2) : 0;
+  const centerContext = activeSegment?.department ?? "Total";
+  const visibleContext = centerContext.length > 18 ? `${centerContext.slice(0, 17)}…` : centerContext;
   const max = Math.max(1, ...ordered.map(item => item.count));
   return <div className="headcount-visual" onMouseLeave={() => setActiveDepartment(null)}>
     <div className="headcount-chart">
       <svg viewBox="0 0 200 200" role="img" aria-label={`${displayValue} ${displayLabel}, ${displayPercentage}% of ${total} ${label} ${noun}`}>
         <circle className="headcount-chart__track" cx="100" cy="100" r="75" pathLength="100" />
-        {segments.map(segment => <circle key={segment.department} className={`headcount-chart__segment${activeSegment?.department === segment.department ? " is-active" : ""}`} cx="100" cy="100" r="75" pathLength="100" stroke={segment.color} color={segment.color} strokeDasharray={`${segment.share} ${100 - segment.share}`} strokeDashoffset={-segment.offset} strokeLinecap="round" tabIndex={0} aria-label={`${segment.department}: ${segment.count} ${noun}, ${Math.round(segment.share)}%`} onMouseEnter={() => setActiveDepartment(segment.department)} onFocus={() => setActiveDepartment(segment.department)} onBlur={() => setActiveDepartment(null)}><title>{segment.department}: {segment.count} {noun}</title></circle>)}
-        <text className="headcount-chart__context" x="100" y="88" textAnchor="middle">{displayLabel}</text>
+        {segments.map(segment => {
+          const dashLength = Math.max(segment.share - segmentGap, 0);
+          return <circle key={segment.department} className={`headcount-chart__segment${activeSegment?.department === segment.department ? " is-active" : ""}`} cx="100" cy="100" r="75" pathLength="100" stroke={segment.color} color={segment.color} strokeDasharray={`${dashLength} ${100 - dashLength}`} strokeDashoffset={-segment.offset} strokeLinecap={segments.length > 1 ? "butt" : "round"} tabIndex={0} aria-label={`${segment.department}: ${segment.count} ${noun}, ${Math.round(segment.share)}%`} onMouseEnter={() => setActiveDepartment(segment.department)} onFocus={() => setActiveDepartment(segment.department)} onBlur={() => setActiveDepartment(null)}><title>{segment.department}: {segment.count} {noun}</title></circle>;
+        })}
+        <text className="headcount-chart__context" x="100" y="74" textAnchor="middle">{visibleContext}</text>
         <text className="headcount-chart__value" x="100" y="108" textAnchor="middle">{displayValue}</text>
-        <text className="headcount-chart__label" x="100" y="126" textAnchor="middle">{activeSegment ? `${displayPercentage}%` : label}</text>
+        <text className="headcount-chart__label" x="100" y="130" textAnchor="middle">{activeSegment ? `${displayPercentage}%` : label}</text>
       </svg>
     </div>
     <ol className="headcount-ranking">
