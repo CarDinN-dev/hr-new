@@ -7044,6 +7044,10 @@ summary:focus-visible,
   gap: 12px;
 }
 
+.app .leave-request-grid > label > .employee-picker {
+  margin-top: 6px;
+}
+
 .app .leave-request-panel .employee-picker__options {
   z-index: 30;
   border-radius: 12px;
@@ -7445,6 +7449,12 @@ summary:focus-visible,
   justify-content: flex-start;
   padding: 6px 9px;
   font-size: 0.75rem;
+}
+
+/* ponytail: Leave keeps native menus; only their table may overflow. */
+.app .leave-requests-panel .table-actions:has(.leave-request-more-actions),
+.app .leave-requests-panel .leave-request-row:has(.leave-request-more-actions) {
+  overflow: visible;
 }
 
 @container (max-width: 1100px) {
@@ -8449,6 +8459,10 @@ summary:focus-visible,
     --control-height: 44px;
   }
 
+  .app .employee-picker {
+    --employee-picker-action-size: var(--control-height);
+  }
+
   .app .pagination-actions,
   .app .notification-actions,
   .app .company-role-actions {
@@ -8456,8 +8470,6 @@ summary:focus-visible,
   }
 
   .app .pagination-actions button,
-  .app .employee-picker .employee-picker__toggle,
-  .app .employee-picker .employee-picker__clear,
   .app .company-role-search button,
   .app .company-role-search-navigation button,
   .app .company-role-canvas-controls button,
@@ -8467,6 +8479,17 @@ summary:focus-visible,
     height: 44px;
     min-height: 44px;
     padding: 0;
+  }
+
+  .app .employee-picker .employee-picker__toggle,
+  .app .employee-picker .employee-picker__clear {
+    width: var(--employee-picker-action-size);
+    min-width: var(--employee-picker-action-size);
+    height: var(--employee-picker-action-size);
+    min-height: var(--employee-picker-action-size);
+    padding: 0;
+    top: 50%;
+    transform: translateY(-50%);
   }
 
   .app .employee-picker input {
@@ -8482,7 +8505,7 @@ summary:focus-visible,
   }
 
   .app .employee-picker__clear {
-    right: 44px;
+    right: var(--employee-picker-action-size);
   }
 
   .app .attendance-row > [data-label]::before {
