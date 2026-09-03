@@ -22,6 +22,13 @@ function envelope(data: unknown) {
   return { success: true, data };
 }
 
+async function selectLeaveType(page: Page, id: string) {
+  const type = leaveTypes.find(item => item.id === id);
+  if (!type) throw new Error(`Unknown leave type: ${id}`);
+  await page.getByRole("button", { name: "Leave type" }).click();
+  await page.getByRole("option", { name: type.name }).click();
+}
+
 async function installLeaveApi(page: Page, { includeMoreActions = false }: { includeMoreActions?: boolean } = {}) {
   const hr = { id: "hr-user", email: "hr@example.invalid", displayName: "HR User", roles: ["HR"], permissions: ["session.self.read", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.manage", "leave.hr.override", ...(includeMoreActions ? ["leave.reassign"] : [])], departmentScopeIds: [], sessionId: "hr-session", authProvider: "local", authorizationVersion: 1, employeeId: "hr-employee" };
   let storedAttachments: Array<{ id: string; fileName: string; fileUrl: string; contentType: string; sizeBytes: number; scanStatus: string; createdAt: string }> = [];
@@ -65,8 +72,10 @@ test("Leave dropdowns stay reachable at desktop, tablet, and phone widths", asyn
   const picker = page.locator(".leave-request-panel .employee-picker");
   const option = page.getByRole("option", { name: "EMP-002 — Amina Saleh" });
   const moreActions = page.locator(".leave-request-more-actions").first();
+  const leaveTypeTrigger = page.getByRole("button", { name: "Leave type" });
+  const leaveTypeMenu = page.locator(".leave-type-picker__options");
 
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 375, height: 812 }]) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 375, height: 812 }]) {
     await page.setViewportSize(viewport);
     await picker.scrollIntoViewIfNeeded();
     await picker.getByRole("button", { name: "Show choices" }).hover();
@@ -88,6 +97,29 @@ test("Leave dropdowns stay reachable at desktop, tablet, and phone widths", asyn
     await page.keyboard.press("Escape");
     await expect(picker.getByRole("combobox")).toBeFocused();
     await expect(option).toHaveCount(0);
+
+    await leaveTypeTrigger.scrollIntoViewIfNeeded();
+    await leaveTypeTrigger.click();
+    await expect(leaveTypeMenu).toBeVisible();
+    expect(await leaveTypeMenu.evaluate(menu => {
+      const bounds = menu.getBoundingClientRect();
+      const trigger = document.querySelector<HTMLButtonElement>(".leave-type-picker__trigger")!.getBoundingClientRect();
+      return bounds.top >= trigger.bottom && bounds.bottom <= window.innerHeight && Array.from(menu.querySelectorAll<HTMLElement>("[role=option]")).every(item => {
+        const option = item.getBoundingClientRect();
+        const target = document.elementFromPoint(option.left + option.width / 2, option.top + option.height / 2);
+        return option.top >= bounds.top && option.bottom <= bounds.bottom && (target === item || item.contains(target));
+      });
+    })).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(leaveTypeTrigger).toBeFocused();
+    await leaveTypeTrigger.press("ArrowDown");
+    await expect(leaveTypeMenu).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(leaveTypeTrigger).toHaveText("Sick leave");
+    await expect(page.getByLabel("Attachment (required)")).toBeVisible();
+    await selectLeaveType(page, "annual");
+    await expect(page.getByLabel("Attachment (required)")).toHaveCount(0);
     expect(await page.locator(".leave-request-panel :is(input, select)").evaluateAll(controls => controls.every(control => {
       const bounds = control.getBoundingClientRect();
       return bounds.width > 0 && bounds.height >= (window.innerWidth <= 720 ? 44 : 36) && control.scrollWidth <= control.clientWidth;
@@ -129,7 +161,7 @@ test("HR submits for an employee and immediately approves without a password", a
   expect(await page.locator(".leave-request-estimate .settlement-preview").evaluate(grid => new Set(Array.from(grid.children, card => card.getBoundingClientRect().top)).size)).toBe(1);
   await expect(page.getByRole("columnheader", { name: "Employee" })).toBeVisible();
   await expect(page.locator(".leave-request-status .badge.warn")).toHaveText("Pending Line Manager");
-  await page.getByLabel("Leave type").selectOption("sick");
+  await selectLeaveType(page, "sick");
   await expect(page.getByLabel("Attachment (required)")).toBeVisible();
   await expect(page.getByLabel("Attachment (required)")).toHaveAttribute("accept", ".pdf,.jpg,.jpeg,.png,.webp");
   await expect(page.getByLabel("Reason")).toHaveCount(0);
@@ -137,9 +169,9 @@ test("HR submits for an employee and immediately approves without a password", a
   await expect(page.getByText("medical-note.pdf", { exact: true })).toBeVisible();
   await expect(page.getByText("Ready to save with this request", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Remove selected attachment" }).click();
-  await page.getByLabel("Leave type").selectOption("compassionate");
+  await selectLeaveType(page, "compassionate");
   await expect(page.getByLabel("Duration")).toBeDisabled();
-  await page.getByLabel("Leave type").selectOption("annual");
+  await selectLeaveType(page, "annual");
   await page.getByRole("textbox", { name: "From" }).fill("2099-04-20");
   await page.getByRole("textbox", { name: "To" }).fill("2099-05-09");
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");
@@ -206,7 +238,7 @@ test("leave attachments stay on the existing persistence paths", async ({ page }
 
   await page.getByLabel("Employee").fill("Amina");
   await page.getByRole("option", { name: "EMP-002 — Amina Saleh" }).click();
-  await page.getByLabel("Leave type").selectOption("sick");
+  await selectLeaveType(page, "sick");
   await page.getByLabel("Attachment (required)").setInputFiles({ name: "medical-note.pdf", mimeType: "application/pdf", buffer: Buffer.from("medical note") });
   await expect(page.getByText("Your attachment will be saved with this request.")).toBeVisible();
   const submitted = page.waitForRequest(request => request.url().endsWith("/api/v1/leave/submit") && request.method() === "POST");

@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FileText, Paperclip, ShieldCheck, Upload, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, FileText, Paperclip, ShieldCheck, Upload, X } from "lucide-react";
 import { apiList, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { EmployeePicker } from "../employee-picker";
@@ -63,6 +64,66 @@ function fileSize(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function LeaveTypePicker({ value, options, onChange }: { value: string; options: readonly LeaveTypeRecord[]; onChange: (value: string) => void }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 0 });
+  const selected = options.find(type => type.id === value);
+
+  function placeMenu() {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    let bounds = trigger.getBoundingClientRect();
+    if (window.innerHeight - bounds.bottom < 52) {
+      trigger.scrollIntoView({ block: "center", inline: "nearest" });
+      bounds = trigger.getBoundingClientRect();
+    }
+    setPosition({ top: bounds.bottom + 4, left: bounds.left, width: bounds.width, maxHeight: Math.min(288, window.innerHeight - bounds.bottom - 8) });
+  }
+
+  function showMenu() {
+    setActiveIndex(Math.max(0, options.findIndex(type => type.id === value)));
+    placeMenu();
+    setOpen(true);
+  }
+
+  function choose(index: number) {
+    const type = options[index];
+    if (!type) return;
+    onChange(type.id);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!triggerRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("resize", placeMenu);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener("resize", placeMenu);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [open]);
+
+  return <div className="leave-type-picker">
+    <button ref={triggerRef} className="leave-type-picker__trigger" type="button" aria-label="Leave type" aria-haspopup="listbox" aria-controls={menuId} aria-expanded={open} disabled={!options.length} onClick={() => open ? setOpen(false) : showMenu()} onKeyDown={event => {
+      if (event.key === "Escape" && open) { event.preventDefault(); setOpen(false); }
+      else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!open) showMenu();
+        else setActiveIndex(current => (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length);
+      } else if ((event.key === "Enter" || event.key === " ") && open) { event.preventDefault(); choose(activeIndex); }
+    }}><span>{selected?.name ?? "Choose leave type"}</span><ChevronDown size={16} aria-hidden="true" /></button>
+    {open && createPortal(<div ref={menuRef} id={menuId} className="leave-type-picker__options" role="listbox" aria-label="Leave type choices" style={position}>{options.map((type, index) => <button className={[type.id === value && "is-selected", index === activeIndex && "is-active"].filter(Boolean).join(" ")} type="button" role="option" aria-selected={type.id === value} key={type.id} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(index)}>{type.name}</button>)}</div>, document.body)}
+  </div>;
 }
 
 function requestBody(form: { employeeId?: string; leaveTypeId: string; startDate: string; endDate: string; isHalfDay: boolean; reason?: string }, file?: File | null, expectedVersion?: number) {
@@ -196,7 +257,7 @@ export function LeaveWorkflowPage({ session, notify }: { session: BackendSession
         <div className="leave-request-sections">
           <section className="leave-form-section" aria-labelledby="leave-request-details"><div className="leave-form-section__heading"><h4 id="leave-request-details">Request details</h4><p>Choose who the leave is for and the applicable leave type.</p></div><div className="form-grid compact leave-request-grid">
             {canSubmitForEmployee && <label>Employee<EmployeePicker value={form.employeeId} onChange={employeeId => setForm(previous => ({ ...previous, employeeId }))} options={employees.data?.map(employee => ({ id: employee.id, label: `${employee.employeeCode} — ${employee.firstName} ${employee.lastName}` })) ?? []} clearable /></label>}
-            <label className={canSubmitForEmployee ? undefined : "wide"}>Leave type<select value={selectedLeaveTypeId} onChange={event => { const type = leaveTypes.data?.find(item => item.id === event.target.value); setForm(previous => ({ ...previous, leaveTypeId: event.target.value, isHalfDay: halfDayDisabled(type) ? false : previous.isHalfDay })); setAttachment(null); }}>{leaveTypes.data?.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+            <label className={canSubmitForEmployee ? undefined : "wide"}>Leave type<LeaveTypePicker value={selectedLeaveTypeId} options={leaveTypes.data ?? []} onChange={leaveTypeId => { const type = leaveTypes.data?.find(item => item.id === leaveTypeId); setForm(previous => ({ ...previous, leaveTypeId, isHalfDay: halfDayDisabled(type) ? false : previous.isHalfDay })); setAttachment(null); }} /></label>
           </div></section>
           <section className="leave-form-section" aria-labelledby="leave-request-dates"><div className="leave-form-section__heading"><h4 id="leave-request-dates">When</h4><p>Set the date range and duration for this request.</p></div><div className="form-grid compact leave-request-grid">
             <label>From<input type="date" value={form.startDate} onChange={event => setForm(previous => ({ ...previous, startDate: event.target.value, isHalfDay: hasDateRange(event.target.value, previous.endDate) ? false : previous.isHalfDay }))} /></label>
