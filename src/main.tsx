@@ -1092,11 +1092,11 @@ function Dashboard({ state, session, setNav, notify, openCommand, quickActions, 
   const canOpenRecruitment = canReadRecruitment && canAccessRoute(session, "Recruitment");
 
   const approvalQueue = canOpenApprovalInbox ? <div className="dashboard-row dashboard-row--single dashboard-row--priority" data-dashboard-widget="approval-inbox"><ApprovalInboxPanel session={session} notify={notify} /></div> : null;
-  const workforcePanel = canReadScopedEmployees ? <section className="panel headcount-panel dashboard-widget" data-dashboard-widget="workforce-distribution"><div className="panel-head"><div><h3>{persona === "manager" ? "Management scope" : persona === "cpo" ? "People organization" : persona === "coo" ? "Organization by department" : "Workforce distribution"}</h3><span>{active.length} active employees in your permitted scope</span></div></div>{headcount.length ? <HeadcountDonut items={headcount} label={managementDashboard ? "in scope" : "active"} noun="employees" /> : <div className="empty">No employee distribution is available.</div>}</section> : null;
+  const workforcePanel = canReadScopedEmployees ? <section className="panel headcount-panel dashboard-widget" data-dashboard-widget="workforce-distribution"><div className="panel-head"><div><h3>{persona === "manager" ? "Management scope" : persona === "cpo" ? "People organization" : persona === "coo" ? "Organization by department" : "Workforce distribution"}</h3><span>{active.length} active employees in your permitted scope</span></div></div>{headcount.length ? <DashboardDonut items={headcount} label={managementDashboard ? "in scope" : "active"} noun="employees" /> : <div className="empty">No employee distribution is available.</div>}</section> : null;
   const availabilityPanel = broadLeave ? <section className="panel dashboard-widget" data-dashboard-widget="leave-availability"><div className="panel-head"><div><h3>{persona === "line-manager" ? "Team availability" : persona === "manager" ? "Upcoming scoped leave" : persona === "coo" ? "Organization leave outlook" : "Leave overview"}</h3><span>{upcomingLeave.length} current or upcoming approved record(s)</span></div>{canAccessRoute(session, "Leave") && <button type="button" onClick={() => setNav("Leave")}>View leave</button>}</div>
     <DataTable label="Approved leave availability" empty="No current or upcoming approved leave." columns={["Employee", "Leave type", "Dates", "Days"]} rows={upcomingLeave.slice(0, 6).map(leave => [`${leave.employee.firstName} ${leave.employee.lastName}`, leave.leaveType.name, `${formatDate(leave.startDate)} – ${formatDate(leave.endDate)}`, leave.totalDays])} />
   </section> : null;
-  const leaveDistributionPanel = broadLeave ? <section className="panel dashboard-widget" data-dashboard-widget="leave-distribution"><div className="panel-head"><div><h3>{persona === "cpo" ? "People leave distribution" : persona === "coo" ? "Organization leave summary" : "Leave distribution"}</h3><span>Requests visible within your current scope.</span></div></div>{leaveDistribution.length ? <HeadcountDonut items={leaveDistribution} label="requests" noun="records" /> : <div className="empty">No leave requests are available.</div>}</section> : null;
+  const leaveDistributionPanel = broadLeave ? <section className="panel dashboard-widget" data-dashboard-widget="leave-distribution"><div className="panel-head"><div><h3>{persona === "cpo" ? "People leave distribution" : persona === "coo" ? "Organization leave summary" : "Leave distribution"}</h3><span>Requests visible within your current scope.</span></div></div>{leaveDistribution.length ? <DashboardDonut items={leaveDistribution} label="requests" noun="records" /> : <div className="empty">No leave requests are available.</div>}</section> : null;
   const attendancePanel = canReadAttendanceSummary ? <section className="panel dashboard-attendance-panel dashboard-widget" data-dashboard-widget="attendance-summary"><div className="panel-head"><div><h3>{executiveDashboard ? "Attendance and compliance" : "Attendance overview"}</h3><span>High-level organization summary only.</span></div>{canOpenAttendance && <button type="button" onClick={() => setNav("Attendance")}>Open attendance</button>}</div>
     {attendance.isPending ? <div className="empty">Loading attendance…</div> : attendance.isError ? <div className="empty">Attendance could not be loaded.</div> : <div className="dashboard-attendance-summary">{executiveDashboard && <div><span>Coverage</span><strong>{attendanceCompliance === null ? "—" : `${attendanceCompliance}%`}</strong></div>}<div><span>Present</span><strong>{attendancePresent}</strong></div><div><span>Absent</span><strong>{attendanceAbsent}</strong></div><div><span>Late</span><strong>{attendanceLate}</strong></div></div>}
   </section> : null;
@@ -3304,7 +3304,8 @@ function DataTable({ columns, rows, empty, label = "Data table" }: { columns: Re
   return <div className={`table-wrap${wide ? " table-wide" : ""}${actions ? " table-actions" : ""}`} role="region" aria-label={label}><table><thead><tr>{columns.map((column, index) => <th key={index}>{column}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td data-label={typeof columns[cellIndex] === "string" ? columns[cellIndex] : `Field ${cellIndex + 1}`} key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
-function HeadcountDonut({ items, label = "assigned", noun = "employees" }: { items: Array<{ department: string; count: number }>; label?: string; noun?: string }) {
+function DashboardDonut({ items, label = "assigned", noun = "employees" }: { items: Array<{ department: string; count: number }>; label?: string; noun?: string }) {
+  const [activeDepartment, setActiveDepartment] = useState<string | null>(null);
   const ordered = [...items].sort((left, right) => right.count - left.count || left.department.localeCompare(right.department));
   const total = ordered.reduce((sum, item) => sum + item.count, 0);
   const primary = ordered.slice(0, 5);
@@ -3318,18 +3319,23 @@ function HeadcountDonut({ items, label = "assigned", noun = "employees" }: { ite
     offset += share;
     return segment;
   });
+  const activeSegment = segments.find(segment => segment.department === activeDepartment);
+  const displayValue = activeSegment?.count ?? total;
+  const displayLabel = activeSegment?.department ?? label;
+  const displayPercentage = activeSegment ? Math.round(activeSegment.share) : 100;
   const max = Math.max(1, ...ordered.map(item => item.count));
-  return <div className="headcount-visual">
+  return <div className="headcount-visual" onMouseLeave={() => setActiveDepartment(null)}>
     <div className="headcount-chart">
-      <svg viewBox="0 0 120 120" role="img" aria-label={`${total} ${label} ${noun} across ${ordered.length} groups`}>
-        <circle className="headcount-chart__track" cx="60" cy="60" r="43" pathLength="100" />
-        {segments.map(segment => <circle key={segment.department} className="headcount-chart__segment" cx="60" cy="60" r="43" pathLength="100" stroke={segment.color} strokeDasharray={`${segment.share} ${100 - segment.share}`} strokeDashoffset={-segment.offset}><title>{segment.department}: {segment.count} employees</title></circle>)}
-        <text className="headcount-chart__value" x="60" y="57" textAnchor="middle">{total}</text>
-        <text className="headcount-chart__label" x="60" y="70" textAnchor="middle">{label}</text>
+      <svg viewBox="0 0 200 200" role="img" aria-label={`${displayValue} ${displayLabel}, ${displayPercentage}% of ${total} ${label} ${noun}`}>
+        <circle className="headcount-chart__track" cx="100" cy="100" r="75" pathLength="100" />
+        {segments.map(segment => <circle key={segment.department} className={`headcount-chart__segment${activeSegment?.department === segment.department ? " is-active" : ""}`} cx="100" cy="100" r="75" pathLength="100" stroke={segment.color} color={segment.color} strokeDasharray={`${segment.share} ${100 - segment.share}`} strokeDashoffset={-segment.offset} strokeLinecap="round" tabIndex={0} aria-label={`${segment.department}: ${segment.count} ${noun}, ${Math.round(segment.share)}%`} onMouseEnter={() => setActiveDepartment(segment.department)} onFocus={() => setActiveDepartment(segment.department)} onBlur={() => setActiveDepartment(null)}><title>{segment.department}: {segment.count} {noun}</title></circle>)}
+        <text className="headcount-chart__context" x="100" y="88" textAnchor="middle">{displayLabel}</text>
+        <text className="headcount-chart__value" x="100" y="108" textAnchor="middle">{displayValue}</text>
+        <text className="headcount-chart__label" x="100" y="126" textAnchor="middle">{activeSegment ? `${displayPercentage}%` : label}</text>
       </svg>
     </div>
     <ol className="headcount-ranking">
-      {segments.map(segment => <li key={segment.department}><i style={{ background: segment.color }} /><span>{segment.department}</span><strong>{segment.count}</strong><small>{total ? Math.round(segment.count / total * 100) : 0}%</small></li>)}
+      {segments.map(segment => <li key={segment.department}><button type="button" className={activeSegment?.department === segment.department ? "is-active" : ""} aria-pressed={activeSegment?.department === segment.department} onMouseEnter={() => setActiveDepartment(segment.department)} onFocus={() => setActiveDepartment(segment.department)} onClick={() => setActiveDepartment(current => current === segment.department ? null : segment.department)}><i style={{ background: segment.color }} /><span>{segment.department}</span><strong>{segment.count}</strong><small>{Math.round(segment.share)}%</small></button></li>)}
     </ol>
     {ordered.length > 5 && <details className="headcount-details"><summary>View all departments</summary><div className="bars">{ordered.map(item => <div className="bar-row" key={item.department}><span>{item.department}</span><div><i style={{ width: `${Math.round(item.count / max * 100)}%` }} /></div><b>{item.count}</b></div>)}</div></details>}
   </div>;

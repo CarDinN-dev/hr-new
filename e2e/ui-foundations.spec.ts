@@ -639,6 +639,21 @@ test("desktop page frames stay centered through the animated sidebar collapse", 
   expect(await sidebar.locator(".logo-crop.wordmark").boundingBox()).toMatchObject({ width: 165, height: 50 });
 });
 
+test("dashboard donut reveals the hovered segment", async ({ page }) => {
+  await installUiApi(page, [{
+    id: "employee-1", employeeCode: "MTC001", firstName: "Dashboard", lastName: "HR",
+    email: "dashboard.hr@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",
+    department: { id: "department-1", name: "Human Resources", code: "HR" }, position: { title: "HR Specialist", code: "HR-SPEC" },
+  }, {
+    id: "employee-2", employeeCode: "MTC002", firstName: "Dashboard", lastName: "Technology",
+    email: "dashboard.technology@example.invalid", hireDate: "2020-01-01", employmentStatus: "ACTIVE",
+    department: { id: "department-2", name: "Information Technology", code: "IT" }, position: { title: "IT Specialist", code: "IT-SPEC" },
+  }]);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Human Resources 1 50%" }).hover();
+  await expect(page.locator(".headcount-chart svg")).toHaveAttribute("aria-label", "1 Human Resources, 50% of 2 active employees");
+});
+
 test("compact header controls keep their geometry through dark-mode changes", async ({ page }) => {
   await installUiApi(page, [], ["notification.self.read", "notification.self.manage"]);
   await page.setViewportSize({ width: 1440, height: 900 });

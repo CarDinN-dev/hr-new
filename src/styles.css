@@ -6639,10 +6639,14 @@ summary:focus-visible,
   overflow: visible;
 }
 
+.headcount-chart text {
+  pointer-events: none;
+}
+
 .headcount-chart__track,
 .headcount-chart__segment {
   fill: none;
-  stroke-width: 15;
+  stroke-width: 24;
 }
 
 .headcount-chart__track {
@@ -6650,19 +6654,34 @@ summary:focus-visible,
 }
 
 .headcount-chart__segment {
+  cursor: pointer;
   transform: rotate(-90deg);
-  transform-origin: 60px 60px;
+  transform-origin: 100px 100px;
+  transition: filter var(--motion-standard), transform var(--motion-standard);
+}
+
+.headcount-chart__segment.is-active,
+.headcount-chart__segment:focus-visible {
+  filter: drop-shadow(0 0 6px currentColor) brightness(1.1);
+  transform: rotate(-90deg) scale(1.035);
+  outline: none;
+}
+
+.headcount-chart__context {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .headcount-chart__value {
   fill: var(--text);
-  font-size: 20px;
+  font-size: 32px;
   font-weight: 800;
 }
 
 .headcount-chart__label {
   fill: var(--text-muted);
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 750;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -6679,12 +6698,35 @@ summary:focus-visible,
 
 .headcount-ranking li {
   min-width: 0;
+}
+
+.headcount-ranking button {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto 34px;
   align-items: center;
   gap: 8px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--border);
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-bottom-color: var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  padding: 6px 4px;
+  text-align: left;
+  box-shadow: none;
+  transition: background-color var(--motion-standard), border-color var(--motion-standard);
+}
+
+.headcount-ranking button:hover,
+.headcount-ranking button.is-active {
+  background: var(--surface-subtle);
+}
+
+.headcount-ranking button:focus-visible {
+  border-color: var(--brand-navy);
+  outline: 2px solid color-mix(in srgb, var(--brand-navy) 42%, transparent);
+  outline-offset: 2px;
 }
 
 .headcount-ranking i {
