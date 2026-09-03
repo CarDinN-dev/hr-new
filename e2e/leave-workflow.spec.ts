@@ -22,8 +22,8 @@ function envelope(data: unknown) {
   return { success: true, data };
 }
 
-async function installLeaveApi(page: Page) {
-  const hr = { id: "hr-user", email: "hr@example.invalid", displayName: "HR User", roles: ["HR"], permissions: ["session.self.read", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.manage", "leave.hr.override"], departmentScopeIds: [], sessionId: "hr-session", authProvider: "local", authorizationVersion: 1, employeeId: "hr-employee" };
+async function installLeaveApi(page: Page, { includeMoreActions = false }: { includeMoreActions?: boolean } = {}) {
+  const hr = { id: "hr-user", email: "hr@example.invalid", displayName: "HR User", roles: ["HR"], permissions: ["session.self.read", "leave.self.read", "leave.self.create", "leave.hr.read", "leave.hr.manage", "leave.hr.override", ...(includeMoreActions ? ["leave.reassign"] : [])], departmentScopeIds: [], sessionId: "hr-session", authProvider: "local", authorizationVersion: 1, employeeId: "hr-employee" };
   let storedAttachments: Array<{ id: string; fileName: string; fileUrl: string; contentType: string; sizeBytes: number; scanStatus: string; createdAt: string }> = [];
   let submittedLeave = false;
   await page.route("**/api/v1/**", async route => {
@@ -53,6 +53,57 @@ async function installLeaveApi(page: Page) {
     return json([]);
   });
 }
+
+test("Leave dropdowns stay reachable at desktop, tablet, and phone widths", async ({ page }) => {
+  await installLeaveApi(page, { includeMoreActions: true });
+  await page.goto("/");
+  await page.getByLabel("Email").fill("hr@example.invalid");
+  await page.getByLabel("Password").fill("IntegrationPass123!");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("link", { name: "Leave" }).click({ force: true });
+
+  const picker = page.locator(".leave-request-panel .employee-picker");
+  const option = page.getByRole("option", { name: "EMP-002 — Amina Saleh" });
+  const moreActions = page.locator(".leave-request-more-actions").first();
+
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 375, height: 812 }]) {
+    await page.setViewportSize(viewport);
+    await picker.scrollIntoViewIfNeeded();
+    expect(await picker.evaluate(root => {
+      const input = root.querySelector("input")!.getBoundingClientRect();
+      const toggle = root.querySelector(".employee-picker__toggle")!.getBoundingClientRect();
+      const target = document.elementFromPoint(toggle.left + toggle.width / 2, toggle.top + toggle.height / 2);
+      return toggle.top >= input.top && toggle.bottom <= input.bottom && Boolean(target?.matches(".employee-picker__toggle") || target?.closest(".employee-picker__toggle"));
+    })).toBe(true);
+    await picker.getByRole("button", { name: "Show choices" }).click();
+    await expect(option).toBeVisible();
+    expect(await option.evaluate(button => {
+      const bounds = button.getBoundingClientRect();
+      const target = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+      return bounds.top >= 0 && bounds.bottom <= window.innerHeight && (target === button || button.contains(target));
+    })).toBe(true);
+    await picker.getByRole("combobox").focus();
+    await page.keyboard.press("Escape");
+    await expect(picker.getByRole("combobox")).toBeFocused();
+    await expect(option).toHaveCount(0);
+    expect(await page.locator(".leave-request-panel :is(input, select)").evaluateAll(controls => controls.every(control => {
+      const bounds = control.getBoundingClientRect();
+      return bounds.width > 0 && bounds.height >= (window.innerWidth <= 720 ? 44 : 36) && control.scrollWidth <= control.clientWidth;
+    }))).toBe(true);
+
+    await moreActions.scrollIntoViewIfNeeded();
+    await moreActions.locator("summary").click();
+    const menu = moreActions.locator(":scope > div");
+    expect(await menu.evaluate(items => {
+      const bounds = items.getBoundingClientRect();
+      const table = items.closest(".table-wrap")!.getBoundingClientRect();
+      const target = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + Math.min(22, bounds.height / 2));
+      return bounds.top >= 0 && bounds.bottom <= window.innerHeight && (target === items || items.contains(target)) && (window.innerWidth < 620 ? getComputedStyle(items).position === "fixed" : bounds.bottom > table.bottom);
+    })).toBe(true);
+    await moreActions.locator("summary").click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
+});
 
 test("HR submits for an employee and immediately approves without a password", async ({ page }) => {
   await installLeaveApi(page);
