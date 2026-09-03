@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, FileText, Paperclip, ShieldCheck, Upload, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, FileText, Paperclip, ShieldCheck, Upload, X } from "lucide-react";
 import { apiList, apiRequest, hasActiveSuperAdminRole, hasAnyPermission, hasPermission, startMicrosoftStepUp, type BackendSession } from "../api";
 import { Dialog } from "../dialog";
 import { EmployeePicker } from "../employee-picker";
@@ -122,7 +122,7 @@ function LeaveTypePicker({ value, options, onChange }: { value: string; options:
         else setActiveIndex(current => (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length);
       } else if ((event.key === "Enter" || event.key === " ") && open) { event.preventDefault(); choose(activeIndex); }
     }}><span>{selected?.name ?? "Choose leave type"}</span><ChevronDown size={16} aria-hidden="true" /></button>
-    {open && createPortal(<div ref={menuRef} id={menuId} className="leave-type-picker__options" role="listbox" aria-label="Leave type choices" style={position}>{options.map((type, index) => <button className={[type.id === value && "is-selected", index === activeIndex && "is-active"].filter(Boolean).join(" ")} type="button" role="option" aria-selected={type.id === value} key={type.id} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(index)}>{type.name}</button>)}</div>, document.body)}
+    {open && createPortal(<div ref={menuRef} id={menuId} className="leave-type-picker__options" role="listbox" aria-label="Leave type choices" style={position}>{options.map((type, index) => <button className={[type.id === value && "is-selected", index === activeIndex && "is-active"].filter(Boolean).join(" ")} type="button" role="option" aria-selected={type.id === value} key={type.id} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(index)}><span>{type.name}</span>{type.id === value && <Check size={16} aria-hidden="true" />}</button>)}</div>, document.body)}
   </div>;
 }
 

@@ -7058,6 +7058,14 @@ summary:focus-visible,
   justify-content: space-between;
   background: var(--control-bg);
   color: var(--text);
+  transition: border-color var(--motion-standard), background-color var(--motion-standard), box-shadow var(--motion-standard);
+}
+
+.app .leave-type-picker__trigger:hover:not(:disabled),
+.app .leave-type-picker__trigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--brand-navy) 34%, var(--border-strong));
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-navy) 10%, transparent);
 }
 
 .app .leave-type-picker__trigger svg {
@@ -7073,29 +7081,60 @@ summary:focus-visible,
 .leave-type-picker__options {
   position: fixed;
   z-index: var(--z-popover);
+  display: grid;
+  gap: 2px;
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   background: var(--surface-overlay);
   box-shadow: var(--clinical-shadow-raised);
+  transform-origin: top center;
+  animation: leave-type-picker-in 140ms cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .app .leave-type-picker__options button {
   width: 100%;
   min-height: var(--control-height);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   justify-content: flex-start;
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
   color: var(--text);
+  font-weight: 680;
   text-align: left;
+  transition: background-color var(--motion-standard), color var(--motion-standard);
 }
 
-.app .leave-type-picker__options button:is(.is-active, .is-selected) {
+.app .leave-type-picker__options button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app .leave-type-picker__options button > svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--brand-red);
+}
+
+.app .leave-type-picker__options button:is(:hover, .is-active):not(.is-selected) {
+  background: var(--surface-subtle);
+}
+
+.app .leave-type-picker__options button.is-selected {
   background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--brand-red);
+  color: var(--text);
+  font-weight: 760;
   transform: none;
+}
+
+@keyframes leave-type-picker-in {
+  from { opacity: 0; transform: translateY(-4px) scale(.985); }
 }
 
 .app .leave-request-panel .employee-picker__options {
