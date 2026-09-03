@@ -69,6 +69,7 @@ test("Leave dropdowns stay reachable at desktop, tablet, and phone widths", asyn
   for (const viewport of [{ width: 1440, height: 900 }, { width: 768, height: 900 }, { width: 375, height: 812 }]) {
     await page.setViewportSize(viewport);
     await picker.scrollIntoViewIfNeeded();
+    await picker.getByRole("button", { name: "Show choices" }).hover();
     expect(await picker.evaluate(root => {
       const input = root.querySelector("input")!.getBoundingClientRect();
       const toggle = root.querySelector(".employee-picker__toggle")!.getBoundingClientRect();

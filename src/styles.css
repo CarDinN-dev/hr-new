@@ -2941,7 +2941,7 @@ summary {
 :root[data-theme="dark"] .app .employee-picker .employee-picker__toggle,
 :root[data-theme="dark"] .app .employee-picker .employee-picker__clear {
   position: absolute;
-  top: 50%;
+  top: 1px;
   width: var(--employee-picker-action-size);
   min-width: var(--employee-picker-action-size);
   height: var(--employee-picker-action-size);
@@ -2957,7 +2957,7 @@ summary {
   line-height: 1;
   touch-action: manipulation;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
-  transform: translateY(-50%);
+  transform: none;
 }
 
 .employee-picker__toggle {
@@ -2974,7 +2974,7 @@ summary {
   background: color-mix(in srgb, var(--brand-red) 7%, var(--surface));
   box-shadow: none;
   color: var(--brand-red);
-  transform: translateY(-50%);
+  transform: none;
 }
 
 .employee-picker__toggle svg {
@@ -8488,8 +8488,6 @@ summary:focus-visible,
     height: var(--employee-picker-action-size);
     min-height: var(--employee-picker-action-size);
     padding: 0;
-    top: 50%;
-    transform: translateY(-50%);
   }
 
   .app .employee-picker input {
