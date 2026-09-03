@@ -2970,7 +2970,8 @@ summary {
 
 .employee-picker .employee-picker__toggle:hover:not(:disabled),
 .employee-picker .employee-picker__clear:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--brand-red) 20%, var(--border));
+  /* ponytail: hover belongs to the field, not a second outlined button. */
+  border-color: transparent;
   background: color-mix(in srgb, var(--brand-red) 7%, var(--surface));
   box-shadow: none;
   color: var(--brand-red);

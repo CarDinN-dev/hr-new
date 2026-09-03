@@ -70,6 +70,7 @@ test("Leave dropdowns stay reachable at desktop, tablet, and phone widths", asyn
     await page.setViewportSize(viewport);
     await picker.scrollIntoViewIfNeeded();
     await picker.getByRole("button", { name: "Show choices" }).hover();
+    expect(await picker.getByRole("button", { name: "Show choices" }).evaluate(button => /(?:\/|,)\s*0\)?$/.test(getComputedStyle(button).borderTopColor))).toBe(true);
     expect(await picker.evaluate(root => {
       const input = root.querySelector("input")!.getBoundingClientRect();
       const toggle = root.querySelector(".employee-picker__toggle")!.getBoundingClientRect();
