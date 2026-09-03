@@ -163,6 +163,24 @@ test("Users and access paginates at 15 and supports 50 per page", async ({ page 
   await expect(usersPanel.getByText("user-14@example.invalid")).toBeVisible();
 });
 
+test("Users and access actions are not clipped by the table", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await loginAndOpenSystem(page);
+
+  const users = page.getByRole("region", { name: "Users and access" });
+  const actions = users.locator(".card-actions-menu").first();
+  await actions.locator("summary").click();
+
+  const access = actions.getByRole("button", { name: "Access" });
+  await expect(access).toBeVisible();
+  await expect.poll(() => access.evaluate(button => {
+    const action = button.getBoundingClientRect();
+    const table = button.closest(".table-wrap")!.getBoundingClientRect();
+    const target = document.elementFromPoint(action.left + action.width / 2, action.top + action.height / 2);
+    return action.top < table.top && (target === button || button.contains(target));
+  })).toBe(true);
+});
+
 test("System page-wide search intersects independent user and session searches", async ({ page }) => {
   await loginAndOpenSystem(page);
   const pageSearch = page.getByRole("searchbox", { name: "Search users, roles and sessions" });

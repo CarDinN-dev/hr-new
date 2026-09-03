@@ -6863,6 +6863,12 @@ summary:focus-visible,
   justify-content: flex-start;
 }
 
+/* ponytail: native action menus escape their table instead of adding a portal. */
+.app .table-actions:has(.card-actions-menu),
+.app .table-actions tr:has(.card-actions-menu) {
+  overflow: visible;
+}
+
 .app .attendance-control {
   overflow: hidden;
 }
